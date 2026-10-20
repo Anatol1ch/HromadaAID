@@ -19,7 +19,7 @@ const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const iconDirectory = app.isPackaged ? join(process.resourcesPath, 'assets') : join(currentDirectory, 'assets')
 let closeDatabase: (() => void) | undefined
 let mainWindow: BrowserWindow | null = null
-const appPageUrl = isDev ? devServerUrl : pathToFileURL(join(currentDirectory, '../dist/index.html')).href
+const appPageUrl = isDev ? devServerUrl : pathToFileURL(join(currentDirectory, '../../dist/index.html')).href
 configureIpcSecurity(() => mainWindow, appPageUrl)
 
 // Dev-only isolated profile support for end-to-end checks. Packaged users always use Electron's standard userData path.
@@ -89,7 +89,7 @@ function createWindow() {
     })
 
     if (isDev) console.log(`[HromadaAid] Electron dev mode: ${devServerUrl}`)
-    const loading = isDev ? window.loadURL(devServerUrl) : window.loadFile(join(currentDirectory, '../dist/index.html'))
+    const loading = isDev ? window.loadURL(devServerUrl) : window.loadFile(join(currentDirectory, '../../dist/index.html'))
     void loading.catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error)
       console.error(`[HromadaAid] ${isDev ? 'loadURL' : 'loadFile'}: ${message}`)

@@ -6,7 +6,7 @@
 - ICO: окремі кадри 16, 24, 32, 48, 64, 128, 256 px.
 - SVG: масштабований вихідний ресурс.
 
-Ресурси готові й не потребують генерації під час запуску. `electron/copy-assets.mjs` копіює всі три файли в `dist-electron/assets` як для `pnpm dev`, так і для `pnpm build`. У dev використовується dist-electron/assets. У майбутньому пакеті extraResources копіює іконки поза ASAR до resources/assets, звідки їх читає main. Це забезпечує звичайний файловий шлях для нативного Windows-завантажувача ICO.
+Ресурси готові й не потребують генерації під час запуску. `electron/copy-assets.mjs` копіює всі три файли до `dist-electron/electron/assets` для Electron runtime та зберігає сумісну копію в `dist-electron/assets` для чинних перевірок. У майбутньому пакеті extraResources копіює іконки поза ASAR до resources/assets, звідки їх читає main. Це забезпечує звичайний файловий шлях для нативного Windows-завантажувача ICO.
 
 У `package.json` додано конфігурацію electron-builder для Windows EXE, NSIS та ярликів. AppUserModelID збігається з main.ts: local.hromadaaid. Ключі конфігурації звірено зі стабільною схемою electron-builder 26.17.0. Збирач ще не встановлений у проєкті; інсталятор цим завданням не збирається. Перед майбутнім пакуванням потрібно виконати звичайну збірку застосунку. Назву package та userData не змінено.
 
