@@ -10,5 +10,5 @@
     "types": ["node"],
     "esModuleInterop": true
   },
-  "include": ["src/**/*.ts", "../shared/**/*.ts"]
+  "include": ["src/**/*.ts", "../shared/**/*.ts", "../electron/database.ts", "../electron/migration-*.ts"]
 }

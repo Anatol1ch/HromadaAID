@@ -350,7 +350,17 @@ const aidTypes = [
 
 export function openAppDatabase(userDataPath: string): DatabaseSync {
   mkdirSync(userDataPath, { recursive: true })
-  const database = new DatabaseSync(join(userDataPath, 'hromada-aid.sqlite'))
+  return openInitializedDatabase(join(userDataPath, 'hromada-aid.sqlite'))
+}
+
+/**
+ * Opens an explicitly selected SQLite database using the complete HromadaAID
+ * validation, migration and reference-data initialization flow. Callers own
+ * choosing and creating the parent directory; this function never selects a
+ * profile path or copies data between databases.
+ */
+export function openInitializedDatabase(databasePath: string): DatabaseSync {
+  const database = new DatabaseSync(databasePath)
   try {
     // These settings affect the connection, not the database's schema or journal mode.
     database.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA synchronous = FULL;')
