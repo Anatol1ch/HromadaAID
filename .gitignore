@@ -2,6 +2,7 @@
 node_modules/
 dist/
 dist-electron/
+dist-server/
 release/
 .vite/
 .cache/

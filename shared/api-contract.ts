@@ -3,6 +3,7 @@ import type { AssignmentStatus } from './assignment-model.js'
 export type { AssignmentStatus } from './assignment-model.js'
 
 export type ReportPdfKind = 'month' | 'quarter' | 'annual' | 'cumulative'
+export type HealthResponse = { status: 'ok'; service: 'hromada-aid-api' }
 export type BankDetailInput = { id?: string; mfo: string; edrpou: string }
 export type BankInput = { name: string; details: BankDetailInput[] }
 export type BankDetail = { id: string; bankId: string; mfo: string; edrpou: string; recipientCount: number }
