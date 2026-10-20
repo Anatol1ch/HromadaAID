@@ -146,7 +146,7 @@ export default function Dictionaries() {
       {dictionaryTabGroups.map((group, index) => <DictionaryTabGroup key={index} tabs={group} section={section} onSelect={setSection} management={index === 1}/>)}
     </div></div>
     {error && !draft && !decisionDraft && <Alert variant="error" action={<button onClick={() => void refresh()}>Оновити</button>}>{error}</Alert>}
-    <div id="dictionary-content" className="tab-content-enter" key={section} role="tabpanel" aria-labelledby={`dictionary-tab-${section}`}>
+    <div id="dictionary-content" role="tabpanel" aria-labelledby={`dictionary-tab-${section}`}>
     {section === 'people' ? <RecipientRegistry embedded/> : section === 'banks' ? <BankRegistry/> : section === 'plans' ? <>{!catalogsLoaded ? loading ? <DataState kind="loading" message="Завантажуємо довідники…"/> : <Alert variant="error" action={<button type="button" onClick={() => void refresh()}>Повторити завантаження</button>}>{loadError}</Alert> : <>{loadError && <Alert variant="error" action={<button type="button" onClick={() => void refresh()}>Повторити завантаження</button>}>{loadError}</Alert>}<AnnualPlanning programs={data.programs} aidTypes={data.aidTypes}/></>}</> : <section className={`dashboard-panel registry-panel ${section === 'decisions' ? 'dictionary-registry' : 'catalog-panel'}`}>
       {section === 'programs' && <ProgramsCatalog loading={loading} error={loadError} onRetry={() => void refresh()} programs={data.programs} aidTypes={data.aidTypes} ordering={ordering} onReorder={reorder} onEditProgram={editProgram} onEditAid={editAidType} onDelete={(entity, id) => void requestDelete(entity, id)}/>}
       {section === 'decisions' && <>

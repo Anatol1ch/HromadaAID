@@ -1,17 +1,18 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { advanceAfterSelection, tabFromPopup } from '../lib/keyboardNavigation'
-import { Check, ChevronDown, Search } from 'lucide-react'
+import { Check, ChevronDown, Search, X } from 'lucide-react'
 
 export type SelectOption = { value: string; label: string; description?: string; searchText?: string; disabled?: boolean }
 type Props = {
   label: string; value: string; options: SelectOption[]; onChange: (value: string) => void
   placeholder?: string; required?: boolean; disabled?: boolean; searchable?: boolean; error?: string
   advanceOnSelect?: boolean
+  onClear?: () => void; clearLabel?: string
 }
 
 /** Controlled values and native form validity are shared by searchable and short lists. */
-export default function Select({ label, value, options, onChange, placeholder = 'Оберіть значення', required = false, disabled = false, searchable, error, advanceOnSelect = true }: Props) {
+export default function Select({ label, value, options, onChange, placeholder = 'Оберіть значення', required = false, disabled = false, searchable, error, advanceOnSelect = true, onClear, clearLabel = 'Очистити вибір' }: Props) {
   const id = useId()
   const root = useRef<HTMLSpanElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
@@ -46,6 +47,12 @@ export default function Select({ label, value, options, onChange, placeholder = 
     if (disabled || trigger.current?.matches(':disabled') || option.disabled) return
     onChange(option.value); setInvalid(false); close(true)
     if (advance && advanceOnSelect) advanceAfterSelection(trigger.current)
+  }
+  const clearSelection = () => {
+    if (disabled || !value || !onClear) return
+    close()
+    setInvalid(false)
+    onClear()
   }
   const keyboard = (event: KeyboardEvent) => {
     if (event.ctrlKey || event.altKey || event.metaKey || event.nativeEvent.isComposing) return
@@ -122,10 +129,12 @@ export default function Select({ label, value, options, onChange, placeholder = 
   const optionId = (option: SelectOption) => `${id}-option-${options.indexOf(option)}`
   const activeOption = enabled.find((option) => option.value === activeValue)
   const listId = `${id}-list`
-  return <span ref={root} className={`app-select${invalid || error ? ' app-select-invalid' : ''}`}>
+  const canClear = !!value && !!onClear && !disabled
+  return <span ref={root} className={`app-select${invalid || error ? ' app-select-invalid' : ''}${canClear ? ' app-select-clearable' : ''}`}>
     <button ref={trigger} id={id} type="button" className="app-select-trigger" role="combobox" aria-label={label} aria-expanded={open} aria-controls={listId} aria-haspopup="listbox" aria-required={required} aria-invalid={invalid || !!error} aria-describedby={invalid || error ? `${id}-error` : undefined} aria-activedescendant={open && !canSearch && activeOption ? optionId(activeOption) : undefined} disabled={disabled} onClick={() => open ? close() : show()} onKeyDown={keyboard}>
-      <span className={!selected ? 'app-select-placeholder' : undefined}>{selected?.label ?? placeholder}</span><ChevronDown size={17} aria-hidden="true"/>
+      <span className={!selected ? 'app-select-placeholder' : undefined}>{selected?.label ?? placeholder}</span>{!canClear && <ChevronDown size={17} aria-hidden="true"/>}
     </button>
+    {canClear && <span className="app-select-icon-group"><button type="button" className="app-select-clear-button" title={clearLabel} aria-label={clearLabel} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); clearSelection() }}><X size={15} aria-hidden="true"/></button><ChevronDown size={17} aria-hidden="true"/></span>}
     <input ref={validity} className="app-select-validity" tabIndex={-1} aria-hidden="true" value={selected?.value ?? ''} onChange={() => {}} required={required} disabled={disabled} onInvalid={(event) => { event.preventDefault(); setInvalid(true); trigger.current?.focus() }}/>
     {(invalid || error) && <span className="app-select-error" id={`${id}-error`} role="alert">{message}</span>}
     {open && !disabled && host && createPortal(<div ref={popup} data-keyboard-popup={id} className="app-select-popup" popover="manual" style={position} onKeyDown={keyboard} onClick={(event) => event.stopPropagation()}>

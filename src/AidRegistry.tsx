@@ -6,12 +6,13 @@ import { useCatalogUpdates } from './services/catalogRepository'
 import { ASSIGNMENT_STATUSES, assignmentStatusColor, assignmentStatusOrder as statusOrder, isAssignedStatus } from '../electron/assignment-model'
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Check, FilterX, ListRestart, Pencil, Plus, SlidersHorizontal, Trash2, X } from 'lucide-react'
-import type { AssignmentInput, AssignmentRecord, AssignmentStatus, DecisionSummary, DeletePreview, RecipientSummary } from '../electron/api-contract'
+import type { AssignmentInput, AssignmentRecord, AssignmentStatus, DecisionSummary, DeletePreview, RecipientRecord, RecipientSummary } from '../electron/api-contract'
 import Modal from './components/Modal'
 import { confirmModalClose } from './components/Modal'
 import { focusFirstInvalid } from './lib/keyboardNavigation'
 import { assignmentRepository } from './services/assignmentRepository'
-import { RecipientFormModal } from './RecipientRegistry'
+import { recipientRepository } from './services/recipientRepository'
+import { RecipientFormModal, recipientInputFromRecord } from './RecipientRegistry'
 import DecisionFormModal from './components/DecisionFormModal'
 import Select from './components/Select'
 import { paymentYearError } from '../electron/accounting-year'
@@ -63,6 +64,8 @@ export default function AidRegistry({ createOnOpen = false }: { createOnOpen?: b
   const [loadError, setLoadError] = useState('')
   const [saving, setSaving] = useState(false)
   const [showPersonForm, setShowPersonForm] = useState(false)
+  const [recipientEditor, setRecipientEditor] = useState<RecipientRecord | null>(null)
+  const [recipientEditorLoading, setRecipientEditorLoading] = useState(false)
   const initialDraft = useRef('')
   const assignmentFormRef = useRef<HTMLFormElement>(null)
   const savingRef = useRef(false)
@@ -181,7 +184,7 @@ export default function AidRegistry({ createOnOpen = false }: { createOnOpen?: b
     try { const preview = await window.hromadaAid.deletion.preview('assignment', row.id); if (preview) setDeletePreview(preview); else setError('Призначення не знайдено. Оновіть список.') }
     catch { setError('Не вдалося перевірити залежні дані призначення.') }
   }
-  const close = () => { setDraft(null); setEditingId(undefined); setError(''); setShowPersonForm(false); setShowDecisionForm(false); saveAndContinueRef.current = false }
+  const close = () => { setDraft(null); setEditingId(undefined); setError(''); setShowPersonForm(false); setRecipientEditor(null); setShowDecisionForm(false); saveAndContinueRef.current = false }
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -211,6 +214,20 @@ export default function AidRegistry({ createOnOpen = false }: { createOnOpen?: b
   }
 
   const update = (patch: Partial<Draft>) => setDraft((current) => current ? { ...current, ...patch } : current)
+  const openRecipientEditor = async () => {
+    const recipientId = draft?.recipientId
+    if (!recipientId || saving || recipientEditorLoading) return
+    setRecipientEditorLoading(true)
+    try {
+      const recipient = await recipientRepository.get(recipientId)
+      if (!recipient) { setError('Картку отримувача не знайдено. Оновіть список.'); return }
+      setRecipientEditor(recipient)
+    } catch {
+      setError('Не вдалося відкрити картку отримувача. Спробуйте ще раз.')
+    } finally {
+      setRecipientEditorLoading(false)
+    }
+  }
   const selectedAidType = catalogs.aidTypes.find((type) => type.id === draft?.aidTypeId)
   const programs = catalogs.programs.filter((program) => program.isActive || (editingId && program.id === selectedAidType?.programId))
   const formAidTypes = catalogs.aidTypes.filter((type) => type.programId === draft?.programId && (type.isActive || (editingId && type.id === draft?.aidTypeId)))
@@ -253,7 +270,10 @@ export default function AidRegistry({ createOnOpen = false }: { createOnOpen?: b
         <div className="assignment-section-title">Отримувач і підстава</div>
         <div className="recipient-field assignment-choice-field">
           <span>Отримувач *</span>
-          <div className="assignment-field-control"><Select label="Отримувач" required searchable disabled={saving} value={draft.recipientId} placeholder="Знайдіть за ПІБ або РНОКПП" options={recipients.map((person) => ({ value: person.id, label: person.fullName, description: person.rnokpp ? `РНОКПП ${person.rnokpp}` : 'РНОКПП не вказано', searchText: person.rnokpp ?? '' }))} onChange={(id) => { const person = recipients.find((item) => item.id === id); update({ recipientId: person?.id ?? '', recipientSearch: person?.fullName ?? '' }) }}/><button type="button" className="secondary-button assignment-create-button" title="Створити нового отримувача" aria-label="Створити нового отримувача" disabled={saving} onClick={() => setShowPersonForm(true)}><Plus size={18} aria-hidden="true"/></button></div>
+          <div className="assignment-field-control">
+            <Select label="Отримувач" required searchable disabled={saving} value={draft.recipientId} placeholder="Знайдіть за ПІБ або РНОКПП" options={recipients.map((person) => ({ value: person.id, label: person.fullName, description: person.rnokpp ? `РНОКПП ${person.rnokpp}` : 'РНОКПП не вказано', searchText: person.rnokpp ?? '' }))} onChange={(id) => { const person = recipients.find((item) => item.id === id); update({ recipientId: person?.id ?? '', recipientSearch: person?.fullName ?? '' }) }} onClear={() => update({ recipientId: '', recipientSearch: '' })}/>
+            {draft.recipientId ? <button type="button" className="secondary-button assignment-create-button" title="Переглянути та редагувати отримувача" aria-label="Переглянути та редагувати отримувача" disabled={saving || recipientEditorLoading} aria-busy={recipientEditorLoading || undefined} onClick={() => void openRecipientEditor()}><Pencil size={17} aria-hidden="true"/></button> : <button type="button" className="secondary-button assignment-create-button" title="Створити нового отримувача" aria-label="Створити нового отримувача" disabled={saving} onClick={() => setShowPersonForm(true)}><Plus size={18} aria-hidden="true"/></button>}
+          </div>
           {draft.recipientId && <small className="assignment-choice-note">Використовуються персональні та банківські дані обраної картки.</small>}
         </div>
         <div className="recipient-field assignment-choice-field">
@@ -271,6 +291,10 @@ export default function AidRegistry({ createOnOpen = false }: { createOnOpen?: b
     {draft && showPersonForm && <RecipientFormModal onClose={() => setShowPersonForm(false)} onSaved={(person) => {
       setRecipients((current) => [...current.filter((item) => item.id !== person.id), person].sort((a, b) => a.fullName.localeCompare(b.fullName, 'uk')))
       update({ recipientId: person.id, recipientSearch: person.fullName }); setShowPersonForm(false)
+    }}/>}
+    {draft && recipientEditor && <RecipientFormModal key={recipientEditor.id} initial={recipientInputFromRecord(recipientEditor)} editingId={recipientEditor.id} onClose={() => setRecipientEditor(null)} onSaved={(person) => {
+      setRecipients((current) => [...current.filter((item) => item.id !== person.id), person].sort((a, b) => a.fullName.localeCompare(b.fullName, 'uk')))
+      update({ recipientId: person.id, recipientSearch: person.fullName }); setRecipientEditor(null)
     }}/>}
     {draft && showDecisionForm && <DecisionFormModal year={year} onClose={() => setShowDecisionForm(false)} onSaved={(decision) => {
       setDecisions((current) => [decision, ...current.filter((item) => item.id !== decision.id)].sort((a, b) => b.decisionDate.localeCompare(a.decisionDate)))

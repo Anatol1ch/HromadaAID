@@ -413,6 +413,13 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .app-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: var(--control-height-legacy); padding: 10px 11px; border: 1px solid var(--border-standard); border-radius: 7px; background: var(--surface-card); color: var(--color-text-control); text-align: left; font: inherit; line-height: 1.4; transition: border-color var(--motion-duration-fast), box-shadow var(--motion-duration-fast), background var(--motion-duration-fast); }
 .app-select-trigger > span { min-width: 0; overflow-wrap: normal; word-break: normal; white-space: normal; }
 .app-select-trigger > svg { flex: none; color: #748a7d; }
+.app-select-clearable .app-select-trigger { padding-right: 70px; }
+.app-select-clearable .app-select-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-select-icon-group { position: absolute; z-index: 1; top: 50%; right: 11px; display: inline-flex; align-items: center; gap: 8px; transform: translateY(-50%); color: #748a7d; pointer-events: none; }
+.app-select-icon-group > svg { flex: none; }
+.app-select-clear-button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 0; padding: 0; border: 0; border-radius: 5px; background: transparent; color: #718177; cursor: pointer; pointer-events: auto; }
+.app-select-clear-button:hover { background: #eef4ef; color: #3c6049; }
+.app-select-clear-button:focus-visible { outline: none; box-shadow: 0 0 0 2px #dcecdf; }
 .app-select-placeholder { color: #829087; }
 .app-select-trigger:hover:not(:disabled) { border-color: #99b8a3; background: #fcfdfc; }
 .app-select-trigger:focus-visible, .app-select-trigger[aria-expanded="true"] { outline: none; border-color: #629875; box-shadow: 0 0 0 3px #dcecdf; }
@@ -1047,7 +1054,6 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .dictionary-tabs button svg { flex-shrink: 0; }
 .dictionary-tabs button:hover:not(:disabled):not([aria-busy="true"]):not([aria-disabled="true"]):not(.active) { background: var(--tab-hover-background); color: var(--tab-active-text); }
 .dictionary-tabs button.active { border-color: var(--tab-active-border); background: var(--tab-active-background); color: var(--tab-active-text); }
-.tab-content-enter { animation: tab-content-enter var(--motion-duration-page) ease-out both; }
 .catalog-panel { padding: 10px var(--space-6) 22px; }
 .catalog-list { display: grid; }
 .catalog-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 0; border-bottom: 1px solid #edf0ed; }
@@ -1972,7 +1978,6 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 }
 
 @keyframes page-content-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes tab-content-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes modal-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes startup-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes startup-loader { 0%, 100% { transform: translateX(-120%); opacity: .45; } 50% { transform: translateX(190%); opacity: 1; } }
@@ -1992,7 +1997,7 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 @media screen and (prefers-reduced-motion: reduce) {
   /* Covers local button variants as well as the shared transition. */
   button, input, textarea, .ui-search, .app-select-trigger, .custom-checkbox, .year-picker-chevron, .statement-parameter-heading > svg, .month-bar { transition: none !important; }
-  .year-picker-menu, .year-picker-menu.closing, .app-modal, .page-transition, .tab-content-enter, .app-startup-content, .app-startup-loader::after, .ui-skeleton, .overview-refresh-icon.is-spinning { animation: none !important; }
+  .year-picker-menu, .year-picker-menu.closing, .app-modal, .page-transition, .app-startup-content, .app-startup-loader::after, .ui-skeleton, .overview-refresh-icon.is-spinning { animation: none !important; }
 }
 
 /* PRINT COMPATIBILITY — existing rules, unchanged declarations */

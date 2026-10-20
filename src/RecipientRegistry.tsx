@@ -25,6 +25,26 @@ const emptyRecipient: RecipientInput = {
   phone: '', email: '', bankAccount: '', bankDetailsId: '', passport: '',
 }
 
+export function recipientInputFromRecord(recipient: RecipientRecord): RecipientInput {
+  return {
+    lastName: recipient.lastName,
+    firstName: recipient.firstName,
+    patronymic: recipient.patronymic ?? '',
+    rnokpp: recipient.rnokpp ?? '',
+    sex: recipient.sex ?? '',
+    isVpo: recipient.isVpo,
+    address: recipient.address ?? '',
+    registeredAddress: recipient.registeredAddress ?? '',
+    addressParts: recipient.addressParts,
+    registeredAddressParts: recipient.registeredAddressParts,
+    phone: recipient.phone ?? '',
+    email: recipient.email ?? '',
+    bankAccount: recipient.bankAccount ?? '',
+    bankDetailsId: recipient.bankDetailsId ?? '',
+    passport: recipient.passport ?? '',
+  }
+}
+
 function RecipientRegistry({ embedded = false }: { embedded?: boolean }) {
   const [recipients, setRecipients] = useState<RecipientSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -74,24 +94,7 @@ function RecipientRegistry({ embedded = false }: { embedded?: boolean }) {
         setError('Картку не знайдено. Оновіть список.')
         return
       }
-      const initial: RecipientInput = {
-        lastName: recipient.lastName,
-        firstName: recipient.firstName,
-        patronymic: recipient.patronymic ?? '',
-        rnokpp: recipient.rnokpp ?? '',
-        sex: recipient.sex ?? '',
-        isVpo: recipient.isVpo,
-        address: recipient.address ?? '',
-        registeredAddress: recipient.registeredAddress ?? '',
-        addressParts: recipient.addressParts,
-        registeredAddressParts: recipient.registeredAddressParts,
-        phone: recipient.phone ?? '',
-        email: recipient.email ?? '',
-        bankAccount: recipient.bankAccount ?? '',
-        bankDetailsId: recipient.bankDetailsId ?? '',
-        passport: recipient.passport ?? '',
-      }
-      setForm(initial)
+      setForm(recipientInputFromRecord(recipient))
       setEditingId(recipient.id)
     } catch {
       setError('Не вдалося відкрити картку. Спробуйте оновити список.')
