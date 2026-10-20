@@ -1,0 +1,42 @@
+/* Shared offscreen measurement, print preview and PDF layout. Screen reports are untouched. */
+.report-print-stage { position: fixed; left: -100000px; top: 0; width: 184mm; visibility: hidden; pointer-events: none; background: transparent; }
+.report-paper { width: 184mm; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; box-shadow: none; color: #111; background: transparent; font-family: 'Segoe UI', sans-serif; line-height: 1.08; }
+.report-paper > header { text-align: center; margin-bottom: 7pt; color: #111; }
+.report-paper-institution { display: block; font-size: 9pt; line-height: 1.15; font-weight: 600; color: #414c44; }
+.report-paper h2 { font-size: 10pt; line-height: 1.15; margin: 4pt 0; font-weight: 700; }
+.report-paper header .report-paper-code { margin: 0 auto 4pt; font-size: 8pt; line-height: 1.15; font-weight: 500; color: #4d5850; overflow-wrap: anywhere; }
+.report-paper header .report-paper-period { margin: 0; font-size: 8pt; line-height: 1.15; color: #4d5850; }
+.report-paper-table { border: .5pt solid #c7d8cb; border-radius: 6px; overflow: hidden; background: transparent; }
+.report-paper .aid-report-table { width: 100%; min-width: 0; table-layout: fixed; border: 0; border-collapse: collapse; background: transparent; font-size: inherit; }
+/* Initial widths only: React measures the text and assigns exact widths before export. */
+.report-paper .aid-report-table col:first-child { width: 64%; }
+.report-paper .aid-report-table col:not(:first-child) { width: 18%; }
+.report-paper .aid-report-table.aid-report-cumulative { min-width: 0; }
+.report-paper .aid-report-cumulative col:first-child { width: 46%; }
+.report-paper .aid-report-cumulative col:not(:first-child) { width: 9%; }
+.report-paper .aid-report-table th, .report-paper .aid-report-table td { padding: 1.5pt 2pt; font-size: inherit; border: 0; border-bottom: .3pt solid #e1e7e2; min-width: 0; line-height: 1.08; color: #111; vertical-align: middle; }
+.report-paper .aid-report-table th { white-space: normal; overflow-wrap: break-word; }
+.report-paper .aid-report-table td { white-space: nowrap; overflow-wrap: normal; text-align: center; font-variant-numeric: tabular-nums; }
+.report-paper .report-number-value { display: inline-block; white-space: nowrap; }
+.report-paper .aid-report-table thead th { background: #edf5ef; border-bottom: .5pt solid #b9cebf; color: #315d40; font-size: .9em; font-weight: 600; text-align: center; }
+.report-paper .aid-report-table thead th:first-child { text-align: left; }
+.report-paper .aid-report-cumulative thead tr:nth-child(2) th { padding-inline: 1pt; font-weight: 500; white-space: nowrap; text-align: center; }
+.report-paper .aid-report-table .aid-report-program > * { background: #f3f5f4; color: #344139; font-weight: 650; border-top: .5pt solid #d6ddd8; }
+.report-paper .aid-report-table tbody tr:not(.aid-report-program) th { font-weight: 400; padding-left: 5pt; }
+.report-paper .aid-report-table tbody tr:not(.aid-report-program) > * { background: #fff; }
+.report-paper .aid-report-table tfoot > tr > * { background: #e5f0e7; color: #294e36; border-top: .7pt solid #93b09c; font-weight: 700; }
+.report-paper .aid-report-cumulative tbody tr > :nth-child(2n), .report-paper .aid-report-cumulative tfoot tr > :nth-child(2n), .report-paper .aid-report-cumulative thead tr:first-child > :not(:first-child), .report-paper .aid-report-cumulative thead tr:nth-child(2) > :nth-child(2n+1) { border-left: .5pt solid #c7d8cb; }
+.report-paper .aid-report-table tbody:last-of-type tr:last-child > *, .report-paper .aid-report-table tfoot tr > * { border-bottom: 0; }
+@page hromada-report { size: A4 portrait; margin: 13mm; background: white; }
+@media print {
+  html:has(.report-print-stage) { background: #fff !important; }
+  body:has(.report-print-stage), body:has(.report-print-stage) #root, body:has(.report-print-stage) .app-shell, body:has(.report-print-stage) .main-area, body:has(.report-print-stage) .content, body:has(.report-print-stage) .reporting-page { width: auto !important; min-width: 0 !important; max-width: none !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; display: block !important; overflow: visible !important; background: transparent !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
+  body:has(.report-print-stage) .sidebar, body:has(.report-print-stage) .topbar, body:has(.report-print-stage) nav, body:has(.report-print-stage) output, .reporting-page > :not(.report-print-stage) { display: none !important; }
+  .report-print-stage { position: static !important; width: 184mm !important; min-height: 0 !important; visibility: visible !important; margin: 0 !important; padding: 0 !important; background: transparent !important; border: 0 !important; box-shadow: none !important; }
+  .report-print-stage * { visibility: visible !important; }
+  .report-paper { page: hromada-report; margin: 0 !important; background: transparent !important; }
+  .report-paper, .report-paper * { print-color-adjust: exact !important; -webkit-print-color-adjust: exact !important; }
+  .report-paper tr { break-inside: avoid; }
+  .report-paper thead { display: table-header-group; }
+  .report-paper tfoot { display: table-row-group; }
+}

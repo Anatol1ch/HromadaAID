@@ -1,0 +1,54 @@
+# Dependencies and generated application bundles
+node_modules/
+dist/
+dist-electron/
+release/
+.vite/
+.cache/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Local SQLite data, journals and backups
+*.sqlite
+*.sqlite3
+*.db
+*.db3
+*.sqlite-wal
+*.sqlite-shm
+*-wal
+*-shm
+*.bak
+*.backup
+*.sqlite.backup
+
+# Runtime logs and process artefacts
+*.log
+*.err
+*.out
+*.pid
+
+# Local generated documents and exports; source templates in reference/ stay trackable
+generated-documents/
+generated-documents-temp/
+exports/
+documents/
+private/
+*.generated.pdf
+*.generated.xlsx
+
+# Test and tool artefacts
+__pycache__/
+*.py[cod]
+.electron-smoke.*
+.electron-version.*
+.hromada-vite-qa.*
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vs/
