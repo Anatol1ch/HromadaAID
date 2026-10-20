@@ -1,4 +1,5 @@
 import { listAnnualPlans, saveAnnualPlan, syncLegacyPlan } from './annual-plans.js'
+import { listCatalogs } from './catalog-data.js'
 import { reorderCatalog } from './catalog-order.js'
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
@@ -273,18 +274,7 @@ export function registerRecordsIpc(database: DatabaseSync) {
   })
 
   ipcMain.handle('catalogs:list', (_event, includeInactiveValue: unknown) => {
-    const includeInactive = includeInactiveValue === true
-    return {
-      programs: database.prepare(`SELECT p.id, p.short_name AS shortName, p.official_name AS officialName, p.is_active AS isActive,
-        p.approval_id AS approvalId, COALESCE(p.approval_number,pa.document_number) AS approvalNumber, COALESCE(p.approval_date,pa.document_date) AS approvalDate, COALESCE(p.approval_title,pa.title) AS approvalTitle,
-        COUNT(a.id) AS assignmentCount FROM programs p LEFT JOIN program_approvals pa ON pa.id=p.approval_id
-        LEFT JOIN aid_types t ON t.program_id=p.id LEFT JOIN assignments a ON a.aid_type_id=t.id
-        ${includeInactive ? '' : 'WHERE p.is_active=1'} GROUP BY p.id ORDER BY p.sort_order,p.id`).all().map((row) => ({ ...row, isActive: Number((row as Row).isActive) === 1 })),
-      aidTypes: database.prepare(`SELECT t.id, t.code, t.program_id AS programId, t.short_name AS shortName, t.official_name AS officialName,
-        t.direction, t.funding_source AS fundingSource, t.is_active AS isActive, COUNT(a.id) AS assignmentCount
-        FROM aid_types t JOIN programs p ON p.id=t.program_id LEFT JOIN assignments a ON a.aid_type_id=t.id
-        ${includeInactive ? '' : 'WHERE t.is_active=1'} GROUP BY t.id ORDER BY p.sort_order,p.id,t.sort_order,t.id`).all().map((row) => ({ ...row, isActive: Number((row as Row).isActive) === 1 })),
-    }
+    return listCatalogs(database, includeInactiveValue === true)
   })
 
   ipcMain.handle('catalogs:reorder', (_event, input: unknown) => reorderCatalog(database, input))

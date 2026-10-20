@@ -20,6 +20,7 @@ export type ProgramApprovalInput = { documentNumber: string; documentDate: strin
 export type CatalogOrderInput = { kind: 'program' | 'aidType'; ids: string[]; programId?: string }
 export type ProgramOption = { id: string; shortName: string; officialName: string; isActive: boolean; approvalId: string | null; approvalNumber: string | null; approvalDate: string | null; approvalTitle: string | null; assignmentCount: number }
 export type AidTypeOption = { id: string; code: string; programId: string; shortName: string; officialName: string; direction: string | null; fundingSource: string | null; isActive: boolean; assignmentCount: number }
+export type CatalogList = { programs: ProgramOption[]; aidTypes: AidTypeOption[] }
 export type CatalogEditInput = { kind: 'program' | 'aidType'; id?: string; shortName: string; officialName: string; programId?: string; direction?: string; fundingSource?: string; isActive?: boolean; approvalId?: string | null; approvalNumber?: string; approvalDate?: string; approvalTitle?: string }
 export type DecisionInput = { decisionNumber: string; decisionDate: string; title: string }
 export type DecisionSummary = { id: string; decisionNumber: string; decisionDate: string; title: string | null; assignmentCount: number; assignedTotalMinor: number; createdAt: string; updatedAt: string }
@@ -57,7 +58,7 @@ export type HromadaAidApi = {
   appName: string; platform: string
   recipients: { list: (includeArchived?: boolean) => Promise<RecipientSummary[]>; get: (id: string) => Promise<RecipientRecord | null>; save: (input: RecipientInput, id?: string, confirmSameName?: boolean) => Promise<RecipientSaveResult>; assignmentHistory: (id: string) => Promise<AssignmentRecord[]> }
   banks: { list: (query?: string) => Promise<BankRecord[]>; get: (id: string) => Promise<BankRecord | null>; details: (bankId: string) => Promise<BankDetail[]>; save: (input: BankInput, id?: string) => Promise<BankSaveResult>; remove: (id: string) => Promise<{ ok: boolean; message?: string }> }
-  catalogs: { list: (includeInactive?: boolean) => Promise<{ programs: ProgramOption[]; aidTypes: AidTypeOption[] }>; save: (input: CatalogEditInput) => Promise<{ ok: boolean; message?: string }>; reorder: (input: CatalogOrderInput) => Promise<{ ok: boolean; message?: string }> }
+  catalogs: { list: (includeInactive?: boolean) => Promise<CatalogList>; save: (input: CatalogEditInput) => Promise<{ ok: boolean; message?: string }>; reorder: (input: CatalogOrderInput) => Promise<{ ok: boolean; message?: string }> }
   programApprovals: { list: () => Promise<ProgramApproval[]>; save: (input: ProgramApprovalInput, id?: string) => Promise<{ ok: boolean; approval?: ProgramApproval; message?: string }> }
   decisions: { list: () => Promise<DecisionSummary[]>; get: (id: string) => Promise<DecisionRecord | null>; save: (input: DecisionInput, id?: string) => Promise<DecisionSaveResult>; addAssignments: (decisionId: string, assignments: AssignmentDraft[]) => Promise<AssignmentSaveResult> }
   assignments: { list: (year: number) => Promise<AssignmentListResult>; save: (input: AssignmentInput, id?: string) => Promise<AssignmentChangeResult>; changeStatuses: (input: AssignmentStatusBatchInput) => Promise<AssignmentStatusBatchResult> }
