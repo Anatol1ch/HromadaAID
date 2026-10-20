@@ -31,7 +31,7 @@ release/
 *.out
 *.pid
 
-# Local generated documents and exports; source templates in reference/ stay trackable
+# Local generated documents and exports
 generated-documents/
 generated-documents-temp/
 exports/
@@ -39,6 +39,10 @@ documents/
 private/
 *.generated.pdf
 *.generated.xlsx
+
+# Original Excel templates contain real personal and banking data.
+# Keep only reviewed, sanitized replacements under version control.
+reference/*.xlsx
 
 # Test and tool artefacts
 __pycache__/
