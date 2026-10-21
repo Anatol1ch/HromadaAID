@@ -20,8 +20,10 @@ import { readStatementRows } from '../../electron/statement-data.js'
 import { executeDeletion, isDeleteEntity, previewDeletion } from '../../electron/deletion-service.js'
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, BankSaveResult, CatalogList, DashboardData, DecisionRecord, DecisionSummary, HealthResponse, ProgramApproval, RecipientRecord, RecipientSaveResult, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from '../../shared/api-contract.js'
 import type { ChangePasswordInput, LoginInput } from '../../shared/auth-contract.js'
+import { hasPermission } from '../../shared/authorization.js'
 import { changePassword, login, logout } from './auth.js'
 import { requireAuthenticated } from './auth-http.js'
+import { currentApiSession, installApiAuthorization } from './api-authorization.js'
 import { LoginRateLimiter } from './login-rate-limit.js'
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -31,6 +33,10 @@ function readJsonQuery(value: string | undefined): unknown {
   if (value === undefined) return undefined
   try { return JSON.parse(value) }
   catch { return undefined }
+}
+
+function requestsPaidStatus(value: unknown): boolean {
+  return isRecord(value) && value.status === 'Виплачено'
 }
 
 export function createApp(database: DatabaseSync): FastifyInstance {
@@ -82,6 +88,8 @@ export function createApp(database: DatabaseSync): FastifyInstance {
     database.prepare('SELECT 1 AS ready').get()
     return { status: 'ok', service: 'hromada-aid-api' }
   })
+
+  installApiAuthorization(app, database)
 
   app.get<{ Querystring: { includeInactive?: string } }>('/api/catalogs', async (request): Promise<CatalogList> =>
     listCatalogs(database, request.query.includeInactive === 'true'))
@@ -172,8 +180,25 @@ export function createApp(database: DatabaseSync): FastifyInstance {
 
   app.post<{ Body: unknown }>('/api/assignments/change-statuses', async (request, reply) => { const result = isRecord(request.body) && 'input' in request.body ? changeAssignmentStatuses(database, request.body.input, request.body.requestId) : { ok: false as const, reason: 'validation' as const, message: 'Некоректні дані пакетної зміни.' }; return reply.status(saveStatus(result)).send(result) })
 
-  app.post<{ Body: unknown }>('/api/assignments', async (request, reply) => { const result = isRecord(request.body) && 'input' in request.body ? saveAssignment(database, request.body.input, undefined, undefined, request.body.requestId) : { ok: false as const, reason: 'validation' as const, message: 'Некоректні дані призначення.' }; return reply.status(saveStatus(result)).send(result) })
-  app.put<{ Params: { id: string }; Body: unknown }>('/api/assignments/:id', async (request, reply) => { const result = isRecord(request.body) && 'input' in request.body && typeof request.body.expectedUpdatedAt === 'string' && request.body.expectedUpdatedAt ? saveAssignment(database, request.body.input, request.params.id, request.body.expectedUpdatedAt) : { ok: false as const, reason: 'validation' as const, message: 'Для редагування потрібна початкова версія призначення.' }; return reply.status(saveStatus(result)).send(result) })
+  app.post<{ Body: unknown }>('/api/assignments', async (request, reply) => {
+    if (!isRecord(request.body) || !('input' in request.body)) return reply.status(400).send({ ok: false, reason: 'validation', message: 'Некоректні дані призначення.' })
+    if (requestsPaidStatus(request.body.input) && !hasPermission(currentApiSession(request).user.roles, 'assignments.change_financial_status')) {
+      return reply.status(403).send({ message: 'Недостатньо прав для встановлення статусу «Виплачено».' })
+    }
+    const result = saveAssignment(database, request.body.input, undefined, undefined, request.body.requestId)
+    return reply.status(saveStatus(result)).send(result)
+  })
+  app.put<{ Params: { id: string }; Body: unknown }>('/api/assignments/:id', async (request, reply) => {
+    if (!isRecord(request.body) || !('input' in request.body) || typeof request.body.expectedUpdatedAt !== 'string' || !request.body.expectedUpdatedAt) {
+      return reply.status(400).send({ ok: false, reason: 'validation', message: 'Для редагування потрібна початкова версія призначення.' })
+    }
+    const previous = database.prepare('SELECT status FROM assignments WHERE id=?').get(request.params.id) as { status?: unknown } | undefined
+    if ((requestsPaidStatus(request.body.input) || previous?.status === 'Виплачено') && !hasPermission(currentApiSession(request).user.roles, 'assignments.change_financial_status')) {
+      return reply.status(403).send({ message: 'Недостатньо прав для зміни призначення зі статусом «Виплачено».' })
+    }
+    const result = saveAssignment(database, request.body.input, request.params.id, request.body.expectedUpdatedAt)
+    return reply.status(saveStatus(result)).send(result)
+  })
 
   app.get<{ Querystring: { year?: string } }>('/api/statements', async (request): Promise<AssignmentListResult> =>
     listStatementAssignments(database, request.query.year === undefined ? undefined : Number(request.query.year)))

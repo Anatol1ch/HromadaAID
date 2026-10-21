@@ -30,6 +30,7 @@ export const PERMISSIONS = [
   'assignments.change_financial_status',
   'dashboard.read',
   'reports.read',
+  'planning.read',
   'planning.manage',
   'statements.generate',
   'reports.export',
@@ -55,9 +56,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   ],
   planning_specialist: [
     'catalogs.read', 'catalogs.manage', 'program_approvals.manage', 'dashboard.read',
-    'reports.read', 'planning.manage', 'reports.export',
+    'reports.read', 'planning.read', 'planning.manage', 'reports.export',
   ],
-  viewer: ['catalogs.read', 'dashboard.read', 'reports.read', 'reports.export'],
+  viewer: ['catalogs.read', 'dashboard.read', 'reports.read', 'planning.read', 'reports.export'],
 }
 
 export function isUserRole(value: unknown): value is UserRole {
