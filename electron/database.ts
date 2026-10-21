@@ -318,6 +318,26 @@ const migrations: Migration[] = [{
     );
     CREATE INDEX idx_decision_assignment_requests_decision ON decision_assignment_requests(decision_id,created_at);
   `,
+}, {
+  version: 23,
+  sql: `
+    CREATE TABLE assignment_save_requests (
+      request_id TEXT PRIMARY KEY,
+      payload_hash TEXT NOT NULL,
+      result_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `,
+}, {
+  version: 24,
+  sql: `
+    CREATE TABLE assignment_status_requests (
+      request_id TEXT PRIMARY KEY,
+      payload_hash TEXT NOT NULL,
+      result_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `,
 }]
 
 const maximumSupportedSchemaVersion = Math.max(...migrations.map(({ version }) => version))
