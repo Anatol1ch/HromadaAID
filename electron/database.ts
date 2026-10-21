@@ -338,6 +338,62 @@ const migrations: Migration[] = [{
       created_at TEXT NOT NULL
     );
   `,
+}, {
+  version: 25,
+  sql: `
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL CHECK(length(trim(username)) BETWEEN 3 AND 80),
+      username_key TEXT NOT NULL UNIQUE CHECK(length(trim(username_key)) BETWEEN 3 AND 80),
+      display_name TEXT CHECK(display_name IS NULL OR length(trim(display_name)) BETWEEN 1 AND 150),
+      password_hash TEXT NOT NULL CHECK(length(password_hash) > 0),
+      status TEXT NOT NULL CHECK(status IN ('active','inactive','blocked')),
+      password_changed_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE user_roles (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK(role IN ('administrator','assignment_specialist','payment_specialist','planning_specialist','viewer')),
+      PRIMARY KEY(user_id,role)
+    );
+    CREATE TABLE user_sessions (
+      token_hash TEXT PRIMARY KEY CHECK(length(token_hash)=64),
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL CHECK(expires_at > created_at)
+    );
+    CREATE INDEX idx_user_roles_user ON user_roles(user_id);
+    CREATE INDEX idx_user_sessions_user ON user_sessions(user_id);
+    CREATE INDEX idx_user_sessions_expiry ON user_sessions(expires_at);
+    CREATE TRIGGER users_revoke_sessions_after_status_change
+    AFTER UPDATE OF status ON users
+    WHEN NEW.status <> OLD.status
+    BEGIN
+      DELETE FROM user_sessions WHERE user_id=NEW.id;
+    END;
+    CREATE TRIGGER users_revoke_sessions_after_password_change
+    AFTER UPDATE OF password_hash ON users
+    WHEN NEW.password_hash <> OLD.password_hash
+    BEGIN
+      DELETE FROM user_sessions WHERE user_id=NEW.id;
+    END;
+    CREATE TRIGGER user_roles_revoke_sessions_after_insert
+    AFTER INSERT ON user_roles
+    BEGIN
+      DELETE FROM user_sessions WHERE user_id=NEW.user_id;
+    END;
+    CREATE TRIGGER user_roles_revoke_sessions_after_delete
+    AFTER DELETE ON user_roles
+    BEGIN
+      DELETE FROM user_sessions WHERE user_id=OLD.user_id;
+    END;
+    CREATE TRIGGER user_roles_revoke_sessions_after_update
+    AFTER UPDATE OF role ON user_roles
+    BEGIN
+      DELETE FROM user_sessions WHERE user_id=NEW.user_id;
+    END;
+  `,
 }]
 
 const maximumSupportedSchemaVersion = Math.max(...migrations.map(({ version }) => version))

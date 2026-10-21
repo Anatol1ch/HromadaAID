@@ -19,6 +19,10 @@ import { listStatementAssignments } from '../../electron/statement-list-data.js'
 import { readStatementRows } from '../../electron/statement-data.js'
 import { executeDeletion, isDeleteEntity, previewDeletion } from '../../electron/deletion-service.js'
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, BankSaveResult, CatalogList, DashboardData, DecisionRecord, DecisionSummary, HealthResponse, ProgramApproval, RecipientRecord, RecipientSaveResult, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from '../../shared/api-contract.js'
+import type { ChangePasswordInput, LoginInput } from '../../shared/auth-contract.js'
+import { changePassword, login, logout } from './auth.js'
+import { requireAuthenticated } from './auth-http.js'
+import { LoginRateLimiter } from './login-rate-limit.js'
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const saveStatus = (result: { ok: boolean; reason?: string }) => result.ok ? 200 : result.reason === 'conflict' ? 409 : result.reason === 'storage' ? 500 : 400
@@ -31,6 +35,48 @@ function readJsonQuery(value: string | undefined): unknown {
 
 export function createApp(database: DatabaseSync): FastifyInstance {
   const app = Fastify({ logger: true })
+  const loginRateLimiter = new LoginRateLimiter()
+
+  app.post<{ Body: unknown }>('/auth/login', async (request, reply) => {
+    const body = isRecord(request.body) ? request.body : undefined
+    const input: LoginInput = { username: typeof body?.username === 'string' ? body.username : '', password: typeof body?.password === 'string' ? body.password : '' }
+    if (loginRateLimiter.isBlocked(request.ip, input.username)) {
+      return reply.status(429).send({ message: 'Забагато невдалих спроб входу. Повторіть пізніше.' })
+    }
+    const result = await login(database, input)
+    if (!result.ok) {
+      if (result.status === 401) loginRateLimiter.failed(request.ip, input.username)
+      return reply.status(result.status).send({ message: result.message })
+    }
+    loginRateLimiter.succeeded(request.ip, input.username)
+    return reply.status(200).send(result.value)
+  })
+
+  app.get('/auth/me', async (request, reply) => {
+    const session = requireAuthenticated(database, request, reply)
+    if (!session) return reply
+    return reply.status(200).send(session.user)
+  })
+
+  app.post('/auth/logout', async (request, reply) => {
+    const session = requireAuthenticated(database, request, reply)
+    if (!session) return reply
+    logout(database, session.tokenHash)
+    return reply.status(204).send()
+  })
+
+  app.post<{ Body: unknown }>('/auth/change-password', async (request, reply) => {
+    const session = requireAuthenticated(database, request, reply)
+    if (!session) return reply
+    const body = isRecord(request.body) ? request.body : undefined
+    const input: ChangePasswordInput = {
+      currentPassword: typeof body?.currentPassword === 'string' ? body.currentPassword : '',
+      newPassword: typeof body?.newPassword === 'string' ? body.newPassword : '',
+    }
+    const result = await changePassword(database, session, input)
+    if (!result.ok) return reply.status(result.status).send({ message: result.message })
+    return reply.status(204).send()
+  })
 
   app.get('/health', async (): Promise<HealthResponse> => {
     database.prepare('SELECT 1 AS ready').get()

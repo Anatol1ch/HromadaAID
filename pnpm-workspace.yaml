@@ -1,2 +1,4 @@
+allowBuilds:
+  argon2: true
 minimumReleaseAgeExclude:
   - electron@44.7.1

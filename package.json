@@ -10,9 +10,11 @@
     "preview": "vite preview --host 127.0.0.1",
     "server:dev": "pnpm server:build && concurrently -k \"pnpm exec tsc -p server/tsconfig.json --watch\" \"node --watch dist-server/server/src/index.js\"",
     "server:build": "tsc -p server/tsconfig.json",
-    "server:start": "node dist-server/server/src/index.js"
+    "server:start": "node dist-server/server/src/index.js",
+    "server:create-admin": "pnpm server:build && node dist-server/server/src/create-admin.js"
   },
   "dependencies": {
+    "argon2": "^0.45.1",
     "fastify": "^5.12.7",
     "lucide-react": "^0.577.0",
     "react": "^19.2.0",
