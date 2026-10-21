@@ -118,6 +118,10 @@ export function isAssignmentListResult(value: unknown): value is AssignmentListR
     isAssignmentRecordList(value.assignments)
 }
 
+export function isStatementListResult(value: unknown): value is AssignmentListResult {
+  return isAssignmentListResult(value)
+}
+
 export function isDecisionSummary(value: unknown): value is DecisionSummary {
   return isRecord(value) && typeof value.id === 'string' && typeof value.decisionNumber === 'string' &&
     typeof value.decisionDate === 'string' && isNullableString(value.title) && typeof value.assignmentCount === 'number' &&

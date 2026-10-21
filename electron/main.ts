@@ -12,7 +12,7 @@ import { configureIpcSecurity, isTrustedAppUrl, registerRemoteIpcBlockers, trust
 import { ElectronRuntimeConfigError, readElectronRuntimeConfig, type ElectronRuntimeConfig } from './runtime-config.js'
 import { HttpClient } from './http-client.js'
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, CatalogList, DashboardData, DecisionRecord, DecisionSummary, ProgramApproval, RecipientRecord, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from './api-contract.js'
-import { isAnnualAidPlanList, isAnnualPlanEntryList, isAssignmentListResult, isAssignmentRecordList, isBankDetailList, isBankRecordList, isCatalogList, isDashboardData, isDecisionSummaryList, isNullableBankRecord, isNullableDecisionRecord, isNullableRecipientRecord, isProgramApprovalList, isRecipientSummaryList, isReportSourceRowList, isReportSummary } from '../shared/api-contract.js'
+import { isAnnualAidPlanList, isAnnualPlanEntryList, isAssignmentListResult, isAssignmentRecordList, isBankDetailList, isBankRecordList, isCatalogList, isDashboardData, isDecisionSummaryList, isNullableBankRecord, isNullableDecisionRecord, isNullableRecipientRecord, isProgramApprovalList, isRecipientSummaryList, isReportSourceRowList, isReportSummary, isStatementListResult } from '../shared/api-contract.js'
 
 // Match the future Windows package/shortcut identity without changing userData.
 if (process.platform === 'win32') app.setAppUserModelId('local.hromadaaid')
@@ -135,7 +135,7 @@ if (!hasSingleInstanceLock) {
         registerStatementsIpc(database)
       } else {
         const http = new HttpClient(runtimeConfig.apiUrl)
-        registerRemoteIpcBlockers(['catalogs:list', 'recipients:list', 'recipients:get', 'recipients:assignment-history', 'banks:list', 'banks:get', 'banks:details', 'decisions:list', 'decisions:get', 'assignments:list', 'program-approvals:list', 'dashboard:get', 'reports:get', 'reports:summary', 'reports:annual-plan-list', 'reports:plan-list'])
+        registerRemoteIpcBlockers(['catalogs:list', 'recipients:list', 'recipients:get', 'recipients:assignment-history', 'banks:list', 'banks:get', 'banks:details', 'decisions:list', 'decisions:get', 'assignments:list', 'program-approvals:list', 'dashboard:get', 'reports:get', 'reports:summary', 'reports:annual-plan-list', 'reports:plan-list', 'statements:list'])
         trustedIpcMain.handle('catalogs:list', async (_event, includeInactiveValue: unknown): Promise<CatalogList> =>
           http.getJson(includeInactiveValue === true ? '/api/catalogs?includeInactive=true' : '/api/catalogs', isCatalogList))
         trustedIpcMain.handle('recipients:list', async (): Promise<RecipientSummary[]> =>
@@ -193,6 +193,10 @@ if (!hasSingleInstanceLock) {
         trustedIpcMain.handle('reports:plan-list', async (_event, yearValue: unknown): Promise<AnnualPlanEntry[]> => {
           const path = yearValue === undefined ? '/api/reports/plan-entries' : `/api/reports/plan-entries?year=${encodeURIComponent(String(yearValue))}`
           return http.getJson(path, isAnnualPlanEntryList)
+        })
+        trustedIpcMain.handle('statements:list', async (_event, yearValue: unknown): Promise<AssignmentListResult> => {
+          const path = yearValue === undefined ? '/api/statements' : `/api/statements?year=${encodeURIComponent(String(yearValue))}`
+          return http.getJson(path, isStatementListResult)
         })
       }
     } catch (error) {

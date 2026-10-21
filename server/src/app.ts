@@ -8,6 +8,7 @@ import { dashboardSummary, reportSummary } from '../../electron/financial-summar
 import { getRecipient, listRecipients } from '../../electron/recipient-data.js'
 import { listAnnualPlans } from '../../electron/annual-plans.js'
 import { listAnnualPlanEntries, listProgramApprovals, listReportSourceRows } from '../../electron/report-read-data.js'
+import { listStatementAssignments } from '../../electron/statement-list-data.js'
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, CatalogList, DashboardData, DecisionRecord, DecisionSummary, HealthResponse, ProgramApproval, RecipientRecord, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from '../../shared/api-contract.js'
 
 function readJsonQuery(value: string | undefined): unknown {
@@ -51,6 +52,9 @@ export function createApp(database: DatabaseSync): FastifyInstance {
 
   app.get<{ Querystring: { year?: string } }>('/api/assignments', async (request): Promise<AssignmentListResult> =>
     listAssignments(database, request.query.year === undefined ? undefined : Number(request.query.year)))
+
+  app.get<{ Querystring: { year?: string } }>('/api/statements', async (request): Promise<AssignmentListResult> =>
+    listStatementAssignments(database, request.query.year === undefined ? undefined : Number(request.query.year)))
 
   app.get('/api/program-approvals', async (): Promise<ProgramApproval[]> => listProgramApprovals(database))
 

@@ -1,7 +1,6 @@
 import { bankStatementFileName, statementFileName } from './statement-filenames.js'
 import { statementKey, statementPeriodText, statementPlan, validateStatementParameters } from './statement-parameters.js'
 import { readStatementRows } from './statement-data.js'
-import { isStatementEligible } from './assignment-model.js'
 import { dialog } from 'electron'
 import { trustedIpcMain as ipcMain } from './ipc-security.js'
 import { copyFileSync, readFileSync, unlinkSync } from 'node:fs'
@@ -11,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import type { GeneratedStatement, StatementKind } from './api-contract.js'
-import { listAssignments } from './records-ipc.js'
+import { listStatementAssignments } from './statement-list-data.js'
 import { cancelDocumentGeneration, cleanupDocumentTemp, createDocumentDirectory, initializeDocumentTemp, isDocumentTempPath, removeDocumentDirectory, setDocumentWorker } from './document-temp.js'
 
 type Row = Record<string, number | string | null>
@@ -98,11 +97,7 @@ function invokeExcel(scriptPath: string, payload: object) {
 export function registerStatementsIpc(database: DatabaseSync) {
   initializeDocumentTemp()
   ipcMain.handle('statements:list', (_event, yearValue: unknown) => {
-    const result = listAssignments(database, yearValue)
-    return {
-      ...result,
-      assignments: result.assignments.filter((assignment) => isStatementEligible(assignment.status)),
-    }
+    return listStatementAssignments(database, yearValue)
   })
 
   ipcMain.handle('statements:generate', async (_event, kindValue: unknown, idsValue: unknown, yearValue: unknown, parametersValue: unknown) => {
