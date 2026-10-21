@@ -7,7 +7,7 @@ export type AssignmentRow = Record<string, string | number | null>
 
 const assignmentStatusValues: readonly AssignmentStatus[] = ASSIGNMENT_STATUSES
 
-export const assignmentSelect = `a.id, a.created_at, a.recipient_id, r.last_name, r.first_name, r.patronymic, r.is_demo AS recipient_is_demo, r.sex AS recipient_sex, r.is_vpo AS recipient_is_vpo,
+export const assignmentSelect = `a.id, a.created_at, a.updated_at, a.recipient_id, r.last_name, r.first_name, r.patronymic, r.is_demo AS recipient_is_demo, r.sex AS recipient_sex, r.is_vpo AS recipient_is_vpo,
   d.id AS decision_id, d.decision_number, d.decision_date,
   p.id AS program_id, p.short_name AS program_name,
   t.id AS aid_type_id, t.short_name AS aid_type_name, a.amount_minor, a.status, a.paid_on`
@@ -21,6 +21,7 @@ export function assignmentFromRow(row: AssignmentRow): AssignmentRecord {
   return {
     id: String(row.id),
     createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at ?? row.created_at),
     recipientId: String(row.recipient_id),
     recipientName: [row.last_name, row.first_name, row.patronymic].filter((part) => typeof part === 'string' && part.trim()).join(' '),
     recipientIsDemo: Number(row.recipient_is_demo) === 1,

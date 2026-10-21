@@ -3,15 +3,15 @@ import { listCatalogs } from './catalog-data.js'
 import { reorderCatalog } from './catalog-order.js'
 import { saveCatalog } from './catalog-store.js'
 import { saveProgramApproval } from './program-approval-store.js'
+import { saveAssignment } from './assignment-store.js'
 import { addDecisionAssignments, saveDecision } from './decision-store.js'
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { trustedIpcMain as ipcMain } from './ipc-security.js'
 import { changeAssignmentStatuses } from './assignment-status.js'
-import { ASSIGNMENT_STATUSES } from './assignment-model.js'
 import { dashboardSummary, reportSummary } from './financial-summary.js'
-import { paymentYearError, resolveAccountingYear } from './accounting-year.js'
-import { assignmentFromRow, assignmentFrom, assignmentSelect, getDecision, listAssignments, listDecisions, listRecipientAssignmentHistory, type AssignmentRow } from './assignment-data.js'
+import { resolveAccountingYear } from './accounting-year.js'
+import { getDecision, listAssignments, listDecisions, listRecipientAssignmentHistory, type AssignmentRow } from './assignment-data.js'
 import { listAnnualPlanEntries, listProgramApprovals, listReportSourceRows } from './report-read-data.js'
 import type {
   AssignmentChangeResult, AssignmentInput, AssignmentListResult, AssignmentRecord, AssignmentStatus,
@@ -19,22 +19,6 @@ import type {
 } from './api-contract.js'
 
 type Row = AssignmentRow
-
-const assignmentStatusValues: readonly AssignmentStatus[] = ASSIGNMENT_STATUSES
-
-function readAssignmentInput(value: unknown): AssignmentInput | null {
-  if (!value || typeof value !== 'object') return null
-  const source = value as Record<string, unknown>
-  if (typeof source.recipientId !== 'string' || !source.recipientId || typeof source.aidTypeId !== 'string' || !source.aidTypeId) return null
-  const decisionId = typeof source.decisionId === 'string' && source.decisionId ? source.decisionId : undefined
-  const decisionNumber = typeof source.decisionNumber === 'string' ? source.decisionNumber.trim() : ''
-  const decisionDate = typeof source.decisionDate === 'string' ? source.decisionDate.trim() : ''
-  if (!decisionId && (!decisionNumber || decisionNumber.length > 100 || !isIsoDate(decisionDate))) return null
-  if (typeof source.amountMinor !== 'number' || !Number.isSafeInteger(source.amountMinor) || source.amountMinor <= 0) return null
-  if (!assignmentStatusValues.includes(source.status as AssignmentStatus)) return null
-  if (source.paidOn !== undefined && (typeof source.paidOn !== 'string' || (source.paidOn !== '' && !isIsoDate(source.paidOn)))) return null
-  return { recipientId: source.recipientId, decisionId, decisionNumber, decisionDate, aidTypeId: source.aidTypeId, amountMinor: source.amountMinor, status: source.status as AssignmentStatus, paidOn: source.paidOn as string | undefined }
-}
 
 export function isIsoDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number(value.slice(0, 4)) < 1) return false
@@ -46,65 +30,7 @@ export function registerRecordsIpc(database: DatabaseSync) {
   ipcMain.handle('assignments:change-statuses', (_event, value: unknown) => changeAssignmentStatuses(database, value))
   ipcMain.handle('assignments:list', (_event, yearValue: unknown): AssignmentListResult => listAssignments(database, yearValue))
 
-  ipcMain.handle('assignments:save', (_event, value: unknown, idValue?: unknown): AssignmentChangeResult => {
-    const input = readAssignmentInput(value)
-    if (!input) return { ok: false, reason: 'validation', message: 'Перевірте отримувача, рішення, вид допомоги, суму та статус.' }
-    if (input.status === 'Виплачено' && (!input.paidOn || !isIsoDate(input.paidOn))) {
-      return { ok: false, reason: 'validation', message: 'Для статусу «Виплачено» вкажіть коректну дату фактичної виплати.' }
-    }
-    const id = typeof idValue === 'string' && idValue ? idValue : null
-    const now = new Date().toISOString()
-    try {
-      database.exec('BEGIN IMMEDIATE')
-      const recipient = database.prepare('SELECT 1 AS found FROM recipients WHERE id = ?').get(input.recipientId)
-      let decisionId = input.decisionId
-      if (!decisionId) {
-        const now = new Date().toISOString()
-        database.prepare('INSERT OR IGNORE INTO decisions(id, decision_number, decision_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
-          .run(randomUUID(), input.decisionNumber, input.decisionDate, now, now)
-        const row = database.prepare('SELECT id FROM decisions WHERE decision_number = ? AND decision_date = ?').get(input.decisionNumber, input.decisionDate) as Row | undefined
-        decisionId = row ? String(row.id) : undefined
-      }
-      const decision = decisionId ? database.prepare('SELECT decision_date FROM decisions WHERE id = ?').get(decisionId) as Row | undefined : null
-      const aidType = database.prepare(`SELECT direction, funding_source FROM aid_types t WHERE id=? AND (is_active=1 OR (? IS NOT NULL AND EXISTS(SELECT 1 FROM assignments old WHERE old.id=? AND old.aid_type_id=t.id)))`)
-        .get(input.aidTypeId, id, id) as Row | undefined
-      if (!recipient || !decision || !aidType) {
-        database.exec('ROLLBACK')
-        return { ok: false, reason: 'validation', message: 'Отримувач, рішення або вид допомоги недоступний. Оновіть дані й спробуйте ще раз.' }
-      }
-      if (!decisionId) {
-        database.exec('ROLLBACK')
-        return { ok: false, reason: 'validation', message: 'Не вдалося зберегти реквізити рішення.' }
-      }
-      if (input.status === 'Виплачено') {
-        const message = paymentYearError(input.paidOn, String(decision.decision_date))
-        if (message) { database.exec('ROLLBACK'); return { ok: false, reason: 'validation', message } }
-      }
-      if (id && !database.prepare('SELECT 1 FROM assignments WHERE id = ?').get(id)) {
-        database.exec('ROLLBACK')
-        return { ok: false, reason: 'not-found', message: 'Призначення не знайдено.' }
-      }
-
-      let savedId = id
-      if (id) {
-        database.prepare(`UPDATE assignments SET recipient_id=?, decision_id=?, aid_type_id=?, amount_minor=?, status=?, direction=?, funding_source=?, updated_at=?, paid_on=CASE WHEN ?='Виплачено' THEN ? ELSE NULL END WHERE id=?`)
-          .run(input.recipientId, decisionId, input.aidTypeId, input.amountMinor, input.status, aidType.direction, aidType.funding_source, now, input.status, input.paidOn || null, id)
-      } else {
-        savedId = randomUUID()
-        database.prepare(`INSERT INTO assignments(id, recipient_id, decision_id, aid_type_id, amount_minor, status, direction, funding_source, created_at, updated_at, paid_on) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
-          .run(savedId, input.recipientId, decisionId, input.aidTypeId, input.amountMinor, input.status, aidType.direction, aidType.funding_source, now, now, input.status === 'Виплачено' ? input.paidOn! : null)
-      }
-
-      const row = database.prepare(`SELECT ${assignmentSelect} ${assignmentFrom} WHERE a.id = ?`).get(savedId!) as Row | undefined
-      if (!row) { database.exec('ROLLBACK'); return { ok: false, reason: 'storage', message: 'Запис не вдалося прочитати після збереження; транзакцію скасовано.' } }
-      const saved = assignmentFromRow(row)
-      database.exec('COMMIT')
-      return { ok: true, assignment: saved }
-    } catch {
-      try { database.exec('ROLLBACK') } catch { /* Transaction may already be closed. */ }
-      return { ok: false, reason: 'storage', message: 'Не вдалося зберегти призначення. Перевірте локальне сховище.' }
-    }
-  })
+  ipcMain.handle('assignments:save', (_event, value: unknown, idValue?: unknown, expectedUpdatedAt?: unknown, requestId?: unknown) => saveAssignment(database, value, idValue, expectedUpdatedAt, requestId))
 
   ipcMain.handle('dashboard:get', (_event, yearValue: unknown) => dashboardSummary(database, yearValue))
 

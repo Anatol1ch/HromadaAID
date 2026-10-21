@@ -13,6 +13,7 @@ import { listAnnualPlans } from '../../electron/annual-plans.js'
 import { listAnnualPlanEntries, listProgramApprovals, listReportSourceRows } from '../../electron/report-read-data.js'
 import { saveProgramApproval } from '../../electron/program-approval-store.js'
 import { addDecisionAssignments, saveDecision } from '../../electron/decision-store.js'
+import { saveAssignment } from '../../electron/assignment-store.js'
 import { listStatementAssignments } from '../../electron/statement-list-data.js'
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, BankSaveResult, CatalogList, DashboardData, DecisionRecord, DecisionSummary, HealthResponse, ProgramApproval, RecipientRecord, RecipientSaveResult, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from '../../shared/api-contract.js'
 
@@ -117,6 +118,9 @@ export function createApp(database: DatabaseSync): FastifyInstance {
 
   app.get<{ Querystring: { year?: string } }>('/api/assignments', async (request): Promise<AssignmentListResult> =>
     listAssignments(database, request.query.year === undefined ? undefined : Number(request.query.year)))
+
+  app.post<{ Body: unknown }>('/api/assignments', async (request, reply) => { const result = isRecord(request.body) && 'input' in request.body ? saveAssignment(database, request.body.input, undefined, undefined, request.body.requestId) : { ok: false as const, reason: 'validation' as const, message: 'Некоректні дані призначення.' }; return reply.status(saveStatus(result)).send(result) })
+  app.put<{ Params: { id: string }; Body: unknown }>('/api/assignments/:id', async (request, reply) => { const result = isRecord(request.body) && 'input' in request.body && typeof request.body.expectedUpdatedAt === 'string' && request.body.expectedUpdatedAt ? saveAssignment(database, request.body.input, request.params.id, request.body.expectedUpdatedAt) : { ok: false as const, reason: 'validation' as const, message: 'Для редагування потрібна початкова версія призначення.' }; return reply.status(saveStatus(result)).send(result) })
 
   app.get<{ Querystring: { year?: string } }>('/api/statements', async (request): Promise<AssignmentListResult> =>
     listStatementAssignments(database, request.query.year === undefined ? undefined : Number(request.query.year)))

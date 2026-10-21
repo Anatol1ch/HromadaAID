@@ -34,7 +34,7 @@ const api: HromadaAidApi = {
   },
   assignments: {
     list: (year) => invoke('assignments:list', year),
-    save: (input, id) => invoke('assignments:save', input, id),
+    save: (input, id, expectedUpdatedAt, requestId) => invoke('assignments:save', input, id, expectedUpdatedAt, requestId),
     changeStatuses: (input) => invoke('assignments:change-statuses', input),
   },
   dashboard: {

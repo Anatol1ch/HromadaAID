@@ -135,7 +135,7 @@ if (!hasSingleInstanceLock) {
         registerStatementsIpc(database)
       } else {
         const http = new HttpClient(runtimeConfig.apiUrl)
-        registerRemoteIpcBlockers(['catalogs:list', 'catalogs:save', 'catalogs:reorder', 'recipients:list', 'recipients:get', 'recipients:save', 'recipients:assignment-history', 'banks:list', 'banks:get', 'banks:details', 'banks:save', 'decisions:list', 'decisions:get', 'decisions:save', 'decisions:add-assignments', 'assignments:list', 'program-approvals:list', 'program-approvals:save', 'dashboard:get', 'reports:get', 'reports:summary', 'reports:annual-plan-list', 'reports:plan-list', 'statements:list'])
+        registerRemoteIpcBlockers(['catalogs:list', 'catalogs:save', 'catalogs:reorder', 'recipients:list', 'recipients:get', 'recipients:save', 'recipients:assignment-history', 'banks:list', 'banks:get', 'banks:details', 'banks:save', 'decisions:list', 'decisions:get', 'decisions:save', 'decisions:add-assignments', 'assignments:list', 'assignments:save', 'program-approvals:list', 'program-approvals:save', 'dashboard:get', 'reports:get', 'reports:summary', 'reports:annual-plan-list', 'reports:plan-list', 'statements:list'])
         trustedIpcMain.handle('catalogs:list', async (_event, includeInactiveValue: unknown): Promise<CatalogList> =>
           http.getJson(includeInactiveValue === true ? '/api/catalogs?includeInactive=true' : '/api/catalogs', isCatalogList))
         trustedIpcMain.handle('catalogs:save', async (_event, input: unknown) => http.postJson('/api/catalogs/save', { input }, isCatalogSaveResult))
@@ -199,6 +199,7 @@ if (!hasSingleInstanceLock) {
           const path = yearValue === undefined ? '/api/assignments' : `/api/assignments?year=${encodeURIComponent(String(yearValue))}`
           return http.getJson(path, isAssignmentListResult)
         })
+        trustedIpcMain.handle('assignments:save', async (_event, input: unknown, id: unknown, expectedUpdatedAt: unknown, requestId: unknown) => { if (typeof id === 'string' && id) return http.putJson(`/api/assignments/${encodeURIComponent(id)}`, { input, expectedUpdatedAt }, isAssignmentSaveResult); return http.postJson('/api/assignments', { input, requestId }, isAssignmentSaveResult) })
         trustedIpcMain.handle('program-approvals:list', async (): Promise<ProgramApproval[]> =>
           http.getJson('/api/program-approvals', isProgramApprovalList))
         trustedIpcMain.handle('program-approvals:save', async (_event, input: unknown, id: unknown, expectedUpdatedAt: unknown) => {

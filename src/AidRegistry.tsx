@@ -59,6 +59,8 @@ export default function AidRegistry({ createOnOpen = false }: { createOnOpen?: b
   const [sort, setSort] = useState<SortState>(defaultSort)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [editingId, setEditingId] = useState<string | undefined>()
+  const [editingUpdatedAt, setEditingUpdatedAt] = useState<string | undefined>()
+  const assignmentRequestId = useRef<string | undefined>()
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -172,19 +174,19 @@ export default function AidRegistry({ createOnOpen = false }: { createOnOpen?: b
     : { key, direction: 'asc' })
   const sortHeader = (label: string, key: SortKey) => <button type="button" className="registry-sort-button" title={key === 'createdAt' ? 'Сортувати за точним часом створення' : `Сортувати: ${label}`} onClick={() => sortBy(key)}><span className="registry-sort-label">{label}</span><span aria-hidden="true">{sort.key === key ? (sort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button>
 
-  const startCreate = () => { const initial = blank(); initialDraft.current = JSON.stringify(initial); setDraft(initial); setEditingId(undefined); setError(''); saveAndContinueRef.current = false }
+  const startCreate = () => { const initial = blank(); initialDraft.current = JSON.stringify(initial); setDraft(initial); setEditingId(undefined); setEditingUpdatedAt(undefined); assignmentRequestId.current = crypto.randomUUID(); setError(''); saveAndContinueRef.current = false }
   useEffect(() => { if (createOnOpen) startCreate() }, [createOnOpen])
   const startEdit = (row: AssignmentRecord) => {
     const initial = { recipientId: row.recipientId, recipientSearch: row.recipientName, decisionId: row.decisionId, decisionNumber: row.decisionNumber, decisionDate: row.decisionDate, programId: row.programId, aidTypeId: row.aidTypeId, amount: (row.amountMinor / 100).toFixed(2), status: row.status, paidOn: row.status === 'Виплачено' ? row.paidOn ?? '' : '' }
     initialDraft.current = JSON.stringify(initial)
     setDraft(initial)
-    setEditingId(row.id); setError(''); saveAndContinueRef.current = false
+    setEditingId(row.id); setEditingUpdatedAt(row.updatedAt); assignmentRequestId.current = undefined; setError(''); saveAndContinueRef.current = false
   }
   const requestDelete = async (row: AssignmentRecord) => {
     try { const preview = await window.hromadaAid.deletion.preview('assignment', row.id); if (preview) setDeletePreview(preview); else setError('Призначення не знайдено. Оновіть список.') }
     catch { setError('Не вдалося перевірити залежні дані призначення.') }
   }
-  const close = () => { setDraft(null); setEditingId(undefined); setError(''); setShowPersonForm(false); setRecipientEditor(null); setShowDecisionForm(false); saveAndContinueRef.current = false }
+  const close = () => { setDraft(null); setEditingId(undefined); setEditingUpdatedAt(undefined); assignmentRequestId.current = undefined; setError(''); setShowPersonForm(false); setRecipientEditor(null); setShowDecisionForm(false); saveAndContinueRef.current = false }
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -200,7 +202,7 @@ export default function AidRegistry({ createOnOpen = false }: { createOnOpen?: b
     const input: AssignmentInput = { recipientId: draft.recipientId, decisionId: draft.decisionId || undefined, decisionNumber: draft.decisionNumber, decisionDate: draft.decisionDate, aidTypeId: draft.aidTypeId, amountMinor: Math.round(Number(normalized) * 100), status: draft.status, paidOn: draft.paidOn }
     savingRef.current = true; setSaving(true); setError('')
     try {
-      const result = await assignmentRepository.save(input, editingId)
+      const result = await assignmentRepository.save(input, editingId, editingUpdatedAt, assignmentRequestId.current)
       if (!result.ok) { setError(result.message); saveAndContinueRef.current = false; return }
       if (saveAndContinueRef.current && !editingId) {
         const next = { ...blank(), decisionId: draft.decisionId, decisionNumber: draft.decisionNumber, decisionDate: draft.decisionDate }
