@@ -5,7 +5,7 @@ import { catalogRepository, useCatalogUpdates } from '../services/catalogReposit
 
 export function useOverviewData(year: number) {
   const [data, setData] = useState<DashboardData | null>(null)
-  const [catalogs, setCatalogs] = useState<Awaited<ReturnType<typeof catalogRepository.list>>>({ programs: [], aidTypes: [] })
+  const [catalogs, setCatalogs] = useState<Awaited<ReturnType<typeof catalogRepository.list>>>({ programs: [], aidTypes: [], programOrderRevision: '', aidTypeOrderRevisions: {} })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const sequence = useRef(0)

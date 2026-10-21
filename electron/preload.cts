@@ -24,7 +24,7 @@ const api: HromadaAidApi = {
   },
   programApprovals: {
     list: () => invoke('program-approvals:list'),
-    save: (input, id) => invoke('program-approvals:save', input, id),
+    save: (input, id, expectedUpdatedAt) => invoke('program-approvals:save', input, id, expectedUpdatedAt),
   },
   decisions: {
     list: () => invoke('decisions:list'),

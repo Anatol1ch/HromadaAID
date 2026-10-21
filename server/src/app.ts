@@ -4,11 +4,14 @@ import { bankDetails, getBank, listBanks, saveBank } from '../../electron/bank-s
 import { getDecision, listAssignments, listDecisions, listRecipientAssignmentHistory } from '../../electron/assignment-data.js'
 import { resolveAccountingYear } from '../../electron/accounting-year.js'
 import { listCatalogs } from '../../electron/catalog-data.js'
+import { reorderCatalog } from '../../electron/catalog-order.js'
+import { saveCatalog } from '../../electron/catalog-store.js'
 import { dashboardSummary, reportSummary } from '../../electron/financial-summary.js'
 import { getRecipient, listRecipients } from '../../electron/recipient-data.js'
 import { saveRecipient } from '../../electron/recipient-store.js'
 import { listAnnualPlans } from '../../electron/annual-plans.js'
 import { listAnnualPlanEntries, listProgramApprovals, listReportSourceRows } from '../../electron/report-read-data.js'
+import { saveProgramApproval } from '../../electron/program-approval-store.js'
 import { listStatementAssignments } from '../../electron/statement-list-data.js'
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, BankSaveResult, CatalogList, DashboardData, DecisionRecord, DecisionSummary, HealthResponse, ProgramApproval, RecipientRecord, RecipientSaveResult, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from '../../shared/api-contract.js'
 
@@ -31,6 +34,14 @@ export function createApp(database: DatabaseSync): FastifyInstance {
 
   app.get<{ Querystring: { includeInactive?: string } }>('/api/catalogs', async (request): Promise<CatalogList> =>
     listCatalogs(database, request.query.includeInactive === 'true'))
+  app.post<{ Body: unknown }>('/api/catalogs/save', async (request, reply) => {
+    const result = isRecord(request.body) && 'input' in request.body ? saveCatalog(database, request.body.input) : { ok: false as const, reason: 'validation' as const, message: 'Некоректні дані довідника.' }
+    return reply.status(saveStatus(result)).send(result)
+  })
+  app.post<{ Body: unknown }>('/api/catalogs/reorder', async (request, reply) => {
+    const result = isRecord(request.body) && 'input' in request.body ? reorderCatalog(database, request.body.input) : { ok: false as const, reason: 'validation' as const, message: 'Некоректний порядок довідника.' }
+    return reply.status(saveStatus(result)).send(result)
+  })
 
   app.get('/api/recipients', async (): Promise<RecipientSummary[]> => listRecipients(database))
 
@@ -89,6 +100,16 @@ export function createApp(database: DatabaseSync): FastifyInstance {
     listStatementAssignments(database, request.query.year === undefined ? undefined : Number(request.query.year)))
 
   app.get('/api/program-approvals', async (): Promise<ProgramApproval[]> => listProgramApprovals(database))
+  app.post<{ Body: unknown }>('/api/program-approvals', async (request, reply) => {
+    const result = isRecord(request.body) && 'input' in request.body ? saveProgramApproval(database, request.body.input) : { ok: false as const, reason: 'validation' as const, message: 'Некоректні реквізити рішення.' }
+    return reply.status(saveStatus(result)).send(result)
+  })
+  app.put<{ Params: { id: string }; Body: unknown }>('/api/program-approvals/:id', async (request, reply) => {
+    const result = isRecord(request.body) && 'input' in request.body && typeof request.body.expectedUpdatedAt === 'string' && request.body.expectedUpdatedAt
+      ? saveProgramApproval(database, request.body.input, request.params.id, request.body.expectedUpdatedAt)
+      : { ok: false as const, reason: 'validation' as const, message: 'Для редагування потрібна початкова версія рішення.' }
+    return reply.status(saveStatus(result)).send(result)
+  })
 
   app.get<{ Querystring: { year?: string } }>('/api/dashboard', async (request): Promise<DashboardData> =>
     dashboardSummary(database, request.query.year === undefined ? undefined : Number(request.query.year)))

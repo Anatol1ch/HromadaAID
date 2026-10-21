@@ -15,24 +15,27 @@ export type RecipientRecord = RecipientSummary & { lastName: string; firstName: 
 export type DuplicateMatch = { id: string; fullName: string; rnokpp: string | null }
 export type RecipientSaveResult = | { ok: true; recipient: RecipientRecord } | { ok: false; reason: 'name-match' | 'rnokpp-match' | 'not-found' | 'conflict' | 'validation' | 'storage'; matches: DuplicateMatch[]; message: string }
 
-export type ProgramApproval = { id: string; documentNumber: string; documentDate: string; title: string | null; programCount: number }
+export type ProgramApproval = { id: string; documentNumber: string; documentDate: string; title: string | null; programCount: number; updatedAt: string }
 export type ProgramApprovalInput = { documentNumber: string; documentDate: string; title: string }
-export type CatalogOrderInput = { kind: 'program' | 'aidType'; ids: string[]; programId?: string }
-export type ProgramOption = { id: string; shortName: string; officialName: string; isActive: boolean; approvalId: string | null; approvalNumber: string | null; approvalDate: string | null; approvalTitle: string | null; assignmentCount: number }
-export type AidTypeOption = { id: string; code: string; programId: string; shortName: string; officialName: string; direction: string | null; fundingSource: string | null; isActive: boolean; assignmentCount: number }
-export type CatalogList = { programs: ProgramOption[]; aidTypes: AidTypeOption[] }
+export type CatalogOrderInput = { kind: 'program' | 'aidType'; ids: string[]; programId?: string; expectedOrderRevision?: string }
+export type CatalogSaveResult = { ok: true } | { ok: false; reason: 'validation' | 'not-found' | 'conflict' | 'storage'; message: string }
+export type CatalogOrderResult = { ok: true } | { ok: false; reason: 'validation' | 'conflict' | 'storage'; message: string }
+export type ProgramApprovalSaveResult = { ok: true; approval: ProgramApproval } | { ok: false; reason: 'validation' | 'not-found' | 'conflict' | 'storage'; message: string }
+export type ProgramOption = { id: string; shortName: string; officialName: string; isActive: boolean; approvalId: string | null; approvalNumber: string | null; approvalDate: string | null; approvalTitle: string | null; assignmentCount: number; updatedAt: string }
+export type AidTypeOption = { id: string; code: string; programId: string; shortName: string; officialName: string; direction: string | null; fundingSource: string | null; isActive: boolean; assignmentCount: number; updatedAt: string }
+export type CatalogList = { programs: ProgramOption[]; aidTypes: AidTypeOption[]; programOrderRevision: string; aidTypeOrderRevisions: Record<string, string> }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const isNullableString = (value: unknown): value is string | null => typeof value === 'string' || value === null
 
 export function isCatalogList(value: unknown): value is CatalogList {
-  if (!isRecord(value) || !Array.isArray(value.programs) || !Array.isArray(value.aidTypes)) return false
+  if (!isRecord(value) || !Array.isArray(value.programs) || !Array.isArray(value.aidTypes) || typeof value.programOrderRevision !== 'string' || !isRecord(value.aidTypeOrderRevisions) || !Object.values(value.aidTypeOrderRevisions).every((revision) => typeof revision === 'string')) return false
   return value.programs.every((item) => isRecord(item) && typeof item.id === 'string' && typeof item.shortName === 'string' &&
-    typeof item.officialName === 'string' && typeof item.isActive === 'boolean' && isNullableString(item.approvalId) &&
+    typeof item.officialName === 'string' && typeof item.isActive === 'boolean' && typeof item.updatedAt === 'string' && isNullableString(item.approvalId) &&
     isNullableString(item.approvalNumber) && isNullableString(item.approvalDate) && isNullableString(item.approvalTitle) &&
     typeof item.assignmentCount === 'number') &&
     value.aidTypes.every((item) => isRecord(item) && typeof item.id === 'string' && typeof item.code === 'string' &&
-      typeof item.programId === 'string' && typeof item.shortName === 'string' && typeof item.officialName === 'string' &&
+      typeof item.programId === 'string' && typeof item.shortName === 'string' && typeof item.officialName === 'string' && typeof item.updatedAt === 'string' &&
       isNullableString(item.direction) && isNullableString(item.fundingSource) && typeof item.isActive === 'boolean' &&
       typeof item.assignmentCount === 'number')
 }
@@ -95,13 +98,23 @@ export function isBankSaveResult(value: unknown): value is BankSaveResult {
     : (value.reason === 'validation' || value.reason === 'not-found' || value.reason === 'conflict' || value.reason === 'storage') && typeof value.message === 'string')
 }
 
+export function isCatalogSaveResult(value: unknown): value is CatalogSaveResult {
+  return isRecord(value) && typeof value.ok === 'boolean' && (value.ok ||
+    (value.reason === 'validation' || value.reason === 'not-found' || value.reason === 'conflict' || value.reason === 'storage') && typeof value.message === 'string')
+}
+
+export function isCatalogOrderResult(value: unknown): value is CatalogOrderResult {
+  return isRecord(value) && typeof value.ok === 'boolean' && (value.ok ||
+    (value.reason === 'validation' || value.reason === 'conflict' || value.reason === 'storage') && typeof value.message === 'string')
+}
+
 export function isRecipientSaveResult(value: unknown): value is RecipientSaveResult {
   return isRecord(value) && typeof value.ok === 'boolean' && (value.ok
     ? isRecipientRecord(value.recipient)
     : (value.reason === 'name-match' || value.reason === 'rnokpp-match' || value.reason === 'not-found' || value.reason === 'conflict' || value.reason === 'validation' || value.reason === 'storage') &&
       Array.isArray(value.matches) && value.matches.every((match) => isRecord(match) && typeof match.id === 'string' && typeof match.fullName === 'string' && isNullableString(match.rnokpp)) && typeof value.message === 'string')
 }
-export type CatalogEditInput = { kind: 'program' | 'aidType'; id?: string; shortName: string; officialName: string; programId?: string; direction?: string; fundingSource?: string; isActive?: boolean; approvalId?: string | null; approvalNumber?: string; approvalDate?: string; approvalTitle?: string }
+export type CatalogEditInput = { kind: 'program' | 'aidType'; id?: string; expectedUpdatedAt?: string; shortName: string; officialName: string; programId?: string; direction?: string; fundingSource?: string; isActive?: boolean; approvalId?: string | null; approvalNumber?: string; approvalDate?: string; approvalTitle?: string }
 export type DecisionInput = { decisionNumber: string; decisionDate: string; title: string }
 export type DecisionSummary = { id: string; decisionNumber: string; decisionDate: string; title: string | null; assignmentCount: number; assignedTotalMinor: number; createdAt: string; updatedAt: string }
 export type AssignmentRecord = { id: string; createdAt: string; recipientId: string; recipientName: string; recipientIsDemo: boolean; recipientSex: 'Жінка' | 'Чоловік' | null; recipientIsVpo: boolean | null; decisionId: string; decisionNumber: string; decisionDate: string; programId: string; programName: string; aidTypeId: string; aidTypeName: string; amountMinor: number; status: AssignmentStatus; paidOn: string | null }
@@ -155,7 +168,13 @@ export function isNullableDecisionRecord(value: unknown): value is DecisionRecor
 
 export function isProgramApproval(value: unknown): value is ProgramApproval {
   return isRecord(value) && typeof value.id === 'string' && typeof value.documentNumber === 'string' &&
-    typeof value.documentDate === 'string' && isNullableString(value.title) && typeof value.programCount === 'number'
+    typeof value.documentDate === 'string' && isNullableString(value.title) && typeof value.programCount === 'number' && typeof value.updatedAt === 'string'
+}
+
+export function isProgramApprovalSaveResult(value: unknown): value is ProgramApprovalSaveResult {
+  return isRecord(value) && typeof value.ok === 'boolean' && (value.ok
+    ? isProgramApproval(value.approval)
+    : (value.reason === 'validation' || value.reason === 'not-found' || value.reason === 'conflict' || value.reason === 'storage') && typeof value.message === 'string')
 }
 
 export function isProgramApprovalList(value: unknown): value is ProgramApproval[] {
@@ -249,8 +268,8 @@ export type HromadaAidApi = {
   appName: string; platform: string
   recipients: { list: (includeArchived?: boolean) => Promise<RecipientSummary[]>; get: (id: string) => Promise<RecipientRecord | null>; save: (input: RecipientInput, id?: string, confirmSameName?: boolean, expectedUpdatedAt?: string) => Promise<RecipientSaveResult>; assignmentHistory: (id: string) => Promise<AssignmentRecord[]> }
   banks: { list: (query?: string) => Promise<BankRecord[]>; get: (id: string) => Promise<BankRecord | null>; details: (bankId: string) => Promise<BankDetail[]>; save: (input: BankInput, id?: string, expectedUpdatedAt?: string) => Promise<BankSaveResult>; remove: (id: string) => Promise<{ ok: boolean; message?: string }> }
-  catalogs: { list: (includeInactive?: boolean) => Promise<CatalogList>; save: (input: CatalogEditInput) => Promise<{ ok: boolean; message?: string }>; reorder: (input: CatalogOrderInput) => Promise<{ ok: boolean; message?: string }> }
-  programApprovals: { list: () => Promise<ProgramApproval[]>; save: (input: ProgramApprovalInput, id?: string) => Promise<{ ok: boolean; approval?: ProgramApproval; message?: string }> }
+  catalogs: { list: (includeInactive?: boolean) => Promise<CatalogList>; save: (input: CatalogEditInput) => Promise<CatalogSaveResult>; reorder: (input: CatalogOrderInput) => Promise<CatalogOrderResult> }
+  programApprovals: { list: () => Promise<ProgramApproval[]>; save: (input: ProgramApprovalInput, id?: string, expectedUpdatedAt?: string) => Promise<ProgramApprovalSaveResult> }
   decisions: { list: () => Promise<DecisionSummary[]>; get: (id: string) => Promise<DecisionRecord | null>; save: (input: DecisionInput, id?: string) => Promise<DecisionSaveResult>; addAssignments: (decisionId: string, assignments: AssignmentDraft[]) => Promise<AssignmentSaveResult> }
   assignments: { list: (year: number) => Promise<AssignmentListResult>; save: (input: AssignmentInput, id?: string) => Promise<AssignmentChangeResult>; changeStatuses: (input: AssignmentStatusBatchInput) => Promise<AssignmentStatusBatchResult> }
   dashboard: { get: (year: number) => Promise<DashboardData> }

@@ -295,6 +295,17 @@ const migrations: Migration[] = [{
     ALTER TABLE banks ADD COLUMN updated_at TEXT;
     UPDATE banks SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE updated_at IS NULL;
   `,
+}, {
+  version: 21,
+  sql: `
+    ALTER TABLE programs ADD COLUMN updated_at TEXT;
+    ALTER TABLE aid_types ADD COLUMN updated_at TEXT;
+    UPDATE programs SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE updated_at IS NULL;
+    UPDATE aid_types SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE updated_at IS NULL;
+    CREATE TABLE catalog_order_revisions (scope TEXT PRIMARY KEY, revision TEXT NOT NULL);
+    INSERT INTO catalog_order_revisions(scope,revision) VALUES ('programs',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    INSERT INTO catalog_order_revisions(scope,revision) SELECT 'aid-types:'||id,strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM programs;
+  `,
 }]
 
 const maximumSupportedSchemaVersion = Math.max(...migrations.map(({ version }) => version))
@@ -449,10 +460,11 @@ function migrate(database: DatabaseSync, currentVersion: number) {
 
 function seedReferenceData(database: DatabaseSync) {
   // Called only inside the new database's initialization transaction.
-  const addProgram = database.prepare('INSERT INTO programs(id, code, short_name, official_name) VALUES (?, ?, ?, ?)')
-  for (const program of programs) addProgram.run(program.id, program.code, program.shortName, program.officialName)
+  const now = new Date().toISOString()
+  const addProgram = database.prepare('INSERT INTO programs(id, code, short_name, official_name, updated_at) VALUES (?, ?, ?, ?, ?)')
+  for (const program of programs) addProgram.run(program.id, program.code, program.shortName, program.officialName, now)
 
-  const addAidType = database.prepare('INSERT INTO aid_types(id, code, program_id, short_name, official_name, direction, funding_source, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+  const addAidType = database.prepare('INSERT INTO aid_types(id, code, program_id, short_name, official_name, direction, funding_source, is_active, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
   for (const aidType of aidTypes) addAidType.run(
     aidType.id,
     aidType.code,
@@ -462,6 +474,7 @@ function seedReferenceData(database: DatabaseSync) {
     ('direction' in aidType ? aidType.direction : null) ?? null,
     ('fundingSource' in aidType ? aidType.fundingSource : null) ?? null,
     ('isActive' in aidType ? (aidType.isActive ? 1 : 0) : 1),
+    now,
   )
   database.exec(`
     WITH ordered AS (SELECT id, ROW_NUMBER() OVER (ORDER BY short_name,id)-1 AS position FROM programs)
@@ -469,6 +482,8 @@ function seedReferenceData(database: DatabaseSync) {
     WITH ordered AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY program_id ORDER BY short_name,id)-1 AS position FROM aid_types)
       UPDATE aid_types SET sort_order=(SELECT position FROM ordered WHERE ordered.id=aid_types.id);
   `)
+  database.prepare("INSERT OR IGNORE INTO catalog_order_revisions(scope,revision) VALUES ('programs',?)").run(now)
+  for (const program of programs) database.prepare('INSERT OR IGNORE INTO catalog_order_revisions(scope,revision) VALUES (?,?)').run(`aid-types:${program.id}`, now)
 
 }
 

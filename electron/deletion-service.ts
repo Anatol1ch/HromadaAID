@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type { DeleteEntity, DeletePreview } from './api-contract.js'
+import { orderScope, touchOrderRevision } from './catalog-order.js'
 
 type Row = Record<string, string | number | null>
 const entities = ['assignment', 'recipient', 'decision', 'program', 'aidType'] as const
@@ -93,10 +94,12 @@ export function executeDeletion(database: DatabaseSync, entity: DeleteEntity, id
     }
     if (entity === 'decision') { removeAssignments(database, 'decision_id=?', id); database.prepare('DELETE FROM decisions WHERE id=?').run(id) }
     if (entity === 'aidType') {
+      const aidType = database.prepare('SELECT program_id FROM aid_types WHERE id=?').get(id) as { program_id: string } | undefined
       removeAssignments(database, 'aid_type_id=?', id)
       database.prepare('DELETE FROM annual_aid_plans WHERE aid_type_id=?').run(id)
       database.prepare('DELETE FROM annual_plan_entries WHERE aid_type_id=?').run(id)
       database.prepare('DELETE FROM aid_types WHERE id=?').run(id)
+      if (aidType) touchOrderRevision(database, orderScope('aidType', aidType.program_id))
     }
     if (entity === 'program') {
       const approvals = database.prepare(`SELECT pa.id FROM program_approvals pa WHERE EXISTS(SELECT 1 FROM programs p WHERE p.id=? AND p.approval_id=pa.id) AND (SELECT COUNT(*) FROM programs p2 WHERE p2.approval_id=pa.id)=1`).all(id) as Row[]
@@ -109,6 +112,8 @@ export function executeDeletion(database: DatabaseSync, entity: DeleteEntity, id
       }
       database.prepare('DELETE FROM aid_types WHERE program_id=?').run(id)
       database.prepare('DELETE FROM programs WHERE id=?').run(id)
+      database.prepare('DELETE FROM catalog_order_revisions WHERE scope=?').run(orderScope('aidType', id))
+      touchOrderRevision(database, orderScope('program'))
       for (const approval of approvals) database.prepare('DELETE FROM program_approvals WHERE id=?').run(String(approval.id))
     }
     database.exec('COMMIT')

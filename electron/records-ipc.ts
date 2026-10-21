@@ -1,6 +1,8 @@
 import { listAnnualPlans, saveAnnualPlan, syncLegacyPlan } from './annual-plans.js'
 import { listCatalogs } from './catalog-data.js'
 import { reorderCatalog } from './catalog-order.js'
+import { saveCatalog } from './catalog-store.js'
+import { saveProgramApproval } from './program-approval-store.js'
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { trustedIpcMain as ipcMain } from './ipc-security.js'
@@ -208,80 +210,12 @@ export function registerRecordsIpc(database: DatabaseSync) {
 
   ipcMain.handle('catalogs:reorder', (_event, input: unknown) => reorderCatalog(database, input))
 
-  ipcMain.handle('catalogs:save', (_event, value: unknown) => {
-    if (!value || typeof value !== 'object') return { ok: false, message: 'Перевірте дані довідника.' }
-    const item = value as Record<string, unknown>
-    if ((item.kind !== 'program' && item.kind !== 'aidType') || (item.id !== undefined && typeof item.id !== 'string') ||
-      typeof item.shortName !== 'string' || !item.shortName.trim() || item.shortName.length > 250 ||
-      typeof item.officialName !== 'string' || !item.officialName.trim() || item.officialName.length > 1500) {
-      return { ok: false, message: 'Коротка та офіційна назви мають бути заповнені.' }
-    }
-    try {
-      const id = typeof item.id === 'string' && item.id ? item.id : null
-      const isActive = item.isActive === undefined ? true : item.isActive === true
-      const duplicate = (table: 'programs' | 'aid_types') => database.prepare(`SELECT id FROM ${table} WHERE (lower(trim(short_name))=lower(trim(?)) OR lower(trim(official_name))=lower(trim(?))) AND id!=? LIMIT 1`)
-        .get(String(item.shortName), String(item.officialName), id ?? '')
-      if (duplicate(item.kind === 'program' ? 'programs' : 'aid_types')) return { ok: false, message: 'Довідник із такою короткою або офіційною назвою вже існує. Перевірте наявний запис.' }
-      if (item.kind === 'program') {
-        const approvalId = typeof item.approvalId === 'string' && item.approvalId ? item.approvalId : null
-        const approvalNumber = typeof item.approvalNumber === 'string' && item.approvalNumber.trim() ? item.approvalNumber.trim() : null
-        const approvalDate = typeof item.approvalDate === 'string' && item.approvalDate ? item.approvalDate : null
-        const approvalTitle = typeof item.approvalTitle === 'string' && item.approvalTitle.trim() ? item.approvalTitle.trim() : null
-        if (approvalNumber && !/^[\w\-/№. ]{1,100}$/u.test(approvalNumber)) return { ok: false, message: 'Перевірте номер рішення про затвердження.' }
-        if (approvalDate && !isIsoDate(approvalDate)) return { ok: false, message: 'Перевірте дату рішення про затвердження.' }
-        if (approvalId && !database.prepare('SELECT 1 FROM program_approvals WHERE id=?').get(approvalId)) return { ok: false, message: 'Обране рішення про затвердження не знайдено.' }
-        if (id) {
-          const result = database.prepare('UPDATE programs SET short_name=?,official_name=?,is_active=?,approval_id=?,approval_number=?,approval_date=?,approval_title=? WHERE id=?').run(item.shortName.trim(), item.officialName.trim(), isActive ? 1 : 0, approvalId, approvalNumber, approvalDate, approvalTitle, id)
-          if (!Number(result.changes)) return { ok: false, message: 'Програму не знайдено. Оновіть довідник.' }
-        } else {
-          database.prepare('INSERT INTO programs(id,code,short_name,official_name,is_active,approval_id,approval_number,approval_date,approval_title,sort_order) VALUES(?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(sort_order),-1)+1 FROM programs))')
-            .run(randomUUID(), `PROGRAM_${randomUUID()}`, item.shortName.trim(), item.officialName.trim(), isActive ? 1 : 0, approvalId, approvalNumber, approvalDate, approvalTitle)
-        }
-      } else {
-        if (id && item.isActive === true && (database.prepare('SELECT code FROM aid_types WHERE id=?').get(id) as Row | undefined)?.code === 'SOCIAL_WAR_EMERGENCY') {
-          return { ok: false, message: 'Цей вид допомоги вимкнено через дублювання категорії та недоступний для нових призначень.' }
-        }
-        if (typeof item.programId !== 'string' || !item.programId) return { ok: false, message: 'Оберіть програму.' }
-        const programExists = database.prepare('SELECT 1 FROM programs WHERE id = ? AND is_active = 1').get(item.programId)
-        if (!programExists) return { ok: false, message: 'Обрана програма недоступна.' }
-        if (id) {
-          const result = database.prepare('UPDATE aid_types SET sort_order=CASE WHEN program_id<>? THEN (SELECT COALESCE(MAX(sort_order),-1)+1 FROM aid_types WHERE program_id=?) ELSE sort_order END,program_id=?,short_name=?,official_name=?,direction=?,funding_source=?,is_active=? WHERE id=?')
-            .run(item.programId, item.programId, item.programId, item.shortName.trim(), item.officialName.trim(), typeof item.direction === 'string' && item.direction.trim() ? item.direction.trim() : null,
-              typeof item.fundingSource === 'string' && item.fundingSource.trim() ? item.fundingSource.trim() : null, isActive ? 1 : 0, id)
-          if (!Number(result.changes)) return { ok: false, message: 'Вид допомоги не знайдено. Оновіть довідник.' }
-        } else {
-          database.prepare('INSERT INTO aid_types(id,code,program_id,short_name,official_name,direction,funding_source,is_active,sort_order) VALUES(?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(sort_order),-1)+1 FROM aid_types WHERE program_id=?))')
-            .run(randomUUID(), `AID_${randomUUID()}`, item.programId, item.shortName.trim(), item.officialName.trim(),
-              typeof item.direction === 'string' && item.direction.trim() ? item.direction.trim() : null,
-              typeof item.fundingSource === 'string' && item.fundingSource.trim() ? item.fundingSource.trim() : null, isActive ? 1 : 0, item.programId)
-        }
-      }
-      return { ok: true }
-    } catch { return { ok: false, message: 'Не вдалося зберегти зміни довідника.' } }
-  })
+  ipcMain.handle('catalogs:save', (_event, value: unknown) => saveCatalog(database, value))
 
   ipcMain.handle('program-approvals:list', () => listProgramApprovals(database))
 
-  ipcMain.handle('program-approvals:save', (_event, value: unknown, idValue?: unknown) => {
-    if (!value || typeof value !== 'object') return { ok: false, message: 'Перевірте реквізити рішення.' }
-    const source = value as Record<string, unknown>
-    const documentNumber = typeof source.documentNumber === 'string' ? source.documentNumber.trim() : ''
-    const documentDate = typeof source.documentDate === 'string' ? source.documentDate.trim() : ''
-    const title = typeof source.title === 'string' ? source.title.trim() : ''
-    if (!documentNumber || documentNumber.length > 100 || !isIsoDate(documentDate) || title.length > 300) return { ok: false, message: 'Вкажіть номер і коректну дату рішення про затвердження.' }
-    const id = typeof idValue === 'string' && idValue ? idValue : null
-    const savedId = id ?? randomUUID(), now = new Date().toISOString()
-    try {
-      const conflict = database.prepare('SELECT id FROM program_approvals WHERE document_number=? AND document_date=? AND id!=?').get(documentNumber, documentDate, id ?? '')
-      if (conflict) return { ok: false, message: 'Рішення з таким номером і датою вже є в довіднику.' }
-      if (id) {
-        const result = database.prepare('UPDATE program_approvals SET document_number=?,document_date=?,title=?,updated_at=? WHERE id=?').run(documentNumber, documentDate, title || null, now, id)
-        if (!Number(result.changes)) return { ok: false, message: 'Рішення не знайдено. Оновіть довідник.' }
-      } else database.prepare('INSERT INTO program_approvals(id,document_number,document_date,title,created_at,updated_at) VALUES(?,?,?,?,?,?)').run(savedId, documentNumber, documentDate, title || null, now, now)
-      const approval = database.prepare(`SELECT pa.id,pa.document_number AS documentNumber,pa.document_date AS documentDate,pa.title,COUNT(p.id) AS programCount FROM program_approvals pa LEFT JOIN programs p ON p.approval_id=pa.id WHERE pa.id=? GROUP BY pa.id`).get(savedId)
-      return { ok: true, approval }
-    } catch { return { ok: false, message: 'Не вдалося зберегти рішення про затвердження програми.' } }
-  })
+  ipcMain.handle('program-approvals:save', (_event, value: unknown, idValue?: unknown, expectedUpdatedAt?: unknown) =>
+    saveProgramApproval(database, value, idValue, expectedUpdatedAt))
 
   ipcMain.handle('decisions:list', (): DecisionSummary[] => {
     return listDecisions(database)

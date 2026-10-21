@@ -29,6 +29,6 @@ export function listAnnualPlanEntries(database: DatabaseSync, yearValue: unknown
 }
 
 export function listProgramApprovals(database: DatabaseSync): ProgramApproval[] {
-  return database.prepare(`SELECT pa.id,pa.document_number AS documentNumber,pa.document_date AS documentDate,pa.title,COUNT(p.id) AS programCount
+  return database.prepare(`SELECT pa.id,pa.document_number AS documentNumber,pa.document_date AS documentDate,pa.title,pa.updated_at AS updatedAt,COUNT(p.id) AS programCount
     FROM program_approvals pa LEFT JOIN programs p ON p.approval_id=pa.id GROUP BY pa.id ORDER BY pa.document_date DESC,pa.document_number`).all() as ProgramApproval[]
 }

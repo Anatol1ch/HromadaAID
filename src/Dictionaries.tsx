@@ -42,7 +42,7 @@ function DictionaryTabGroup({ tabs, section, onSelect, management }: { tabs: rea
 export default function Dictionaries() {
   const { year } = useReportingYear()
   const [section, setSection] = useState<Section>('people')
-  const [data, setData] = useState<CatalogData>({ programs: [], aidTypes: [] })
+  const [data, setData] = useState<CatalogData>({ programs: [], aidTypes: [], programOrderRevision: '', aidTypeOrderRevisions: {} })
   const [deletePreview, setDeletePreview] = useState<DeletePreview | null>(null)
   const [decisions, setDecisions] = useState<DecisionSummary[]>([])
   const [draft, setDraft] = useState<CatalogEditInput | null>(null)
@@ -86,7 +86,8 @@ export default function Dictionaries() {
       return { ...current, aidTypes: current.aidTypes.map(type => type.programId === input.programId ? byId.get(input.ids[index++])! : type) }
     })
     try {
-      const result = await catalogRepository.reorder(input)
+      const expectedOrderRevision = input.kind === 'program' ? data.programOrderRevision : data.aidTypeOrderRevisions[input.programId ?? '']
+      const result = await catalogRepository.reorder({ ...input, expectedOrderRevision })
       if (!result.ok) { setData(before); setError(result.message ?? 'Не вдалося зберегти порядок.'); return false }
       return true
     } catch { setData(before); setError('Не вдалося зберегти порядок. Попередню послідовність відновлено.'); return false }
@@ -94,12 +95,12 @@ export default function Dictionaries() {
   }
 
   const editProgram = (program?: ProgramOption) => {
-    const next = program ? { kind: 'program' as const, id: program.id, shortName: program.shortName, officialName: program.officialName, isActive: program.isActive, approvalId: null, approvalNumber: program.approvalNumber ?? '', approvalDate: program.approvalDate ?? '', approvalTitle: program.approvalTitle ?? '' }
+    const next = program ? { kind: 'program' as const, id: program.id, expectedUpdatedAt: program.updatedAt, shortName: program.shortName, officialName: program.officialName, isActive: program.isActive, approvalId: null, approvalNumber: program.approvalNumber ?? '', approvalDate: program.approvalDate ?? '', approvalTitle: program.approvalTitle ?? '' }
       : blankCatalog('program')
     setDraft(next); setInitial(JSON.stringify(next)); setError('')
   }
   const editAidType = (type?: AidTypeOption, programId = '') => {
-    const next = type ? { kind: 'aidType' as const, id: type.id, shortName: type.shortName, officialName: type.officialName, programId: type.programId, direction: type.direction ?? '', fundingSource: type.fundingSource ?? '', isActive: type.isActive }
+    const next = type ? { kind: 'aidType' as const, id: type.id, expectedUpdatedAt: type.updatedAt, shortName: type.shortName, officialName: type.officialName, programId: type.programId, direction: type.direction ?? '', fundingSource: type.fundingSource ?? '', isActive: type.isActive }
       : blankCatalog('aidType', programId)
     setDraft(next); setInitial(JSON.stringify(next)); setError('')
   }
