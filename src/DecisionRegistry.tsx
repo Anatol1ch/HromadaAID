@@ -35,6 +35,7 @@ function DecisionRegistry() {
   const [error, setError] = useState('')
   const [editor, setEditor] = useState<DecisionInput | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingUpdatedAt, setEditingUpdatedAt] = useState<string | null>(null)
   const [savingDecision, setSavingDecision] = useState(false)
   const [selected, setSelected] = useState<DecisionRecord | null>(null)
   const [deletePreview, setDeletePreview] = useState<DeletePreview | null>(null)
@@ -45,6 +46,7 @@ function DecisionRegistry() {
   const [assignmentError, setAssignmentError] = useState('')
   const [loadingChoices, setLoadingChoices] = useState(false)
   const [savingAssignments, setSavingAssignments] = useState(false)
+  const assignmentRequestId = useRef<string | null>(null)
   const [quickRecipient, setQuickRecipient] = useState<number | null>(null)
   const initialEditor = useRef('')
 
@@ -57,7 +59,7 @@ function DecisionRegistry() {
     finally { if (sequence === loadSequence.current) setLoading(false) }
   }
 
-  useEffect(() => { setSelected(null); setEditor(null); setRows([]); setQuickRecipient(null); void loadDecisions() }, [year])
+  useEffect(() => { setSelected(null); setEditor(null); setEditingUpdatedAt(null); setRows([]); assignmentRequestId.current = null; setQuickRecipient(null); void loadDecisions() }, [year])
 
   const openDecision = async (id: string) => {
     setError('')
@@ -68,7 +70,7 @@ function DecisionRegistry() {
     } catch { setError('Не вдалося відкрити рішення. Спробуйте оновити список.') }
   }
 
-  const beginCreate = () => { const initial = blankDecision(year); initialEditor.current = JSON.stringify(initial); setSelected(null); setEditor(initial); setEditingId(null); setError('') }
+  const beginCreate = () => { const initial = blankDecision(year); initialEditor.current = JSON.stringify(initial); setSelected(null); setEditor(initial); setEditingId(null); setEditingUpdatedAt(null); setError('') }
 
   const saveDecision = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -76,10 +78,10 @@ function DecisionRegistry() {
     setSavingDecision(true)
     setError('')
     try {
-      const result = await decisionRepository.save(editor, editingId ?? undefined)
+      const result = await decisionRepository.save(editor, editingId ?? undefined, editingUpdatedAt ?? undefined)
       if (!result.ok) { setError(result.message); return }
       setEditor(null)
-      setEditingId(null)
+      setEditingId(null); setEditingUpdatedAt(null)
       await loadDecisions()
       await openDecision(result.decision.id)
     } catch { setError('Не вдалося зберегти рішення. Дані у формі залишилися — спробуйте ще раз.') }
@@ -91,10 +93,11 @@ function DecisionRegistry() {
     setEditor({ decisionNumber: selected.decisionNumber, decisionDate: selected.decisionDate, title: selected.title ?? '' })
     initialEditor.current = JSON.stringify({ decisionNumber: selected.decisionNumber, decisionDate: selected.decisionDate, title: selected.title ?? '' })
     setEditingId(selected.id)
+    setEditingUpdatedAt(selected.updatedAt)
     setError('')
   }
 
-  const closeEditor = () => { setEditor(null); setEditingId(null); setError('') }
+  const closeEditor = () => { setEditor(null); setEditingId(null); setEditingUpdatedAt(null); setError('') }
 
   useCatalogUpdates(() => {
     void decisionRepository.catalogs().then(catalog => { setPrograms(catalog.programs); setAidTypes(catalog.aidTypes) }).catch(() => setAssignmentError('Не вдалося оновити довідники.'))
@@ -108,7 +111,11 @@ function DecisionRegistry() {
       // Re-read on every opening: a previous visit must not cache deleted/renamed choices.
       const [catalog, people] = await Promise.all([decisionRepository.catalogs(), recipientRepository.list()])
       setPrograms(catalog.programs); setAidTypes(catalog.aidTypes); setRecipients(people)
-      setRows(current => current.length ? current : [makeAssignmentRow(catalog.programs[0]?.id ?? '', catalog.aidTypes)])
+      setRows(current => {
+        if (current.length) return current
+        assignmentRequestId.current = crypto.randomUUID()
+        return [makeAssignmentRow(catalog.programs[0]?.id ?? '', catalog.aidTypes)]
+      })
     } catch {
       setAssignmentError('Не вдалося завантажити отримувачів або довідники. Перевірте локальне сховище.')
     } finally { setLoadingChoices(false) }
@@ -144,9 +151,11 @@ function DecisionRegistry() {
     setSavingAssignments(true)
     setAssignmentError('')
     try {
-      const result = await decisionRepository.addAssignments(selected.id, drafts)
+      const requestId = assignmentRequestId.current
+      if (!requestId) { setAssignmentError('Не вдалося підготувати операцію збереження. Закрийте форму та відкрийте її повторно.'); return }
+      const result = await decisionRepository.addAssignments(selected.id, drafts, requestId)
       if (!result.ok) { setAssignmentError(result.message); return }
-      setRows([])
+      setRows([]); assignmentRequestId.current = null
       await openDecision(selected.id)
       await loadDecisions()
     } catch { setAssignmentError('Не вдалося зберегти призначення. Дані форми залишилися — спробуйте ще раз.') }
@@ -182,13 +191,13 @@ function DecisionRegistry() {
       </tr>)}</tbody></table></div> : <div className="registry-empty"><ClipboardList size={24}/><strong>Рішень поки немає</strong><span>Додайте рішення виконкому, щоб зареєструвати його реквізити та призначення.</span><button type="button" className="secondary-button" onClick={beginCreate}><Plus size={17}/>Додати рішення</button></div>}
     </section>
 
-    {selected && <Modal title={`Рішення виконкому № ${selected.decisionNumber}`} description={`${formatDate(selected.decisionDate)}${selected.title ? ` • ${selected.title}` : ''}`} onClose={() => { setSelected(null); setRows([]) }} size="large">
+    {selected && <Modal title={`Рішення виконкому № ${selected.decisionNumber}`} description={`${formatDate(selected.decisionDate)}${selected.title ? ` • ${selected.title}` : ''}`} onClose={() => { setSelected(null); setRows([]); assignmentRequestId.current = null }} size="large">
       <div className="decision-detail-heading"><div><div className="eyebrow">ПОВ’ЯЗАНІ ПРИЗНАЧЕННЯ</div></div><div className="decision-detail-actions"><button className="secondary-button" onClick={startEdit}><Pencil size={16}/>Редагувати реквізити</button><button className="secondary-button danger-action" onClick={() => void deleteDecision()}><Trash2 size={16}/>Видалити рішення</button></div></div>
       {error && <div className="registry-alert" role="alert">{error}</div>}
       <div className="decision-assignment-summary"><span>{selected.assignments.length} записів</span><strong>{formatMoneyMinor(selected.assignedTotalMinor)}</strong><span>загальна призначена сума</span></div>
       {selected.assignments.length ? <div className="registry-table-wrap"><table className="registry-table decision-assignment-table"><thead><tr><th>Отримувач</th><th>Програма / вид допомоги</th><th>Сума</th><th>Статус</th></tr></thead><tbody>{selected.assignments.map((assignment) => <tr key={assignment.id}><td><span className="registry-name">{assignment.recipientName}</span></td><td><span className="registry-name">{assignment.aidTypeName}</span><span className="decision-date-cell">{assignment.programName}</span></td><td className="assignment-amount">{formatMoneyMinor(assignment.amountMinor)}</td><td><StatusBadge status={assignment.status}/></td></tr>)}</tbody></table></div> : <div className="registry-empty decision-no-assignments">Для цього рішення ще не додано призначень.</div>}
-      {!rows.length ? <div className="decision-add-action"><p>Додавайте призначення до вибраного рішення.</p><button className="primary-button" onClick={() => void prepareAssignments()} disabled={loadingChoices}><Plus size={18}/>{loadingChoices ? 'Завантаження…' : 'Додати призначення'}</button></div> : <Modal title="Додати призначення до рішення" description="Додавайте одного або кількох отримувачів до цього рішення." onClose={() => { setRows([]); setAssignmentError('') }} dirty={rows.length > 1 || rows.some((row) => !!row.recipientId || !!row.amount)} size="large"><form className="assignment-builder" onSubmit={addAssignments}>
-        <div className="assignment-builder-heading"><div><h3>Нові призначення</h3><p>Додавайте одного або кількох отримувачів до цього рішення.</p></div><button type="button" className="icon-button" aria-label="Закрити додавання призначень" onClick={() => confirmModalClose(true, () => { setRows([]); setAssignmentError('') })}><X size={18}/></button></div>
+      {!rows.length ? <div className="decision-add-action"><p>Додавайте призначення до вибраного рішення.</p><button className="primary-button" onClick={() => void prepareAssignments()} disabled={loadingChoices}><Plus size={18}/>{loadingChoices ? 'Завантаження…' : 'Додати призначення'}</button></div> : <Modal title="Додати призначення до рішення" description="Додавайте одного або кількох отримувачів до цього рішення." onClose={() => { setRows([]); assignmentRequestId.current = null; setAssignmentError('') }} dirty={rows.length > 1 || rows.some((row) => !!row.recipientId || !!row.amount)} size="large"><form className="assignment-builder" onSubmit={addAssignments}>
+        <div className="assignment-builder-heading"><div><h3>Нові призначення</h3><p>Додавайте одного або кількох отримувачів до цього рішення.</p></div><button type="button" className="icon-button" aria-label="Закрити додавання призначень" onClick={() => confirmModalClose(true, () => { setRows([]); assignmentRequestId.current = null; setAssignmentError('') })}><X size={18}/></button></div>
         {rows.map((row, index) => <div className="assignment-draft-row" key={index}>
           <div className="recipient-field assignment-recipient-field"><span>Отримувач *</span><div className="assignment-recipient-select"><Select label="Отримувач" required searchable value={row.recipientId} placeholder="Знайдіть за ПІБ або РНОКПП" options={recipients.map((person) => ({ value: person.id, label: person.fullName + (person.isDemo ? ' • демо' : ''), description: person.rnokpp ? `РНОКПП ${person.rnokpp}` : 'РНОКПП не вказано', searchText: person.rnokpp ?? '' }))} onChange={(value) => updateRow(index, { recipientId: value })}/><button type="button" className="table-action" onClick={() => openQuickAdd(index)}><UserPlus size={16}/><span>Створити</span></button></div></div>
           <label className="recipient-field"><span>Програма *</span><Select label="Програма" required value={row.programId} placeholder="Оберіть програму" options={programs.map((program) => ({ value: program.id, label: program.shortName }))} onChange={(value) => updateRow(index, { programId: value })}/></label>

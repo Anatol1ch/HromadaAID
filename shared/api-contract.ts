@@ -166,6 +166,18 @@ export function isNullableDecisionRecord(value: unknown): value is DecisionRecor
   return value === null || isDecisionRecord(value)
 }
 
+export function isDecisionSaveResult(value: unknown): value is DecisionSaveResult {
+  return isRecord(value) && typeof value.ok === 'boolean' && (value.ok
+    ? isDecisionSummary(value.decision)
+    : (value.reason === 'validation' || value.reason === 'conflict' || value.reason === 'not-found' || value.reason === 'storage') && typeof value.message === 'string')
+}
+
+export function isAssignmentSaveResult(value: unknown): value is AssignmentSaveResult {
+  return isRecord(value) && typeof value.ok === 'boolean' && (value.ok
+    ? isAssignmentRecordList(value.assignments)
+    : (value.reason === 'validation' || value.reason === 'not-found' || value.reason === 'conflict' || value.reason === 'storage') && typeof value.message === 'string')
+}
+
 export function isProgramApproval(value: unknown): value is ProgramApproval {
   return isRecord(value) && typeof value.id === 'string' && typeof value.documentNumber === 'string' &&
     typeof value.documentDate === 'string' && isNullableString(value.title) && typeof value.programCount === 'number' && typeof value.updatedAt === 'string'
@@ -256,7 +268,7 @@ export type ReportExportResult = { ok: boolean; canceled?: boolean; message?: st
 export type DecisionRecord = DecisionSummary & { assignments: AssignmentRecord[] }
 export type AssignmentDraft = { recipientId: string; aidTypeId: string; amountMinor: number; status: AssignmentStatus; paidOn?: string }
 export type DecisionSaveResult = | { ok: true; decision: DecisionSummary } | { ok: false; reason: 'validation' | 'conflict' | 'not-found' | 'storage'; message: string }
-export type AssignmentSaveResult = | { ok: true; assignments: AssignmentRecord[] } | { ok: false; reason: 'validation' | 'not-found' | 'storage'; message: string }
+export type AssignmentSaveResult = | { ok: true; assignments: AssignmentRecord[] } | { ok: false; reason: 'validation' | 'not-found' | 'conflict' | 'storage'; message: string }
 export type DeleteEntity = 'assignment' | 'recipient' | 'decision' | 'program' | 'aidType'
 export type DeletePreview = { entity: DeleteEntity; id: string; name: string; dependencies: { label: string; count: number }[] }
 export type StatementKind = 'personal' | 'summary'
@@ -270,7 +282,7 @@ export type HromadaAidApi = {
   banks: { list: (query?: string) => Promise<BankRecord[]>; get: (id: string) => Promise<BankRecord | null>; details: (bankId: string) => Promise<BankDetail[]>; save: (input: BankInput, id?: string, expectedUpdatedAt?: string) => Promise<BankSaveResult>; remove: (id: string) => Promise<{ ok: boolean; message?: string }> }
   catalogs: { list: (includeInactive?: boolean) => Promise<CatalogList>; save: (input: CatalogEditInput) => Promise<CatalogSaveResult>; reorder: (input: CatalogOrderInput) => Promise<CatalogOrderResult> }
   programApprovals: { list: () => Promise<ProgramApproval[]>; save: (input: ProgramApprovalInput, id?: string, expectedUpdatedAt?: string) => Promise<ProgramApprovalSaveResult> }
-  decisions: { list: () => Promise<DecisionSummary[]>; get: (id: string) => Promise<DecisionRecord | null>; save: (input: DecisionInput, id?: string) => Promise<DecisionSaveResult>; addAssignments: (decisionId: string, assignments: AssignmentDraft[]) => Promise<AssignmentSaveResult> }
+  decisions: { list: () => Promise<DecisionSummary[]>; get: (id: string) => Promise<DecisionRecord | null>; save: (input: DecisionInput, id?: string, expectedUpdatedAt?: string) => Promise<DecisionSaveResult>; addAssignments: (decisionId: string, assignments: AssignmentDraft[], requestId: string) => Promise<AssignmentSaveResult> }
   assignments: { list: (year: number) => Promise<AssignmentListResult>; save: (input: AssignmentInput, id?: string) => Promise<AssignmentChangeResult>; changeStatuses: (input: AssignmentStatusBatchInput) => Promise<AssignmentStatusBatchResult> }
   dashboard: { get: (year: number) => Promise<DashboardData> }
   reports: { get: (sheet: ReportSheet) => Promise<ReportSourceRow[]>; summary: (year: number, period: ReportPeriod) => Promise<ReportSummary>; annualPlanList: (year: number) => Promise<AnnualAidPlan[]>; annualPlanSave: (input: AnnualAidPlanInput) => Promise<{ ok: boolean; message?: string }>; generate: (snapshot: ReportExportSnapshot) => Promise<{ ok: true; document: PreparedReport } | { ok: false; message: string }>; savePdf: (documentId: string) => Promise<ReportExportResult>; saveExcel: (documentId: string) => Promise<ReportExportResult>; release: (documentId: string) => Promise<void>; planList: (year: number) => Promise<AnnualPlanEntry[]>; planSave: (input: AnnualPlanInput, id?: string) => Promise<{ ok: boolean; message?: string }>; planRemove: (id: string) => Promise<{ ok: boolean; message?: string }> }

@@ -29,8 +29,8 @@ const api: HromadaAidApi = {
   decisions: {
     list: () => invoke('decisions:list'),
     get: (id) => invoke('decisions:get', id),
-    save: (input, id) => invoke('decisions:save', input, id),
-    addAssignments: (decisionId, assignments) => invoke('decisions:add-assignments', decisionId, assignments),
+    save: (input, id, expectedUpdatedAt) => invoke('decisions:save', input, id, expectedUpdatedAt),
+    addAssignments: (decisionId, assignments, requestId) => invoke('decisions:add-assignments', decisionId, assignments, requestId),
   },
   assignments: {
     list: (year) => invoke('assignments:list', year),

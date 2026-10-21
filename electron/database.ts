@@ -306,6 +306,18 @@ const migrations: Migration[] = [{
     INSERT INTO catalog_order_revisions(scope,revision) VALUES ('programs',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
     INSERT INTO catalog_order_revisions(scope,revision) SELECT 'aid-types:'||id,strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM programs;
   `,
+}, {
+  version: 22,
+  sql: `
+    CREATE TABLE decision_assignment_requests (
+      request_id TEXT PRIMARY KEY,
+      decision_id TEXT NOT NULL REFERENCES decisions(id) ON DELETE CASCADE,
+      payload_hash TEXT NOT NULL,
+      result_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_decision_assignment_requests_decision ON decision_assignment_requests(decision_id,created_at);
+  `,
 }]
 
 const maximumSupportedSchemaVersion = Math.max(...migrations.map(({ version }) => version))

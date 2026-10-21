@@ -12,6 +12,7 @@ import { saveRecipient } from '../../electron/recipient-store.js'
 import { listAnnualPlans } from '../../electron/annual-plans.js'
 import { listAnnualPlanEntries, listProgramApprovals, listReportSourceRows } from '../../electron/report-read-data.js'
 import { saveProgramApproval } from '../../electron/program-approval-store.js'
+import { addDecisionAssignments, saveDecision } from '../../electron/decision-store.js'
 import { listStatementAssignments } from '../../electron/statement-list-data.js'
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, BankSaveResult, CatalogList, DashboardData, DecisionRecord, DecisionSummary, HealthResponse, ProgramApproval, RecipientRecord, RecipientSaveResult, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from '../../shared/api-contract.js'
 
@@ -92,6 +93,27 @@ export function createApp(database: DatabaseSync): FastifyInstance {
 
   app.get<{ Params: { id: string } }>('/api/decisions/:id', async (request): Promise<DecisionRecord | null> =>
     getDecision(database, request.params.id))
+
+  app.post<{ Body: unknown }>('/api/decisions', async (request, reply) => {
+    const result = isRecord(request.body) && 'input' in request.body
+      ? saveDecision(database, request.body.input)
+      : { ok: false as const, reason: 'validation' as const, message: 'Некоректні дані рішення.' }
+    return reply.status(saveStatus(result)).send(result)
+  })
+
+  app.put<{ Params: { id: string }; Body: unknown }>('/api/decisions/:id', async (request, reply) => {
+    const result = isRecord(request.body) && 'input' in request.body && typeof request.body.expectedUpdatedAt === 'string' && request.body.expectedUpdatedAt
+      ? saveDecision(database, request.body.input, request.params.id, request.body.expectedUpdatedAt)
+      : { ok: false as const, reason: 'validation' as const, message: 'Для редагування потрібна початкова версія рішення.' }
+    return reply.status(saveStatus(result)).send(result)
+  })
+
+  app.post<{ Params: { id: string }; Body: unknown }>('/api/decisions/:id/assignments', async (request, reply) => {
+    const result = isRecord(request.body) && Array.isArray(request.body.assignments) && typeof request.body.requestId === 'string'
+      ? addDecisionAssignments(database, request.params.id, request.body.assignments, request.body.requestId)
+      : { ok: false as const, reason: 'validation' as const, message: 'Некоректний пакет призначень.' }
+    return reply.status(saveStatus(result)).send(result)
+  })
 
   app.get<{ Querystring: { year?: string } }>('/api/assignments', async (request): Promise<AssignmentListResult> =>
     listAssignments(database, request.query.year === undefined ? undefined : Number(request.query.year)))

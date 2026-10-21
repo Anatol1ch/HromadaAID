@@ -25,7 +25,7 @@ import type { LucideIcon } from 'lucide-react'
 
 type CatalogData = Awaited<ReturnType<typeof window.hromadaAid.catalogs.list>>
 type Section = 'people' | 'programs' | 'decisions' | 'banks' | 'plans'
-type DecisionDraft = DecisionInput & { id?: string }
+type DecisionDraft = DecisionInput & { id?: string; expectedUpdatedAt?: string }
 type DictionaryTab = { key: Section; label: string; icon: LucideIcon }
 const dictionaryTabGroups: readonly (readonly DictionaryTab[])[] = [
   [{ key: 'people', label: 'Отримувачі', icon: Users }, { key: 'decisions', label: 'Рішення виконкому', icon: FileCheck2 }, { key: 'banks', label: 'Банки', icon: Landmark }],
@@ -126,8 +126,8 @@ export default function Dictionaries() {
     event.preventDefault(); if (!decisionDraft || savingRef.current) return
     savingRef.current = true; setSaving(true); setError('')
     try {
-      const { id, ...input } = decisionDraft
-      const result = await window.hromadaAid.decisions.save(input, id)
+      const { id, expectedUpdatedAt, ...input } = decisionDraft
+      const result = await window.hromadaAid.decisions.save(input, id, expectedUpdatedAt)
       if (!result.ok) { setError(result.message); return }
       setDecisionDraft(null); await refresh()
     } catch { setError('Не вдалося зберегти рішення. Введені дані залишилися у формі.') }
@@ -153,7 +153,7 @@ export default function Dictionaries() {
       {section === 'decisions' && <>
         <DictionaryToolbar loading={loading} unavailable={Boolean(loadError)} title="Рішення виконкому" count={`Рішень: ${decisions.length}`}><button className="primary-button" onClick={openNewDecision}><Plus size={17}/>Додати рішення</button></DictionaryToolbar>
         <DictionaryTable loading={loading} error={loadError} onRetry={() => void refresh()} label="Рішення виконкому" className="dictionary-decisions" empty={!decisions.length ? `За ${year} рік рішень поки немає. Додайте перше рішення.` : undefined} columns={[{label:'Номер рішення'},{label:'Дата рішення',width:'24%'},{label:'Пов’язаних призначень',width:'30%',className:'dictionary-center'},{label:'Дії',width:'94px',className:'dictionary-actions-cell'}]}>
-          {decisions.map(item => <tr key={item.id}><td><strong className="registry-name">№ {item.decisionNumber}</strong></td><td className="dictionary-nowrap">{formatDate(item.decisionDate)}</td><td className="dictionary-center dictionary-number">{item.assignmentCount}</td><td className="dictionary-actions-cell"><div className="registry-row-actions"><button className="table-action" title="Редагувати рішення" aria-label={`Редагувати рішення: № ${item.decisionNumber}`} onClick={() => { const next = { id: item.id, decisionNumber: item.decisionNumber, decisionDate: item.decisionDate, title: item.title ?? '' }; setDecisionDraft(next); setInitial(JSON.stringify(next)); setError('') }}><Pencil size={16}/></button><button className="table-action danger-action" title="Видалити рішення" onClick={() => void requestDelete('decision', item.id)} aria-label={`Видалити рішення: № ${item.decisionNumber}`}><Trash2 size={16}/></button></div></td></tr>)}
+          {decisions.map(item => <tr key={item.id}><td><strong className="registry-name">№ {item.decisionNumber}</strong></td><td className="dictionary-nowrap">{formatDate(item.decisionDate)}</td><td className="dictionary-center dictionary-number">{item.assignmentCount}</td><td className="dictionary-actions-cell"><div className="registry-row-actions"><button className="table-action" title="Редагувати рішення" aria-label={`Редагувати рішення: № ${item.decisionNumber}`} onClick={() => { const next = { id: item.id, expectedUpdatedAt: item.updatedAt, decisionNumber: item.decisionNumber, decisionDate: item.decisionDate, title: item.title ?? '' }; setDecisionDraft(next); setInitial(JSON.stringify(next)); setError('') }}><Pencil size={16}/></button><button className="table-action danger-action" title="Видалити рішення" onClick={() => void requestDelete('decision', item.id)} aria-label={`Видалити рішення: № ${item.decisionNumber}`}><Trash2 size={16}/></button></div></td></tr>)}
         </DictionaryTable>
       </>}
     </section>}
