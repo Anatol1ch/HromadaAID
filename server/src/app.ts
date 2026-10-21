@@ -2,9 +2,19 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
 import { bankDetails, getBank, listBanks } from '../../electron/bank-store.js'
 import { getDecision, listAssignments, listDecisions, listRecipientAssignmentHistory } from '../../electron/assignment-data.js'
+import { resolveAccountingYear } from '../../electron/accounting-year.js'
 import { listCatalogs } from '../../electron/catalog-data.js'
+import { dashboardSummary, reportSummary } from '../../electron/financial-summary.js'
 import { getRecipient, listRecipients } from '../../electron/recipient-data.js'
-import type { AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, CatalogList, DecisionRecord, DecisionSummary, HealthResponse, RecipientRecord, RecipientSummary } from '../../shared/api-contract.js'
+import { listAnnualPlans } from '../../electron/annual-plans.js'
+import { listAnnualPlanEntries, listProgramApprovals, listReportSourceRows } from '../../electron/report-read-data.js'
+import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, CatalogList, DashboardData, DecisionRecord, DecisionSummary, HealthResponse, ProgramApproval, RecipientRecord, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from '../../shared/api-contract.js'
+
+function readJsonQuery(value: string | undefined): unknown {
+  if (value === undefined) return undefined
+  try { return JSON.parse(value) }
+  catch { return undefined }
+}
 
 export function createApp(database: DatabaseSync): FastifyInstance {
   const app = Fastify({ logger: true })
@@ -41,6 +51,23 @@ export function createApp(database: DatabaseSync): FastifyInstance {
 
   app.get<{ Querystring: { year?: string } }>('/api/assignments', async (request): Promise<AssignmentListResult> =>
     listAssignments(database, request.query.year === undefined ? undefined : Number(request.query.year)))
+
+  app.get('/api/program-approvals', async (): Promise<ProgramApproval[]> => listProgramApprovals(database))
+
+  app.get<{ Querystring: { year?: string } }>('/api/dashboard', async (request): Promise<DashboardData> =>
+    dashboardSummary(database, request.query.year === undefined ? undefined : Number(request.query.year)))
+
+  app.get<{ Querystring: { sheet?: string } }>('/api/reports/source-rows', async (request): Promise<ReportSourceRow[]> =>
+    listReportSourceRows(database, request.query.sheet))
+
+  app.get<{ Querystring: { year?: string; period?: string } }>('/api/reports/summary', async (request): Promise<ReportSummary> =>
+    reportSummary(database, request.query.year === undefined ? undefined : Number(request.query.year), readJsonQuery(request.query.period) as ReportPeriod))
+
+  app.get<{ Querystring: { year?: string } }>('/api/reports/annual-plans', async (request): Promise<AnnualAidPlan[]> =>
+    listAnnualPlans(database, resolveAccountingYear(request.query.year === undefined ? undefined : Number(request.query.year))))
+
+  app.get<{ Querystring: { year?: string } }>('/api/reports/plan-entries', async (request): Promise<AnnualPlanEntry[]> =>
+    listAnnualPlanEntries(database, request.query.year === undefined ? undefined : Number(request.query.year)))
 
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(error)

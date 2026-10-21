@@ -11,8 +11,8 @@ import { cleanupGeneratedStatements, registerStatementsIpc } from './statements-
 import { configureIpcSecurity, isTrustedAppUrl, registerRemoteIpcBlockers, trustedIpcMain } from './ipc-security.js'
 import { ElectronRuntimeConfigError, readElectronRuntimeConfig, type ElectronRuntimeConfig } from './runtime-config.js'
 import { HttpClient } from './http-client.js'
-import type { AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, CatalogList, DecisionRecord, DecisionSummary, RecipientRecord, RecipientSummary } from './api-contract.js'
-import { isAssignmentListResult, isAssignmentRecordList, isBankDetailList, isBankRecordList, isCatalogList, isDecisionSummaryList, isNullableBankRecord, isNullableDecisionRecord, isNullableRecipientRecord, isRecipientSummaryList } from '../shared/api-contract.js'
+import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, CatalogList, DashboardData, DecisionRecord, DecisionSummary, ProgramApproval, RecipientRecord, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from './api-contract.js'
+import { isAnnualAidPlanList, isAnnualPlanEntryList, isAssignmentListResult, isAssignmentRecordList, isBankDetailList, isBankRecordList, isCatalogList, isDashboardData, isDecisionSummaryList, isNullableBankRecord, isNullableDecisionRecord, isNullableRecipientRecord, isProgramApprovalList, isRecipientSummaryList, isReportSourceRowList, isReportSummary } from '../shared/api-contract.js'
 
 // Match the future Windows package/shortcut identity without changing userData.
 if (process.platform === 'win32') app.setAppUserModelId('local.hromadaaid')
@@ -135,7 +135,7 @@ if (!hasSingleInstanceLock) {
         registerStatementsIpc(database)
       } else {
         const http = new HttpClient(runtimeConfig.apiUrl)
-        registerRemoteIpcBlockers(['catalogs:list', 'recipients:list', 'recipients:get', 'recipients:assignment-history', 'banks:list', 'banks:get', 'banks:details', 'decisions:list', 'decisions:get', 'assignments:list'])
+        registerRemoteIpcBlockers(['catalogs:list', 'recipients:list', 'recipients:get', 'recipients:assignment-history', 'banks:list', 'banks:get', 'banks:details', 'decisions:list', 'decisions:get', 'assignments:list', 'program-approvals:list', 'dashboard:get', 'reports:get', 'reports:summary', 'reports:annual-plan-list', 'reports:plan-list'])
         trustedIpcMain.handle('catalogs:list', async (_event, includeInactiveValue: unknown): Promise<CatalogList> =>
           http.getJson(includeInactiveValue === true ? '/api/catalogs?includeInactive=true' : '/api/catalogs', isCatalogList))
         trustedIpcMain.handle('recipients:list', async (): Promise<RecipientSummary[]> =>
@@ -170,6 +170,29 @@ if (!hasSingleInstanceLock) {
         trustedIpcMain.handle('assignments:list', async (_event, yearValue: unknown): Promise<AssignmentListResult> => {
           const path = yearValue === undefined ? '/api/assignments' : `/api/assignments?year=${encodeURIComponent(String(yearValue))}`
           return http.getJson(path, isAssignmentListResult)
+        })
+        trustedIpcMain.handle('program-approvals:list', async (): Promise<ProgramApproval[]> =>
+          http.getJson('/api/program-approvals', isProgramApprovalList))
+        trustedIpcMain.handle('dashboard:get', async (_event, yearValue: unknown): Promise<DashboardData> => {
+          const path = yearValue === undefined ? '/api/dashboard' : `/api/dashboard?year=${encodeURIComponent(String(yearValue))}`
+          return http.getJson(path, isDashboardData)
+        })
+        trustedIpcMain.handle('reports:get', async (_event, sheetValue: unknown): Promise<ReportSourceRow[]> => {
+          if (typeof sheetValue !== 'string') return []
+          return http.getJson(`/api/reports/source-rows?sheet=${encodeURIComponent(sheetValue)}`, isReportSourceRowList)
+        })
+        trustedIpcMain.handle('reports:summary', async (_event, yearValue: unknown, periodValue: unknown): Promise<ReportSummary> => {
+          const year = encodeURIComponent(String(yearValue))
+          const period = encodeURIComponent(String(JSON.stringify(periodValue)))
+          return http.getJson(`/api/reports/summary?year=${year}&period=${period}`, isReportSummary)
+        })
+        trustedIpcMain.handle('reports:annual-plan-list', async (_event, yearValue: unknown): Promise<AnnualAidPlan[]> => {
+          const path = yearValue === undefined ? '/api/reports/annual-plans' : `/api/reports/annual-plans?year=${encodeURIComponent(String(yearValue))}`
+          return http.getJson(path, isAnnualAidPlanList)
+        })
+        trustedIpcMain.handle('reports:plan-list', async (_event, yearValue: unknown): Promise<AnnualPlanEntry[]> => {
+          const path = yearValue === undefined ? '/api/reports/plan-entries' : `/api/reports/plan-entries?year=${encodeURIComponent(String(yearValue))}`
+          return http.getJson(path, isAnnualPlanEntryList)
         })
       }
     } catch (error) {

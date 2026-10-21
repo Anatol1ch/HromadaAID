@@ -135,6 +135,75 @@ export function isDecisionRecord(value: unknown): value is DecisionRecord {
 export function isNullableDecisionRecord(value: unknown): value is DecisionRecord | null {
   return value === null || isDecisionRecord(value)
 }
+
+export function isProgramApproval(value: unknown): value is ProgramApproval {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.documentNumber === 'string' &&
+    typeof value.documentDate === 'string' && isNullableString(value.title) && typeof value.programCount === 'number'
+}
+
+export function isProgramApprovalList(value: unknown): value is ProgramApproval[] {
+  return Array.isArray(value) && value.every(isProgramApproval)
+}
+
+export function isAnnualAidPlan(value: unknown): value is AnnualAidPlan {
+  return isRecord(value) && typeof value.year === 'number' && typeof value.aidTypeId === 'string' &&
+    (typeof value.plannedRecipientCount === 'number' || value.plannedRecipientCount === null) && typeof value.plannedAmountMinor === 'number'
+}
+
+export function isAnnualAidPlanList(value: unknown): value is AnnualAidPlan[] {
+  return Array.isArray(value) && value.every(isAnnualAidPlan)
+}
+
+export function isAnnualPlanEntry(value: unknown): value is AnnualPlanEntry {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.year === 'number' && typeof value.aidTypeId === 'string' &&
+    typeof value.aidTypeName === 'string' && typeof value.aidTypeOfficialName === 'string' && typeof value.programName === 'string' &&
+    typeof value.programOfficialName === 'string' && typeof value.referenceLabel === 'string' &&
+    (typeof value.plannedRecipientCount === 'number' || value.plannedRecipientCount === null) && typeof value.plannedAmountMinor === 'number'
+}
+
+export function isAnnualPlanEntryList(value: unknown): value is AnnualPlanEntry[] {
+  return Array.isArray(value) && value.every(isAnnualPlanEntry)
+}
+
+export function isReportSourceRow(value: unknown): value is ReportSourceRow {
+  return isRecord(value) && typeof value.rowNumber === 'number' && typeof value.label === 'string' && isNullableString(value.asOf) &&
+    Array.isArray(value.values) && value.values.every((item) => typeof item === 'string' || typeof item === 'number' || item === null) &&
+    Array.isArray(value.formulas) && value.formulas.every(isNullableString)
+}
+
+export function isReportSourceRowList(value: unknown): value is ReportSourceRow[] {
+  return Array.isArray(value) && value.every(isReportSourceRow)
+}
+
+export function isReportSummary(value: unknown): value is ReportSummary {
+  if (!isRecord(value) || typeof value.year !== 'number' || typeof value.periodLabel !== 'string' || !Array.isArray(value.rows)) return false
+  if (value.programs !== undefined && (!Array.isArray(value.programs) || !value.programs.every((program) =>
+    isRecord(program) && typeof program.id === 'string' && typeof program.shortName === 'string' && typeof program.officialName === 'string'))) return false
+  return value.rows.every((row) => isRecord(row) && (typeof row.programId === 'string' || row.programId === undefined) &&
+    (typeof row.plannedRecipientCount === 'number' || row.plannedRecipientCount === undefined) &&
+    (typeof row.plannedAmountMinor === 'number' || row.plannedAmountMinor === undefined) && typeof row.aidTypeId === 'string' &&
+    typeof row.officialName === 'string' && typeof row.programOfficialName === 'string' && typeof row.assignmentCount === 'number' &&
+    typeof row.amountMinor === 'number' && typeof row.paidCount === 'number' && typeof row.paidAmountMinor === 'number')
+}
+
+export function isDashboardData(value: unknown): value is DashboardData {
+  if (!isRecord(value) || typeof value.year !== 'number' || typeof value.assignmentCount !== 'number' || typeof value.totalMinor !== 'number' ||
+    typeof value.paidCount !== 'number' || typeof value.paidTotalMinor !== 'number' || typeof value.demo !== 'boolean' ||
+    !Array.isArray(value.monthlyAmountMinor) || !value.monthlyAmountMinor.every((item) => typeof item === 'number') ||
+    !Array.isArray(value.monthlyAssignmentCount) || !value.monthlyAssignmentCount.every((item) => typeof item === 'number') ||
+    !Array.isArray(value.statusCounts) || !Array.isArray(value.programExecution) || !Array.isArray(value.aidTypeDistribution) || !isRecord(value.paidBySex) || !isRecord(value.paidVpo)) return false
+  const paidBySex = value.paidBySex
+  const paidVpo = value.paidVpo
+  return typeof paidBySex.male === 'number' && typeof paidBySex.female === 'number' && typeof paidBySex.unknown === 'number' &&
+    typeof paidVpo.count === 'number' && typeof paidVpo.amountMinor === 'number' &&
+    value.statusCounts.every((item) => isRecord(item) && isAssignmentStatus(item.status) && typeof item.count === 'number') &&
+    value.programExecution.every((item) => isRecord(item) && (typeof item.programId === 'string' || item.programId === undefined) &&
+      typeof item.programName === 'string' && (typeof item.plannedMinor === 'number' || item.plannedMinor === null) &&
+      typeof item.amountMinor === 'number' && typeof item.paidMinor === 'number') &&
+    value.aidTypeDistribution.every((item) => isRecord(item) && (typeof item.aidTypeId === 'string' || item.aidTypeId === undefined) &&
+      (typeof item.programId === 'string' || item.programId === undefined) && typeof item.aidTypeName === 'string' &&
+      typeof item.amountMinor === 'number' && typeof item.count === 'number')
+}
 export type DashboardData = { year: number; assignmentCount: number; totalMinor: number; paidCount: number; paidTotalMinor: number; monthlyAmountMinor: number[]; monthlyAssignmentCount: number[]; statusCounts: { status: AssignmentStatus; count: number }[]; paidBySex: { male: number; female: number; unknown: number }; paidVpo: { count: number; amountMinor: number }; programExecution: { programId?: string; programName: string; plannedMinor: number | null; amountMinor: number; paidMinor: number }[]; aidTypeDistribution: { aidTypeId?: string; programId?: string; aidTypeName: string; amountMinor: number; count: number }[]; demo: boolean }
 export type ReportSheet = 'ПЛАН' | 'ФАКТ (МІСЯЦЬ)' | 'ФАКТ (КВАРТАЛ)' | 'ПЛАН-ФАКТ (РІК)'
 export type ReportSourceRow = { rowNumber: number; label: string; values: (string | number | null)[]; formulas: (string | null)[]; asOf: string | null }
