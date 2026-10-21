@@ -16,6 +16,7 @@ import { addDecisionAssignments, saveDecision } from '../../electron/decision-st
 import { saveAssignment } from '../../electron/assignment-store.js'
 import { changeAssignmentStatuses } from '../../electron/assignment-status.js'
 import { listStatementAssignments } from '../../electron/statement-list-data.js'
+import { readStatementRows } from '../../electron/statement-data.js'
 import { executeDeletion, isDeleteEntity, previewDeletion } from '../../electron/deletion-service.js'
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, BankSaveResult, CatalogList, DashboardData, DecisionRecord, DecisionSummary, HealthResponse, ProgramApproval, RecipientRecord, RecipientSaveResult, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from '../../shared/api-contract.js'
 
@@ -130,6 +131,9 @@ export function createApp(database: DatabaseSync): FastifyInstance {
 
   app.get<{ Querystring: { year?: string } }>('/api/statements', async (request): Promise<AssignmentListResult> =>
     listStatementAssignments(database, request.query.year === undefined ? undefined : Number(request.query.year)))
+
+  app.post<{ Body: { ids?: unknown; year?: unknown } }>('/api/statements/snapshot', async (request, reply) => { const ids=request.body?.ids, year=request.body?.year; if(!Array.isArray(ids)||!ids.length||ids.length>500||ids.some(id=>typeof id!=='string'||!id)||!Number.isInteger(year)||Number(year)<2000||Number(year)>2200)return reply.status(400).send({message:'Некоректний склад відомості.'}); const unique=[...new Set(ids as string[])], rows=readStatementRows(database,unique,String(year)); if(rows.length!==unique.length)return reply.status(409).send({message:'Частина призначень змінилася. Оновіть список.'}); return rows })
+  app.post<{ Body: { ids?: unknown; year?: unknown } }>('/api/statements/bank-snapshot', async (request, reply) => { const ids=request.body?.ids, year=request.body?.year; if(!Array.isArray(ids)||!ids.length||ids.length>500||ids.some(id=>typeof id!=='string'||!id)||!Number.isInteger(year)||Number(year)<2000||Number(year)>2200)return reply.status(400).send({message:'Некоректний склад відомості.'}); const unique=[...new Set(ids as string[])], marks=unique.map(()=>'?').join(','); const rows=database.prepare(`SELECT a.id,a.amount_minor,r.last_name,r.first_name,r.patronymic,r.rnokpp,r.bank_account FROM assignments a JOIN recipients r ON r.id=a.recipient_id JOIN decisions d ON d.id=a.decision_id WHERE a.id IN (${marks}) AND substr(d.decision_date,1,4)=? AND a.status IN ('Призначено','В роботі','Передано до казначейства') ORDER BY d.decision_date,a.created_at,a.id`).all(...unique,String(year)); if(rows.length!==unique.length)return reply.status(409).send({message:'Частина призначень змінилася. Оновіть список.'}); return rows })
 
   app.get<{ Params: { entity: string; id: string } }>('/api/deletion/:entity/:id', async (request) => isDeleteEntity(request.params.entity) ? previewDeletion(database, request.params.entity, request.params.id) : null)
   app.post<{ Params: { entity: string; id: string }; Body: { confirmationToken?: unknown } }>('/api/deletion/:entity/:id', async (request, reply) => { if (!isDeleteEntity(request.params.entity)) return reply.status(400).send({ ok:false,message:'Некоректний тип запису.' }); const result=executeDeletion(database, request.params.entity, request.params.id, request.body?.confirmationToken); return reply.status(result.ok?200:409).send(result) })

@@ -94,11 +94,10 @@ function invokeExcel(scriptPath: string, payload: object) {
   return done
 }
 
-export function registerStatementsIpc(database: DatabaseSync) {
+export type StatementDataSource = { readRows: (ids: string[], year: string) => Promise<Row[]>; readBankRows: (ids: string[], year: number) => Promise<Row[]> }
+export function registerStatementsIpc(database?: DatabaseSync, source?: StatementDataSource) {
   initializeDocumentTemp()
-  ipcMain.handle('statements:list', (_event, yearValue: unknown) => {
-    return listStatementAssignments(database, yearValue)
-  })
+  if (database) ipcMain.handle('statements:list', (_event, yearValue: unknown) => listStatementAssignments(database, yearValue))
 
   ipcMain.handle('statements:generate', async (_event, kindValue: unknown, idsValue: unknown, yearValue: unknown, parametersValue: unknown) => {
     if (shuttingDown) return { ok: false, message: 'Застосунок завершує роботу.' }
@@ -109,7 +108,7 @@ export function registerStatementsIpc(database: DatabaseSync) {
     if (!year) return { ok: false, message: 'Оберіть коректний звітний рік.' }
     const kind = kindValue as StatementKind
     const ids = [...new Set(idsValue as string[])]
-    const rows = readStatementRows(database, ids, year)
+    const rows = source ? await source.readRows(ids, year) : readStatementRows(database!, ids, year)
     if (rows.length !== ids.length) return { ok: false, message: 'Частина призначень недоступна: їх видалено, змінено статус або рік рішення. Оновіть список.' }
     try {
       for (const row of rows) asMinor(row.amount_minor)
@@ -197,11 +196,7 @@ export function registerStatementsIpc(database: DatabaseSync) {
     }
     const excelName = bankStatementFileName()
     const ids = [...new Set(idsValue as string[])]
-    const marks = ids.map(() => '?').join(',')
-    const rows = database.prepare(`SELECT a.id,a.amount_minor,r.last_name,r.first_name,r.patronymic,r.rnokpp,r.bank_account
-      FROM assignments a JOIN recipients r ON r.id=a.recipient_id JOIN decisions d ON d.id=a.decision_id
-      WHERE a.id IN (${marks}) AND substr(d.decision_date,1,4)=? AND a.status IN ('Призначено','В роботі','Передано до казначейства')
-      ORDER BY d.decision_date,a.created_at,a.id`).all(...ids, String(yearValue)) as Row[]
+    const rows = source ? await source.readBankRows(ids, Number(yearValue)) : database!.prepare(`SELECT a.id,a.amount_minor,r.last_name,r.first_name,r.patronymic,r.rnokpp,r.bank_account FROM assignments a JOIN recipients r ON r.id=a.recipient_id JOIN decisions d ON d.id=a.decision_id WHERE a.id IN (${ids.map(() => '?').join(',')}) AND substr(d.decision_date,1,4)=? AND a.status IN ('Призначено','В роботі','Передано до казначейства') ORDER BY d.decision_date,a.created_at,a.id`).all(...ids, String(yearValue)) as Row[]
     if (rows.length !== ids.length) return { ok: false, message: 'Частина призначень недоступна: їх видалено, змінено статус або рік рішення. Оновіть список.' }
     const missing = rows.flatMap((row) => {
       const fields = [!String(row.rnokpp ?? '').trim() ? 'РНОКПП' : '', !String(row.bank_account ?? '').trim() ? 'банківський рахунок' : ''].filter(Boolean)
