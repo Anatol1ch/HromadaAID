@@ -1,10 +1,14 @@
 import Alert from './components/Alert'
 import DataState from './components/DataState'
-import { useEffect, useState } from 'react'
+import LoginScreen from './components/LoginScreen'
+import ChangePasswordModal from './components/ChangePasswordModal'
+import { useEffect, useMemo, useState } from 'react'
 import { initialAccountingYear, rememberAccountingYear } from './lib/accountingYear'
-import { Activity, ChevronRight, CircleHelp, Code2, Plus, ArrowUpRight, CalendarDays, FileText, HandCoins, HeartHandshake, Home, MoreHorizontal, Settings, BookOpen, ChartNoAxesCombined } from 'lucide-react'
+import { Activity, ChevronRight, CircleHelp, Code2, Plus, ArrowUpRight, CalendarDays, FileText, HandCoins, HeartHandshake, Home, LogOut, Settings, BookOpen, ChartNoAxesCombined, KeyRound } from 'lucide-react'
+import type { ClientAuthState } from '../shared/auth-contract'
+import { USER_ROLE_LABELS, type Permission } from '../shared/authorization'
 import StatementFormation from './StatementFormation'
-import Dictionaries from './Dictionaries'
+import Dictionaries, { type DictionarySection } from './Dictionaries'
 import AidRegistry from './AidRegistry'
 import Dashboard from './Dashboard'
 import Reports from './Reports'
@@ -16,93 +20,86 @@ import { useReportingYear } from './context/YearContext'
 import { YearContext } from './context/YearContext'
 
 const nav = [
-  { label: 'Головна', icon: Home },
-  { label: 'Огляд', icon: Activity },
-  { label: 'Реєстр допомог', icon: HandCoins },
-  { label: 'Формування відомостей', icon: FileText },
-  { label: 'Звітність', icon: ChartNoAxesCombined },
-  { label: 'Довідники', icon: BookOpen },
+  { label: 'Головна', icon: Home, permission: 'dashboard.read' as Permission },
+  { label: 'Огляд', icon: Activity, permission: 'dashboard.read' as Permission },
+  { label: 'Реєстр допомог', icon: HandCoins, permission: 'assignments.read' as Permission },
+  { label: 'Формування відомостей', icon: FileText, permission: 'statements.generate' as Permission },
+  { label: 'Звітність', icon: ChartNoAxesCombined, permission: 'reports.read' as Permission },
+  { label: 'Довідники', icon: BookOpen, permission: 'catalogs.read' as Permission },
 ]
 
 function App() {
-  const [ready, setReady] = useState(false)
+  const [auth, setAuth] = useState<ClientAuthState | null>(null)
+  useEffect(() => {
+    let active = true
+    void window.hromadaAid.auth.getState().then((state) => { if (active) setAuth(state) }, () => { if (active) setAuth({ mode: 'remote', status: 'unavailable', user: null, message: 'Не вдалося отримати стан авторизації.' }) })
+    return window.hromadaAid.auth.onStateChange((state) => { if (active) setAuth(state) })
+  }, [])
+  const login = async (username: string, password: string) => {
+    const result = await window.hromadaAid.auth.login(username, password)
+    setAuth(result.state)
+    return { ok: result.ok, message: 'message' in result ? result.message : undefined }
+  }
+  if (!auth) return <StartupScreen/>
+  if (auth.mode === 'remote' && auth.status !== 'authenticated') return <LoginScreen state={auth} onLogin={login}/>
+  return <Workspace auth={auth} setAuth={setAuth}/>
+}
+
+function Workspace({ auth, setAuth }: { auth: Extract<ClientAuthState, { status: 'authenticated' }>; setAuth: (state: ClientAuthState) => void }) {
   const [activeNav, setActiveNav] = useState('Головна')
   const [createAssignment, setCreateAssignment] = useState(false)
   const [notice, setNotice] = useState('')
   const [year, setYear] = useState(initialAccountingYear)
-  useEffect(() => { setReady(true) }, [])
+  const [changePassword, setChangePassword] = useState(false)
+  const [logoutBusy, setLogoutBusy] = useState(false)
+  const permissions = useMemo(() => new Set(auth.mode === 'local' ? nav.map((item) => item.permission).concat(['catalogs.manage', 'program_approvals.manage', 'personal_data.read', 'recipients.manage', 'banks.manage', 'decisions.read', 'decisions.manage', 'assignments.manage', 'assignments.change_financial_status', 'planning.read', 'planning.manage', 'reports.export', 'protected_entities.delete', 'users.manage'] as Permission[]) : auth.user.permissions), [auth])
+  const can = (permission: Permission) => permissions.has(permission)
+  const allowedNav = nav.filter((item) => can(item.permission))
+  const dictionarySections = (['people', 'programs', 'decisions', 'banks', 'plans'] as DictionarySection[]).filter((section) =>
+    section === 'people' || section === 'banks' ? can('personal_data.read') : section === 'decisions' ? can('decisions.read') : section === 'plans' ? can('planning.read') : can('catalogs.read'))
   useEffect(() => { rememberAccountingYear(year) }, [year])
-  const navigate = (label: string) => { setCreateAssignment(false); setActiveNav(label); setNotice('') }
-  const newAssignment = () => { setCreateAssignment(true); setActiveNav('Реєстр допомог'); setNotice('') }
-
-  if (!ready) return <StartupScreen/>
+  useEffect(() => { if (!allowedNav.some((item) => item.label === activeNav)) setActiveNav(allowedNav[0]?.label ?? 'Головна') }, [activeNav, allowedNav])
+  const navigate = (label: string) => { if (!allowedNav.some((item) => item.label === label)) return; setCreateAssignment(false); setActiveNav(label); setNotice('') }
+  const newAssignment = () => { if (!can('assignments.manage')) return; setCreateAssignment(true); setActiveNav('Реєстр допомог'); setNotice('') }
+  const logout = async () => {
+    if (logoutBusy) return
+    setLogoutBusy(true)
+    try { const result = await window.hromadaAid.auth.logout(); if (!result.ok) setNotice(result.message ?? 'Локальну сесію видалено.') }
+    finally { setLogoutBusy(false) }
+  }
+  const user = auth.mode === 'remote' ? auth.user : null
+  const displayName = user?.displayName || user?.username || 'Локальний режим'
+  const roles = user ? user.roles.map((role) => USER_ROLE_LABELS[role]).join(', ') : 'Автономна робота'
   return <YearContext.Provider value={{ year, setYear }}><div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark"><HeartHandshake size={22} strokeWidth={2.1}/></div><div className="brand-copy"><div className="brand-name">Hromada<span>Aid</span></div><div className="brand-caption">Автоматизована система обліку матеріальних допомог</div></div></div>
       <div className="nav-label">РОБОЧИЙ ПРОСТІР</div>
-      <nav className="nav-list">{nav.map(({ label, icon: Icon }) => <button key={label} type="button" aria-label={label} title={label} aria-current={activeNav === label ? 'page' : undefined} className={`nav-item ${activeNav === label ? 'active' : ''}`} onClick={() => navigate(label)}><Icon size={19} strokeWidth={1.8} aria-hidden="true"/><span>{label}</span></button>)}</nav>
-      <div className="sidebar-bottom"><div className="nav-label">СИСТЕМА</div><button type="button" className="nav-item" aria-label="Налаштування" title="Налаштування" onClick={() => setNotice('Налаштування будуть доступні у наступному етапі.')}><Settings size={19} strokeWidth={1.8} aria-hidden="true"/><span>Налаштування</span></button><div className="help-card"><div className="help-icon"><CircleHelp size={18}/></div><div><strong>Потрібна допомога?</strong><p>Зверніться до адміністратора системи</p></div><ChevronRight size={17}/></div><div className="user-row"><div className="avatar">ОМ</div><div className="user-copy"><strong>Олена Мельник</strong><span>Адміністратор</span></div><MoreHorizontal size={20} className="muted-icon"/></div></div>
+      <nav className="nav-list">{allowedNav.map(({ label, icon: Icon }) => <button key={label} type="button" aria-label={label} title={label} aria-current={activeNav === label ? 'page' : undefined} className={`nav-item ${activeNav === label ? 'active' : ''}`} onClick={() => navigate(label)}><Icon size={19} strokeWidth={1.8} aria-hidden="true"/><span>{label}</span></button>)}</nav>
+      <div className="sidebar-bottom"><div className="nav-label">СИСТЕМА</div><button type="button" className="nav-item" aria-label="Налаштування" title="Налаштування" onClick={() => setNotice('Налаштування будуть доступні у наступному етапі.')}><Settings size={19} strokeWidth={1.8} aria-hidden="true"/><span>Налаштування</span></button><div className="help-card"><div className="help-icon"><CircleHelp size={18}/></div><div><strong>Потрібна допомога?</strong><p>Зверніться до адміністратора системи</p></div><ChevronRight size={17}/></div><div className="user-row"><div className="avatar">{user ? displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() : 'Л'}</div><div className="user-copy"><strong>{displayName}</strong><span title={roles}>{roles}</span></div>{user && <div className="user-actions"><button type="button" className="icon-button" title="Змінити пароль" aria-label="Змінити пароль" onClick={() => setChangePassword(true)}><KeyRound size={16}/></button><button type="button" className="icon-button" title="Вийти" aria-label="Вийти" disabled={logoutBusy} onClick={() => void logout()}><LogOut size={16}/></button></div>}</div></div>
     </aside>
     <main className="main-area">
       <header className="topbar"><Breadcrumbs items={[{ label: 'Робочий простір', section: 'Головна' }, { label: activeNav }]} navigate={navigate}/><div className="top-actions"><YearPicker value={year} onChange={setYear} label="Рік"/></div></header>
       <div className={`content${activeNav === 'Головна' ? ' home-content' : ''}`}>
         {notice && <Alert variant="info" onDismiss={() => setNotice('')}>{notice}</Alert>}
-        <div className="page-transition" key={activeNav}>{activeNav === 'Головна' ? <StartPage navigate={navigate} onCreate={newAssignment}/> :
+        <div>{activeNav === 'Головна' ? <StartPage navigate={navigate} onCreate={newAssignment} canCreate={can('assignments.manage')} allowedLinks={new Set(allowedNav.map((item) => item.label))}/> :
           activeNav === 'Реєстр допомог' ? <AidRegistry createOnOpen={createAssignment}/> :
           activeNav === 'Формування відомостей' ? <StatementFormation/> :
-          activeNav === 'Довідники' ? <Dictionaries/> :
+          activeNav === 'Довідники' ? <Dictionaries allowedSections={dictionarySections} canManageCatalogs={can('catalogs.manage')} canManagePlans={can('planning.manage')} canManageDecisions={can('decisions.manage')} canManagePersonal={can('recipients.manage') || can('banks.manage')}/> :
           activeNav === 'Огляд' ? <Dashboard/> : <Reports/>}</div>
       </div>
     </main>
-  </div><UnsavedChangesConfirmation/></YearContext.Provider>
+  </div>{changePassword && <ChangePasswordModal onClose={() => setChangePassword(false)} onChangePassword={async (currentPassword, newPassword) => { const result = await window.hromadaAid.auth.changePassword(currentPassword, newPassword); setAuth(result.state); return { ok: result.ok, message: 'message' in result ? result.message : undefined } }}/>}<UnsavedChangesConfirmation/></YearContext.Provider>
 }
 
-function StartupScreen() {
-  return <main className="app-startup" aria-busy="true" aria-label="Підготовка робочого простору HromadaAid">
-    <div className="app-startup-content" role="status" aria-live="polite">
-      <div className="app-startup-mark"><HeartHandshake size={34} strokeWidth={2}/></div>
-      <div className="app-startup-name">Hromada<span>Aid</span></div>
-      <p>Автоматизована система обліку матеріальних допомог</p>
-      <span className="app-startup-loader" aria-hidden="true"/>
-      <span className="visually-hidden">Підготовка робочого простору…</span>
-    </div>
-  </main>
-}
+function StartupScreen() { return <main className="app-startup" aria-busy="true" aria-label="Підготовка робочого простору HromadaAid"><div className="app-startup-content" role="status" aria-live="polite"><div className="app-startup-mark"><HeartHandshake size={34} strokeWidth={2}/></div><div className="app-startup-name">Hromada<span>Aid</span></div><p>Автоматизована система обліку матеріальних допомог</p><span className="app-startup-loader" aria-hidden="true"/><span className="visually-hidden">Підготовка робочого простору…</span></div></main> }
 
 type BreadcrumbItem = { label: string; section?: string }
+function Breadcrumbs({ items, navigate }: { items: BreadcrumbItem[]; navigate: (section: string) => void }) { return <nav className="crumb" aria-label="Навігаційні крихти"><ol>{items.map((item, index) => <li key={`${index}-${item.label}`}>{index > 0 && <ChevronRight size={15} aria-hidden="true"/>}{index === items.length - 1 ? <span aria-current="page">{item.label}</span> : item.section ? <button type="button" onClick={() => navigate(item.section!)}>{item.label}</button> : <span>{item.label}</span>}</li>)}</ol></nav> }
 
-function Breadcrumbs({ items, navigate }: { items: BreadcrumbItem[]; navigate: (section: string) => void }) {
-  return <nav className="crumb" aria-label="Навігаційні крихти"><ol>{items.map((item, index) => <li key={`${index}-${item.label}`}>
-    {index > 0 && <ChevronRight size={15} aria-hidden="true"/>}
-    {index === items.length - 1 ? <span aria-current="page">{item.label}</span> : item.section
-      ? <button type="button" onClick={() => navigate(item.section!)}>{item.label}</button>
-      : <span>{item.label}</span>}
-  </li>)}</ol></nav>
-}
-
-function StartPage({ navigate, onCreate }: { navigate: (label: string) => void; onCreate: () => void }) {
-  const { year } = useReportingYear()
-  const { data, loading, error, refresh } = useOverviewData(year)
-  const links = [
-    { title: 'Відкрити реєстр призначень', section: 'Реєстр допомог', text: 'Пошук, редагування та зміна статусів', icon: HandCoins },
-    { title: 'Сформувати відомості', section: 'Формування відомостей', text: 'Персональні, зведені та банківські документи', icon: FileText },
-    { title: 'Переглянути звітність', section: 'Звітність', text: 'Виплати та виконання річного плану', icon: ChartNoAxesCombined },
-    { title: 'Перейти до довідників', section: 'Довідники', text: 'Отримувачі, програми, рішення та банки', icon: BookOpen },
-  ]
-  return <div className="workspace-page">
-    <section className="page-heading workspace-heading"><div className="workspace-coat-area"><img src={communityCoat} alt="Герб Вишнівської територіальної громади"/></div><div className="workspace-identity-copy"><div className="eyebrow">РОБОЧИЙ ПРОСТІР ГРОМАДИ</div><h1><span>Вишнівська селищна</span>{' '}<span>територіальна громада</span></h1><p className="workspace-system-name">HromadaAID</p><p className="subtitle">Автоматизована система обліку матеріальних допомог</p></div></section>
-    <section className="dashboard-panel workspace-actions" aria-labelledby="workspace-actions-title">
-      <div className="workspace-primary"><div><h2 id="workspace-actions-title">Щоденна робота</h2><p>Оберіть дію, щоб розпочати роботу з призначеннями.</p></div><button type="button" className="primary-button" onClick={onCreate}><Plus size={19}/>Створити призначення</button></div>
-      <div className="workspace-shortcuts">{links.map(({ title, section, text, icon: Icon }, index) => <button type="button" aria-label={title} aria-describedby={`workspace-shortcut-${index}`} key={section} onClick={() => navigate(section)}><span className="workspace-action-icon"><Icon size={20} aria-hidden="true"/></span><span><strong>{title}</strong><small id={`workspace-shortcut-${index}`}>{text}</small></span><ArrowUpRight size={18} aria-hidden="true"/></button>)}</div>
-    </section>
-    <section className="dashboard-panel workspace-year" aria-label="Обліковий період"><div className="workspace-year-label"><CalendarDays size={21} aria-hidden="true"/><div><span>Обраний обліковий рік</span><strong>{year}</strong></div></div><div className="workspace-year-summary" aria-live={loading || error ? undefined : 'polite'}>{loading ? <DataState kind="loading" compact message="Завантажуємо підсумок…"/> : error ? <Alert variant="error" action={<button type="button" onClick={() => void refresh()}>Повторити</button>}>{error}</Alert> : data ? <><strong>{`Призначено допомог: ${data.assignmentCount}`}</strong><span>{data.assignmentCount ? 'Показники та стан виконання доступні в огляді.' : 'Додайте призначення або перевірте записи в реєстрі.'}</span></> : null}</div><button type="button" className="secondary-button" onClick={() => navigate('Огляд')}>Відкрити огляд<ArrowUpRight size={16}/></button></section>
-    <footer className="page-footer">
-      <p>© {new Date().getFullYear()} Вишнівська селищна рада. Внутрішня інформаційна система.</p>
-      <hr aria-hidden="true"/>
-      <p className="home-footer-credit"><Code2 size={17} strokeWidth={1.7} aria-hidden="true"/><span>Developed by <strong>Anatolii Myronenko</strong></span></p>
-    </footer>
-  </div>
+function StartPage({ navigate, onCreate, canCreate, allowedLinks }: { navigate: (label: string) => void; onCreate: () => void; canCreate: boolean; allowedLinks: Set<string> }) {
+  const { year } = useReportingYear(); const { data, loading, error, refresh } = useOverviewData(year)
+  const links = [{ title: 'Відкрити реєстр призначень', section: 'Реєстр допомог', text: 'Пошук, редагування та зміна статусів', icon: HandCoins }, { title: 'Сформувати відомості', section: 'Формування відомостей', text: 'Персональні, зведені та банківські документи', icon: FileText }, { title: 'Переглянути звітність', section: 'Звітність', text: 'Виплати та виконання річного плану', icon: ChartNoAxesCombined }, { title: 'Перейти до довідників', section: 'Довідники', text: 'Програми, види допомог і планові показники', icon: BookOpen }].filter((item) => allowedLinks.has(item.section))
+  return <div className="workspace-page"><section className="page-heading workspace-heading"><div className="workspace-coat-area"><img src={communityCoat} alt="Герб Вишнівської територіальної громади"/></div><div className="workspace-identity-copy"><div className="eyebrow">РОБОЧИЙ ПРОСТІР ГРОМАДИ</div><h1><span>Вишнівська селищна</span>{' '}<span>територіальна громада</span></h1><p className="workspace-system-name">HromadaAID</p><p className="subtitle">Автоматизована система обліку матеріальних допомог</p></div></section><section className="dashboard-panel workspace-actions" aria-labelledby="workspace-actions-title"><div className="workspace-primary"><div><h2 id="workspace-actions-title">Щоденна робота</h2><p>Оберіть дію, щоб розпочати роботу з призначеннями.</p></div>{canCreate && <button type="button" className="primary-button" onClick={onCreate}><Plus size={19}/>Створити призначення</button>}</div><div className="workspace-shortcuts">{links.map(({ title, section, text, icon: Icon }, index) => <button type="button" aria-label={title} aria-describedby={`workspace-shortcut-${index}`} key={section} onClick={() => navigate(section)}><span className="workspace-action-icon"><Icon size={20} aria-hidden="true"/></span><span><strong>{title}</strong><small id={`workspace-shortcut-${index}`}>{text}</small></span><ArrowUpRight size={18} aria-hidden="true"/></button>)}</div></section><section className="dashboard-panel workspace-year" aria-label="Обліковий період"><div className="workspace-year-label"><CalendarDays size={21} aria-hidden="true"/><div><span>Обраний обліковий рік</span><strong>{year}</strong></div></div><div className="workspace-year-summary" aria-live={loading || error ? undefined : 'polite'}>{loading ? <DataState kind="loading" compact message="Завантажуємо підсумок…"/> : error ? <Alert variant="error" action={<button type="button" onClick={() => void refresh()}>Повторити</button>}>{error}</Alert> : data ? <><strong>{`Призначено допомог: ${data.assignmentCount}`}</strong><span>{data.assignmentCount ? 'Показники та стан виконання доступні в огляді.' : 'Додайте призначення або перевірте записи в реєстрі.'}</span></> : null}</div><button type="button" className="secondary-button" onClick={() => navigate('Огляд')}>Відкрити огляд<ArrowUpRight size={16}/></button></section><footer className="page-footer"><p>© {new Date().getFullYear()} Вишнівська селищна рада. Внутрішня інформаційна система.</p><hr aria-hidden="true"/><p className="home-footer-credit"><Code2 size={17} strokeWidth={1.7} aria-hidden="true"/><span>Developed by <strong>Anatolii Myronenko</strong></span></p></footer></div>
 }
 
 export default App
-

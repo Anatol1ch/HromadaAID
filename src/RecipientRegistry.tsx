@@ -45,7 +45,7 @@ export function recipientInputFromRecord(recipient: RecipientRecord): RecipientI
   }
 }
 
-function RecipientRegistry({ embedded = false }: { embedded?: boolean }) {
+function RecipientRegistry({ embedded = false, readOnly = false }: { embedded?: boolean; readOnly?: boolean }) {
   const [recipients, setRecipients] = useState<RecipientSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -134,7 +134,7 @@ function RecipientRegistry({ embedded = false }: { embedded?: boolean }) {
   return <>
     {!embedded && <section className="page-heading registry-heading">
       <div><div className="eyebrow">ОТРИМУВАЧІ • ЛОКАЛЬНІ ДАНІ</div><h1>Реєстр отримувачів</h1><p className="subtitle">Картки людей зберігаються окремо від рішень і призначень допомоги</p></div>
-      <button className="primary-button" onClick={beginCreate}><Plus size={19}/>Додати отримувача</button>
+      {!readOnly && <button className="primary-button" onClick={beginCreate}><Plus size={19}/>Додати отримувача</button>}
     </section>}
 
     {error && !form && <Alert variant="error" action={<button type="button" onClick={() => void loadRecipients()}>Оновити список</button>}>{error}</Alert>}
@@ -144,7 +144,7 @@ function RecipientRegistry({ embedded = false }: { embedded?: boolean }) {
     <section className="dashboard-panel registry-panel dictionary-registry">
       <DictionaryToolbar unavailable={Boolean(loadError)} title="Отримувачі" count={`Карток: ${visibleRecipients.length}${search.trim() ? ` з ${recipients.length}` : ''}`} loading={loading}>
         <DictionarySearch value={search} onChange={setSearch} placeholder="ПІБ або РНОКПП" label="Пошук отримувачів за ПІБ або РНОКПП"/>
-        <button className="primary-button" onClick={beginCreate}><Plus size={17}/>Додати отримувача</button>
+        {!readOnly && <button className="primary-button" onClick={beginCreate}><Plus size={17}/>Додати отримувача</button>}
       </DictionaryToolbar>
       <DictionaryTable error={loadError} onRetry={() => void loadRecipients()} label="Отримувачі" className="dictionary-recipients" loading={loading} filtered={Boolean(search.trim())} empty={!visibleRecipients.length ? search.trim() ? 'За заданими параметрами нічого не знайдено' : 'Отримувачів поки немає. Додайте першу картку.' : undefined} columns={[
         {label:'Отримувач',width:'23%'},{label:'РНОКПП',width:'106px'},{label:'Стать',width:'72px'},{label:'ВПО',width:'46px',className:'dictionary-center'},
@@ -154,13 +154,13 @@ function RecipientRegistry({ embedded = false }: { embedded?: boolean }) {
           <td><span className="registry-name">{recipient.fullName}</span>{recipient.isDemo && <span className="demo-recipient-badge">Демо</span>}</td>
           <td className="dictionary-nowrap">{recipient.rnokpp || '—'}</td><td className="dictionary-nowrap">{recipient.sex || '—'}</td><td className="dictionary-center">{recipient.isVpo === null ? '—' : recipient.isVpo ? 'Так' : 'Ні'}</td>
           <td className="dictionary-nowrap">{recipient.phone || '—'}</td><td><span className="dictionary-address" title={recipient.registeredAddress || undefined} tabIndex={recipient.registeredAddress ? 0 : undefined}>{recipient.registeredAddress || '—'}</span></td><td className="dictionary-nowrap">{formatDate(recipient.updatedAt)}</td>
-          <td className="dictionary-actions-cell"><div className="registry-row-actions"><button type="button" className="table-action" title="Переглянути картку" aria-label={`Відкрити картку: ${recipient.fullName}`} onClick={() => void openDetails(recipient.id)}><Eye size={17}/></button><button type="button" className="table-action" title="Редагувати картку" aria-label={`Редагувати картку: ${recipient.fullName}`} onClick={() => void beginEdit(recipient.id)}><Pencil size={16}/></button><button type="button" className="table-action danger-action" title="Видалити картку" aria-label={`Видалити картку: ${recipient.fullName}`} onClick={() => void requestRecipientDelete(recipient)}><Trash2 size={16}/></button></div></td>
+          <td className="dictionary-actions-cell"><div className="registry-row-actions"><button type="button" className="table-action" title="Переглянути картку" aria-label={`Відкрити картку: ${recipient.fullName}`} onClick={() => void openDetails(recipient.id)}><Eye size={17}/></button>{!readOnly && <><button type="button" className="table-action" title="Редагувати картку" aria-label={`Редагувати картку: ${recipient.fullName}`} onClick={() => void beginEdit(recipient.id)}><Pencil size={16}/></button><button type="button" className="table-action danger-action" title="Видалити картку" aria-label={`Видалити картку: ${recipient.fullName}`} onClick={() => void requestRecipientDelete(recipient)}><Trash2 size={16}/></button></>}</div></td>
         </tr>)}
       </DictionaryTable>
     </section>
     <p className="registry-storage-note"><UserRound size={16}/> Дані зберігаються локально на цьому комп’ютері.</p>
     {detailError && <Alert variant="error" action={<button type="button" onClick={() => setDetailError('')}>Закрити</button>}>{detailError}</Alert>}
-    {viewing && <RecipientDetails recipient={viewing} history={history} historyLoading={historyLoading} historyError={historyError} onClose={() => setViewing(null)} onEdit={() => { setViewing(null); void beginEdit(viewing.id) }}/>}
+    {viewing && <RecipientDetails recipient={viewing} history={history} historyLoading={historyLoading} historyError={historyError} onClose={() => setViewing(null)} onEdit={readOnly ? undefined : () => { setViewing(null); void beginEdit(viewing.id) }}/>}
     {deletePreview && <DeleteConfirmation preview={deletePreview} onClose={() => setDeletePreview(null)} onDeleted={async () => { setDeletePreview(null); await loadRecipients() }}/>}
   </>
 }
@@ -306,7 +306,7 @@ export function RecipientFormModal({ initial = emptyRecipient, editingId, expect
     {showBankForm && <BankFormModal onClose={() => setShowBankForm(false)} onSaved={bank => {
       setBanks(current => [...current.filter(item => item.id !== bank.id), bank].sort((a, b) => a.name.localeCompare(b.name, 'uk')))
       setBankChoice(bank.id); updateField('bankDetailsId', onlyBankDetail(bank)); setShowBankForm(false)
-    }}/>} 
+    }}/>}
   </>
 }
 

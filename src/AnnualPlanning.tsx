@@ -9,7 +9,7 @@ import { notifyCatalogsChanged, useCatalogUpdates } from './services/catalogRepo
 import Modal, { confirmModalClose } from './components/Modal'
 import { parsePlanMoney, reportMoney } from './lib/reporting'
 
-export default function AnnualPlanning({ programs, aidTypes }: { programs: ProgramOption[]; aidTypes: AidTypeOption[] }) {
+export default function AnnualPlanning({ programs, aidTypes, readOnly = false }: { programs: ProgramOption[]; aidTypes: AidTypeOption[]; readOnly?: boolean }) {
   const { year } = useReportingYear()
   const [plans, setPlans] = useState<AnnualAidPlan[]>([]), [error, setError] = useState(''), [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<{ year: number; type: AidTypeOption; program: ProgramOption; plan?: AnnualAidPlan } | null>(null)
@@ -35,7 +35,7 @@ export default function AnnualPlanning({ programs, aidTypes }: { programs: Progr
       return <section className="planning-program" key={program.id}><header><h3>{program.shortName}</h3></header>
       <div className="planning-table-wrap"><table className="planning-table" aria-label={`План: ${program.shortName}`}><PlanningColumns/><thead><tr><th scope="col">Вид допомоги</th><th scope="col">План отримувачів</th><th scope="col">Планова сума</th><th scope="col">Дії</th></tr></thead><tbody>{aidTypes.filter(type => type.programId === program.id).map(type => {
         const plan = byType.get(type.id)
-        return <tr key={type.id}><td><strong>{type.shortName}</strong></td><td>{plan?.plannedRecipientCount ?? <span className="planning-unset">Не встановлено</span>}</td><td>{plan ? reportMoney(plan.plannedAmountMinor) : <span className="planning-unset">Не встановлено</span>}</td><td><button type="button" className="secondary-button" onClick={() => setEditing({year,type,program,plan})}>{plan ? <Pencil size={15}/> : <Plus size={15}/>} {plan ? 'Редагувати план' : 'Встановити план'}</button></td></tr>
+        return <tr key={type.id}><td><strong>{type.shortName}</strong></td><td>{plan?.plannedRecipientCount ?? <span className="planning-unset">Не встановлено</span>}</td><td>{plan ? reportMoney(plan.plannedAmountMinor) : <span className="planning-unset">Не встановлено</span>}</td><td>{!readOnly && <button type="button" className="secondary-button" onClick={() => setEditing({year,type,program,plan})}>{plan ? <Pencil size={15}/> : <Plus size={15}/>} {plan ? 'Редагувати план' : 'Встановити план'}</button>}</td></tr>
       })}</tbody><tfoot><tr><th scope="row">Разом за програмою</th><td>{programTotal.count}</td><td>{reportMoney(programTotal.amount)}</td><td/></tr></tfoot></table></div>{!aidTypes.some(type => type.programId === program.id) && <DataState kind="empty" compact message="У програмі поки немає видів допомоги."/>}
     </section>}) : <DataState kind="empty" message="Програм поки немає" description="Додайте програму та вид допомоги, щоб встановити річний план."/>}
     {!loading && !error && programs.length > 0 && <section className="planning-total" aria-label="Загальний підсумок плану"><div className="planning-table-wrap"><table className="planning-table planning-total-table" aria-label={`Річний план за ${year} рік`}><PlanningColumns/><thead className="visually-hidden"><tr><th scope="col">Вид допомоги</th><th scope="col">План отримувачів</th><th scope="col">Планова сума</th><th scope="col">Дії</th></tr></thead><tbody><tr><th scope="row">Загалом за {year} рік</th><td>{total.count}</td><td>{reportMoney(total.amount)}</td><td/></tr></tbody></table></div></section>}

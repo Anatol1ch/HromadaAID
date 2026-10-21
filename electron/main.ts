@@ -1,5 +1,7 @@
 import { cleanupGeneratedReports, registerReportExportIpc } from './report-export-ipc.js'
 import { app, BrowserWindow, dialog, screen } from 'electron'
+import { RemoteAuthSession, localAuthState } from './auth-session.js'
+import type { AuthActionResult, ClientAuthState } from '../shared/auth-contract.js'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { DatabaseIntegrityError, DatabaseSchemaError, openAppDatabase } from './database.js'
@@ -121,10 +123,18 @@ if (!hasSingleInstanceLock) {
     // During startup, the normal ready handler will create the only window.
   })
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     try {
       runtimeConfig = readElectronRuntimeConfig()
+      const publishAuthState = (state: ClientAuthState) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('auth:state', state)
+      }
       if (runtimeConfig.mode === 'local') {
+        const localState = localAuthState()
+        trustedIpcMain.handle('auth:get-state', async () => localState)
+        trustedIpcMain.handle('auth:login', async (): Promise<AuthActionResult> => ({ ok: false, state: localState, message: 'Вхід не потрібен у локальному режимі.' }))
+        trustedIpcMain.handle('auth:logout', async (): Promise<AuthActionResult> => ({ ok: true, state: localState }))
+        trustedIpcMain.handle('auth:change-password', async (): Promise<AuthActionResult> => ({ ok: false, state: localState, message: 'Зміна пароля доступна у віддаленому режимі.' }))
         const database = openAppDatabase(app.getPath('userData'))
         closeDatabase = () => database.close()
         registerBankIpc(database)
@@ -134,7 +144,19 @@ if (!hasSingleInstanceLock) {
         registerDeletionIpc(database)
         registerStatementsIpc(database)
       } else {
-        const http = new HttpClient(runtimeConfig.apiUrl)
+        let session: RemoteAuthSession | undefined
+        const http = new HttpClient(runtimeConfig.apiUrl, 5_000, {
+          getAccessToken: () => session?.accessToken,
+          onUnauthorized: () => { void session?.expired() },
+        })
+        session = new RemoteAuthSession(app.getPath('userData'), http, publishAuthState)
+        await session.initialize()
+        trustedIpcMain.handle('auth:get-state', async () => session.currentState)
+        trustedIpcMain.handle('auth:login', async (_event, username: unknown, password: unknown): Promise<AuthActionResult> =>
+          session.login(typeof username === 'string' ? username : '', typeof password === 'string' ? password : ''))
+        trustedIpcMain.handle('auth:logout', async (): Promise<AuthActionResult> => session.logout())
+        trustedIpcMain.handle('auth:change-password', async (_event, currentPassword: unknown, newPassword: unknown): Promise<AuthActionResult> =>
+          session.changePassword(typeof currentPassword === 'string' ? currentPassword : '', typeof newPassword === 'string' ? newPassword : ''))
         // PDF snapshots and their release are per-window Electron resources; they never access SQLite.
         registerReportExportIpc()
         registerStatementsIpc(undefined, { readRows: async (ids, year) => http.postJson('/api/statements/snapshot', { ids, year: Number(year) }), readBankRows: async (ids, year) => http.postJson('/api/statements/bank-snapshot', { ids, year }) })

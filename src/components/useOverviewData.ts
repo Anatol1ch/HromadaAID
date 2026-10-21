@@ -16,7 +16,7 @@ export function useOverviewData(year: number) {
       const [next, catalog] = await Promise.all([window.hromadaAid.dashboard.get(year), catalogRepository.list(true)])
       if (sequence.current !== request) return
       setData(next); setCatalogs(catalog)
-    } catch { if (sequence.current === request) { setData(null); setError('Не вдалося завантажити показники з локального сховища.') } }
+    } catch { if (sequence.current === request) { setData(null); setError('Не вдалося завантажити показники.') } }
     finally { if (sequence.current === request) setLoading(false) }
   }, [year])
   useEffect(() => {

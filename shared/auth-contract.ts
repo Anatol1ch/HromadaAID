@@ -15,6 +15,33 @@ export type LoginInput = { username: string; password: string }
 export type LoginResult = { token: string; user: AuthenticatedUser; expiresAt: string }
 export type ChangePasswordInput = { currentPassword: string; newPassword: string }
 
+/** Public session state deliberately excludes the bearer token. */
+export type ClientAuthState =
+  | { mode: 'local'; status: 'authenticated'; user: null }
+  | { mode: 'remote'; status: 'authenticated'; user: AuthenticatedUser }
+  | { mode: 'remote'; status: 'unauthenticated' | 'unavailable'; user: null; message?: string }
+
+export type AuthActionResult = { ok: true; state: ClientAuthState } | { ok: false; state: ClientAuthState; message: string }
+
 export function isUserStatus(value: unknown): value is UserStatus {
   return typeof value === 'string' && (USER_STATUSES as readonly string[]).includes(value)
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+export function isAuthenticatedUser(value: unknown): value is AuthenticatedUser {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const item = value as Record<string, unknown>
+  return typeof item.id === 'string' && typeof item.username === 'string' &&
+    (typeof item.displayName === 'string' || item.displayName === null) &&
+    isStringArray(item.roles) && isStringArray(item.permissions)
+}
+
+export function isLoginResult(value: unknown): value is LoginResult {
+  return !!value && typeof value === 'object' && !Array.isArray(value) &&
+    typeof (value as Record<string, unknown>).token === 'string' &&
+    typeof (value as Record<string, unknown>).expiresAt === 'string' &&
+    isAuthenticatedUser((value as Record<string, unknown>).user)
 }

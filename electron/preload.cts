@@ -4,6 +4,17 @@ import type { HromadaAidApi } from './api-contract.js'
 const api: HromadaAidApi = {
   appName: 'HromadaAid',
   platform: process.platform,
+  auth: {
+    getState: () => invoke('auth:get-state'),
+    login: (username, password) => invoke('auth:login', username, password),
+    logout: () => invoke('auth:logout'),
+    changePassword: (currentPassword, newPassword) => invoke('auth:change-password', currentPassword, newPassword),
+    onStateChange: (listener) => {
+      const receive = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state)
+      ipcRenderer.on('auth:state', receive)
+      return () => ipcRenderer.removeListener('auth:state', receive)
+    },
+  },
   recipients: {
     list: (includeArchived) => invoke('recipients:list', includeArchived),
     get: (id) => invoke('recipients:get', id),

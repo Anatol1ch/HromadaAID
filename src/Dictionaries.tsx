@@ -24,7 +24,8 @@ import ConfirmDialog from './components/ConfirmDialog'
 import type { LucideIcon } from 'lucide-react'
 
 type CatalogData = Awaited<ReturnType<typeof window.hromadaAid.catalogs.list>>
-type Section = 'people' | 'programs' | 'decisions' | 'banks' | 'plans'
+export type DictionarySection = 'people' | 'programs' | 'decisions' | 'banks' | 'plans'
+type Section = DictionarySection
 type DecisionDraft = DecisionInput & { id?: string; expectedUpdatedAt?: string }
 type DictionaryTab = { key: Section; label: string; icon: LucideIcon }
 const dictionaryTabGroups: readonly (readonly DictionaryTab[])[] = [
@@ -39,9 +40,21 @@ function DictionaryTabGroup({ tabs, section, onSelect, management }: { tabs: rea
   </div>
 }
 
-export default function Dictionaries() {
+export default function Dictionaries({
+  allowedSections = ['people', 'programs', 'decisions', 'banks', 'plans'],
+  canManageCatalogs = true,
+  canManagePlans = true,
+  canManageDecisions = true,
+  canManagePersonal = true,
+}: {
+  allowedSections?: readonly DictionarySection[]
+  canManageCatalogs?: boolean
+  canManagePlans?: boolean
+  canManageDecisions?: boolean
+  canManagePersonal?: boolean
+}) {
   const { year } = useReportingYear()
-  const [section, setSection] = useState<Section>('people')
+  const [section, setSection] = useState<Section>(allowedSections[0] ?? 'programs')
   const [data, setData] = useState<CatalogData>({ programs: [], aidTypes: [], programOrderRevision: '', aidTypeOrderRevisions: {} })
   const [deletePreview, setDeletePreview] = useState<DeletePreview | null>(null)
   const [decisions, setDecisions] = useState<DecisionSummary[]>([])
@@ -64,14 +77,15 @@ export default function Dictionaries() {
     setLoading(true); setLoadError('')
     try {
       const [catalogs, nextDecisions] = await Promise.all([
-        catalogRepository.list(true), window.hromadaAid.decisions.list(),
+        catalogRepository.list(true), allowedSections.includes('decisions') ? window.hromadaAid.decisions.list() : Promise.resolve([]),
       ])
       if (sequence !== refreshSequence.current) return
       setCatalogsLoaded(true); setData(catalogs); setDecisions(nextDecisions.filter(item => item.decisionDate.slice(0, 4) === String(year))); setError('')
     } catch { if (sequence === refreshSequence.current) setLoadError('Не вдалося завантажити довідники з локального сховища.') }
     finally { if (sequence === refreshSequence.current) setLoading(false) }
-  }, [year])
+  }, [year, allowedSections])
   useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => { if (!allowedSections.includes(section)) setSection(allowedSections[0] ?? 'programs') }, [allowedSections, section])
   useCatalogUpdates(() => { void refresh() })
 
   const reorder = async (input: CatalogOrderInput) => {
@@ -144,16 +158,16 @@ export default function Dictionaries() {
   return <>
     <section className="page-heading"><div><div className="eyebrow">ДОВІДКОВІ ДАНІ</div><h1>Довідники</h1><p className="subtitle">Картки людей, банки, програми, види допомоги та реквізити рішень.</p></div></section>
     <div className="dictionary-navigation"><div className="dictionary-navigation-groups" role="tablist" aria-label="Підрозділи довідників" onKeyDown={navigateTabs}>
-      {dictionaryTabGroups.map((group, index) => <DictionaryTabGroup key={index} tabs={group} section={section} onSelect={setSection} management={index === 1}/>)}
+      {dictionaryTabGroups.map((group, index) => { const tabs = group.filter((tab) => allowedSections.includes(tab.key)); return tabs.length ? <DictionaryTabGroup key={index} tabs={tabs} section={section} onSelect={setSection} management={index === 1}/> : null })}
     </div></div>
     {error && !draft && !decisionDraft && <Alert variant="error" action={<button onClick={() => void refresh()}>Оновити</button>}>{error}</Alert>}
     <div id="dictionary-content" role="tabpanel" aria-labelledby={`dictionary-tab-${section}`}>
-    {section === 'people' ? <RecipientRegistry embedded/> : section === 'banks' ? <BankRegistry/> : section === 'plans' ? <>{!catalogsLoaded ? loading ? <DataState kind="loading" message="Завантажуємо довідники…"/> : <Alert variant="error" action={<button type="button" onClick={() => void refresh()}>Повторити завантаження</button>}>{loadError}</Alert> : <>{loadError && <Alert variant="error" action={<button type="button" onClick={() => void refresh()}>Повторити завантаження</button>}>{loadError}</Alert>}<AnnualPlanning programs={data.programs} aidTypes={data.aidTypes}/></>}</> : <section className={`dashboard-panel registry-panel ${section === 'decisions' ? 'dictionary-registry' : 'catalog-panel'}`}>
-      {section === 'programs' && <ProgramsCatalog loading={loading} error={loadError} onRetry={() => void refresh()} programs={data.programs} aidTypes={data.aidTypes} ordering={ordering} onReorder={reorder} onEditProgram={editProgram} onEditAid={editAidType} onDelete={(entity, id) => void requestDelete(entity, id)}/>}
+    {section === 'people' ? <RecipientRegistry embedded readOnly={!canManagePersonal}/> : section === 'banks' ? <BankRegistry readOnly={!canManagePersonal}/> : section === 'plans' ? <>{!catalogsLoaded ? loading ? <DataState kind="loading" message="Завантажуємо довідники…"/> : <Alert variant="error" action={<button type="button" onClick={() => void refresh()}>Повторити завантаження</button>}>{loadError}</Alert> : <>{loadError && <Alert variant="error" action={<button type="button" onClick={() => void refresh()}>Повторити завантаження</button>}>{loadError}</Alert>}<AnnualPlanning programs={data.programs} aidTypes={data.aidTypes} readOnly={!canManagePlans}/></>}</> : <section className={`dashboard-panel registry-panel ${section === 'decisions' ? 'dictionary-registry' : 'catalog-panel'}`}>
+      {section === 'programs' && <ProgramsCatalog loading={loading} error={loadError} onRetry={() => void refresh()} programs={data.programs} aidTypes={data.aidTypes} ordering={ordering} onReorder={reorder} onEditProgram={editProgram} onEditAid={editAidType} onDelete={(entity, id) => void requestDelete(entity, id)} readOnly={!canManageCatalogs}/>}
       {section === 'decisions' && <>
-        <DictionaryToolbar loading={loading} unavailable={Boolean(loadError)} title="Рішення виконкому" count={`Рішень: ${decisions.length}`}><button className="primary-button" onClick={openNewDecision}><Plus size={17}/>Додати рішення</button></DictionaryToolbar>
+        <DictionaryToolbar loading={loading} unavailable={Boolean(loadError)} title="Рішення виконкому" count={`Рішень: ${decisions.length}`}>{canManageDecisions && <button className="primary-button" onClick={openNewDecision}><Plus size={17}/>Додати рішення</button>}</DictionaryToolbar>
         <DictionaryTable loading={loading} error={loadError} onRetry={() => void refresh()} label="Рішення виконкому" className="dictionary-decisions" empty={!decisions.length ? `За ${year} рік рішень поки немає. Додайте перше рішення.` : undefined} columns={[{label:'Номер рішення'},{label:'Дата рішення',width:'24%'},{label:'Пов’язаних призначень',width:'30%',className:'dictionary-center'},{label:'Дії',width:'94px',className:'dictionary-actions-cell'}]}>
-          {decisions.map(item => <tr key={item.id}><td><strong className="registry-name">№ {item.decisionNumber}</strong></td><td className="dictionary-nowrap">{formatDate(item.decisionDate)}</td><td className="dictionary-center dictionary-number">{item.assignmentCount}</td><td className="dictionary-actions-cell"><div className="registry-row-actions"><button className="table-action" title="Редагувати рішення" aria-label={`Редагувати рішення: № ${item.decisionNumber}`} onClick={() => { const next = { id: item.id, expectedUpdatedAt: item.updatedAt, decisionNumber: item.decisionNumber, decisionDate: item.decisionDate, title: item.title ?? '' }; setDecisionDraft(next); setInitial(JSON.stringify(next)); setError('') }}><Pencil size={16}/></button><button className="table-action danger-action" title="Видалити рішення" onClick={() => void requestDelete('decision', item.id)} aria-label={`Видалити рішення: № ${item.decisionNumber}`}><Trash2 size={16}/></button></div></td></tr>)}
+          {decisions.map(item => <tr key={item.id}><td><strong className="registry-name">№ {item.decisionNumber}</strong></td><td className="dictionary-nowrap">{formatDate(item.decisionDate)}</td><td className="dictionary-center dictionary-number">{item.assignmentCount}</td><td className="dictionary-actions-cell">{canManageDecisions && <div className="registry-row-actions"><button className="table-action" title="Редагувати рішення" aria-label={`Редагувати рішення: № ${item.decisionNumber}`} onClick={() => { const next = { id: item.id, expectedUpdatedAt: item.updatedAt, decisionNumber: item.decisionNumber, decisionDate: item.decisionDate, title: item.title ?? '' }; setDecisionDraft(next); setInitial(JSON.stringify(next)); setError('') }}><Pencil size={16}/></button><button className="table-action danger-action" title="Видалити рішення" onClick={() => void requestDelete('decision', item.id)} aria-label={`Видалити рішення: № ${item.decisionNumber}`}><Trash2 size={16}/></button></div>}</td></tr>)}
         </DictionaryTable>
       </>}
     </section>}

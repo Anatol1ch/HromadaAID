@@ -7,7 +7,7 @@ import BankFormModal from './components/BankFormModal'
 import DictionaryTable, { DictionarySearch, DictionaryToolbar } from './components/DictionaryTable'
 import ConfirmDialog from './components/ConfirmDialog'
 
-export default function BankRegistry() {
+export default function BankRegistry({ readOnly = false }: { readOnly?: boolean }) {
   const [banks, setBanks] = useState<BankRecord[]>([])
   const [query, setQuery] = useState('')
   const [revision, setRevision] = useState(0)
@@ -36,11 +36,11 @@ export default function BankRegistry() {
   return <section className="dashboard-panel registry-panel bank-registry dictionary-registry">
     <DictionaryToolbar unavailable={Boolean(loadError)} title="Банки" count={`Банків: ${banks.length}`} loading={loading}>
       <DictionarySearch value={query} onChange={setQuery} label="Пошук банків за назвою, МФО або ЄДРПОУ" placeholder="Назва банку, МФО або ЄДРПОУ"/>
-      <button className="primary-button" onClick={() => setEditing('new')}><Plus size={17}/>Додати банк</button>
+      {!readOnly && <button className="primary-button" onClick={() => setEditing('new')}><Plus size={17}/>Додати банк</button>}
     </DictionaryToolbar>
     {error && <Alert variant="error" action={<button onClick={() => setRevision(current => current + 1)}>Оновити</button>}>{error}</Alert>}
     <DictionaryTable error={loadError} onRetry={() => setRevision(current => current + 1)} label="Банки" className="dictionary-banks" loading={loading} filtered={Boolean(query.trim())} empty={!banks.length ? query.trim() ? 'За цим запитом банків не знайдено.' : 'Банків поки немає. Додайте перший банк.' : undefined} columns={[{label:'№',width:'48px'},{label:'Найменування банку'},{label:'Наборів реквізитів',width:'160px',className:'dictionary-center'},{label:'Дії',width:'94px',className:'dictionary-actions-cell'}]}>
-      {banks.map((bank, index) => <tr key={bank.id}><td className="dictionary-number">{index + 1}</td><td><strong className="registry-name">{bank.name}</strong></td><td className="dictionary-center dictionary-number">{bank.details.length}</td><td className="dictionary-actions-cell"><div className="registry-row-actions"><button className="table-action" title="Редагувати банк" aria-label={`Редагувати банк: ${bank.name}`} onClick={() => void open(bank.id)}><Pencil size={17}/></button><button className="table-action danger-action" title="Видалити банк" aria-label={`Видалити банк: ${bank.name}`} onClick={() => void open(bank.id, true)}><Trash2 size={17}/></button></div></td></tr>)}
+      {banks.map((bank, index) => <tr key={bank.id}><td className="dictionary-number">{index + 1}</td><td><strong className="registry-name">{bank.name}</strong></td><td className="dictionary-center dictionary-number">{bank.details.length}</td><td className="dictionary-actions-cell">{!readOnly && <div className="registry-row-actions"><button className="table-action" title="Редагувати банк" aria-label={`Редагувати банк: ${bank.name}`} onClick={() => void open(bank.id)}><Pencil size={17}/></button><button className="table-action danger-action" title="Видалити банк" aria-label={`Видалити банк: ${bank.name}`} onClick={() => void open(bank.id, true)}><Trash2 size={17}/></button></div>}</td></tr>)}
     </DictionaryTable>
     {editing && <BankFormModal initial={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); setRevision(current => current + 1) }}/>}
     {deleting && <ConfirmDialog title="Видалити банк?" message={`«${deleting.name}». Буде безповоротно видалено банк та ${deleting.details.length} наборів реквізитів. Картки отримувачів не видалятимуться.`} confirmLabel="Видалити" confirmIcon={<Trash2 size={17}/>} error={deleteError} onCancel={() => setDeleting(null)} onConfirm={async () => {

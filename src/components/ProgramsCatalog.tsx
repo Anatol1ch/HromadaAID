@@ -19,9 +19,10 @@ type Props = {
   ordering: boolean
   onReorder: (input: CatalogOrderInput) => Promise<boolean>
   onDelete: (entity: 'program' | 'aidType', id: string) => void
+  readOnly?: boolean
 }
 
-export default function ProgramsCatalog({ programs, aidTypes, onEditProgram, onEditAid, onDelete, ordering, onReorder, loading = false, error, onRetry }: Props) {
+export default function ProgramsCatalog({ programs, aidTypes, onEditProgram, onEditAid, onDelete, ordering, onReorder, readOnly = false, loading = false, error, onRetry }: Props) {
   const id = useId()
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [viewId, setViewId] = useState<string | null>(null)
@@ -34,7 +35,7 @@ export default function ProgramsCatalog({ programs, aidTypes, onEditProgram, onE
   const allowed = (target: DragItem) => dragging.current?.kind === target.kind && dragging.current?.programId === target.programId
   const finish = () => { dragging.current = null; setDragId(''); setOverId('') }
   const move = async (source: DragItem, targetId: string) => {
-    if (ordering || moving.current || source.id === targetId) return
+    if (readOnly || ordering || moving.current || source.id === targetId) return
     const ids = (source.kind === 'program' ? programs : aidTypes.filter(type => type.programId === source.programId)).map(item => item.id)
     const from = ids.indexOf(source.id), to = ids.indexOf(targetId)
     if (from < 0 || to < 0) return
@@ -47,9 +48,9 @@ export default function ProgramsCatalog({ programs, aidTypes, onEditProgram, onE
     onDragOver: (event: DragEvent) => { if (allowed(target) && !ordering) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; setOverId(target.id) } },
     onDrop: (event: DragEvent) => { if (!allowed(target)) return; event.preventDefault(); event.stopPropagation(); const source = dragging.current!; finish(); void move(source, target.id) },
   })
-  const handle = (item: DragItem, name: string) => <button type="button" className="catalog-sort-handle" draggable={!ordering} aria-disabled={ordering}
+  const handle = (item: DragItem, name: string) => <button type="button" className="catalog-sort-handle" draggable={!ordering && !readOnly} aria-disabled={ordering || readOnly}
     aria-label={`Змінити порядок: ${name}`} aria-describedby={`${id}-sort-help`} title="Перетягніть або натисніть Alt + ↑ / ↓"
-    onDragStart={event => { if (ordering) { event.preventDefault(); return }; event.stopPropagation(); dragging.current = item; setDragId(item.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', item.id) }}
+    onDragStart={event => { if (ordering || readOnly) { event.preventDefault(); return }; event.stopPropagation(); dragging.current = item; setDragId(item.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', item.id) }}
     onDragEnd={finish} onKeyDown={event => {
       if (!event.altKey || !['ArrowUp', 'ArrowDown'].includes(event.key)) return
       event.preventDefault(); event.stopPropagation()
@@ -72,7 +73,7 @@ export default function ProgramsCatalog({ programs, aidTypes, onEditProgram, onE
   })
   return <div className="programs-catalog" aria-busy={ordering || loading}>
     <span id={`${id}-sort-help`} className="visually-hidden">Перетягніть за ручку або використовуйте Alt зі стрілками вгору та вниз. Види допомоги можна переміщувати лише в межах своєї програми.</span><span role="status" aria-label="Порядок довідника" className="visually-hidden">{notice}</span>
-    <header className="registry-toolbar"><div><h2>Програми та допомоги</h2><p>Види матеріальної допомоги, згруповані за програмами.</p></div><button type="button" className="primary-button" disabled={ordering || loading || Boolean(error)} onClick={() => onEditProgram()}><Plus size={17}/>Додати програму</button></header>
+    <header className="registry-toolbar"><div><h2>Програми та допомоги</h2><p>Види матеріальної допомоги, згруповані за програмами.</p></div>{!readOnly && <button type="button" className="primary-button" disabled={ordering || loading || Boolean(error)} onClick={() => onEditProgram()}><Plus size={17}/>Додати програму</button>}</header>
     {loading && !programs.length ? <ContentSkeleton label="Завантажуємо програми та види допомоги…" lines={6}/> : error ? <Alert variant="error" action={onRetry && <button type="button" onClick={onRetry}>Повторити завантаження</button>}>{error}</Alert> : !loading && !programs.length && <DataState kind="empty" message="Програм ще немає" description="Додайте програму, щоб створити її види допомоги."/>}
     {!error && programs.map(program => {
       const types = grouped.get(program.id) ?? []
@@ -80,22 +81,22 @@ export default function ProgramsCatalog({ programs, aidTypes, onEditProgram, onE
       return <section className={`program-catalog-block ${programTone(program.id)}${dragId === program.id ? ' catalog-dragging' : ''}${overId === program.id ? ' catalog-drag-over' : ''}`} key={program.id} {...dropProps({ kind: 'program', id: program.id })} aria-labelledby={`${id}-${program.id}-title`}>
         <header className="program-catalog-header">
           <div className="program-catalog-title">{handle({ kind: 'program', id: program.id }, program.shortName)}<span className="program-catalog-icon"><Landmark size={20}/></span><div><h3 id={`${id}-${program.id}-title`}>{program.shortName}{!program.isActive && <small className="catalog-inactive">Неактивна</small>}</h3><p>{program.approvalNumber ? `Рішення № ${program.approvalNumber} від ${formatDate(program.approvalDate)}` : 'Види матеріальної допомоги в межах програми'}</p><span className="program-type-count">Видів допомоги: {types.length}</span></div></div>
-          <div className="program-catalog-actions"><button type="button" className="table-action" disabled={ordering} aria-label={`Редагувати програму «${program.shortName}»`} title="Редагувати програму" onClick={() => onEditProgram(program)}><Pencil size={17}/></button><button type="button" className="table-action danger-action" disabled={ordering} aria-label={`Видалити програму «${program.shortName}»`} title="Видалити програму" onClick={() => onDelete('program', program.id)}><Trash2 size={17}/></button><button type="button" className="program-collapse" aria-label={`${expanded ? 'Згорнути' : 'Розгорнути'} види допомоги: ${program.shortName}`} aria-expanded={expanded} aria-controls={`${id}-${program.id}-list`} onClick={() => toggle(program.id)}><ChevronDown size={18}/></button></div>
+          <div className="program-catalog-actions">{!readOnly && <><button type="button" className="table-action" disabled={ordering} aria-label={`Редагувати програму «${program.shortName}»`} title="Редагувати програму" onClick={() => onEditProgram(program)}><Pencil size={17}/></button><button type="button" className="table-action danger-action" disabled={ordering} aria-label={`Видалити програму «${program.shortName}»`} title="Видалити програму" onClick={() => onDelete('program', program.id)}><Trash2 size={17}/></button></>}<button type="button" className="program-collapse" aria-label={`${expanded ? 'Згорнути' : 'Розгорнути'} види допомоги: ${program.shortName}`} aria-expanded={expanded} aria-controls={`${id}-${program.id}-list`} onClick={() => toggle(program.id)}><ChevronDown size={18}/></button></div>
         </header>
         <div id={`${id}-${program.id}-list`} hidden={!expanded}>
           {types.length ? <ul className="program-aid-list">{types.map(type => <li key={type.id} className={`${dragId === type.id ? 'catalog-dragging' : ''}${overId === type.id ? ' catalog-drag-over' : ''}`} {...dropProps({ kind: 'aidType', id: type.id, programId: program.id })}>
             {handle({ kind: 'aidType', id: type.id, programId: program.id }, type.shortName)}
             <button type="button" className="program-aid-open" onClick={() => setViewId(type.id)}><HandCoins size={17}/><span>{type.shortName}{!type.isActive && <small className="catalog-inactive">Неактивний</small>}</span></button>
             <span className="program-aid-count">Призначень: <strong>{type.assignmentCount}</strong></span>
-            <div className="program-catalog-actions"><button type="button" className="table-action" disabled={ordering} aria-label={`Редагувати вид допомоги «${type.shortName}»`} title="Редагувати вид допомоги" onClick={() => onEditAid(type)}><Pencil size={16}/></button><button type="button" className="table-action danger-action" disabled={ordering} aria-label={`Видалити вид допомоги «${type.shortName}»`} title="Видалити вид допомоги" onClick={() => onDelete('aidType', type.id)}><Trash2 size={16}/></button></div>
+            {!readOnly && <div className="program-catalog-actions"><button type="button" className="table-action" disabled={ordering} aria-label={`Редагувати вид допомоги «${type.shortName}»`} title="Редагувати вид допомоги" onClick={() => onEditAid(type)}><Pencil size={16}/></button><button type="button" className="table-action danger-action" disabled={ordering} aria-label={`Видалити вид допомоги «${type.shortName}»`} title="Видалити вид допомоги" onClick={() => onDelete('aidType', type.id)}><Trash2 size={16}/></button></div>}
           </li>)}</ul> : <DataState kind="empty" compact message="У програмі поки немає видів допомоги."/>}
         </div>
-        <footer className="program-catalog-footer" hidden={!expanded}><button type="button" className="secondary-button" disabled={ordering || !program.isActive} title={!program.isActive ? 'У неактивну програму не можна додавати нові види допомоги' : undefined} onClick={() => onEditAid(undefined, program.id)}><Plus size={16}/>Додати вид допомоги</button></footer>
+        {!readOnly && <footer className="program-catalog-footer" hidden={!expanded}><button type="button" className="secondary-button" disabled={ordering || !program.isActive} title={!program.isActive ? 'У неактивну програму не можна додавати нові види допомоги' : undefined} onClick={() => onEditAid(undefined, program.id)}><Plus size={16}/>Додати вид допомоги</button></footer>}
       </section>
     })}
     {viewed && <Modal title="Вид допомоги" description="Відомості довідника та зв’язок із програмою." headerIcon={<HandCoins size={22}/>} size="large" onClose={() => setViewId(null)} className="catalog-details-modal">
       <dl className="catalog-details"><div><dt>Коротка назва</dt><dd>{viewed.shortName}</dd></div><div><dt>Повна офіційна назва</dt><dd>{viewed.officialName}</dd></div><div><dt>Програма</dt><dd>{viewedProgram?.shortName ?? 'Програму не знайдено'}</dd></div><div><dt>Кількість пов’язаних призначень</dt><dd>{viewed.assignmentCount}</dd></div>{viewed.direction && <div><dt>Напрям</dt><dd>{viewed.direction}</dd></div>}{viewed.fundingSource && <div><dt>Джерело фінансування</dt><dd>{viewed.fundingSource}</dd></div>}</dl>
-      <div className="recipient-form-actions recipient-card-actions"><div><button type="button" className="secondary-button" onClick={() => setViewId(null)}>Закрити</button><button type="button" className="primary-button" onClick={() => { setViewId(null); onEditAid(viewed) }}><Pencil size={17}/>Редагувати</button></div></div>
+      <div className="recipient-form-actions recipient-card-actions"><div><button type="button" className="secondary-button" onClick={() => setViewId(null)}>Закрити</button>{!readOnly && <button type="button" className="primary-button" onClick={() => { setViewId(null); onEditAid(viewed) }}><Pencil size={17}/>Редагувати</button>}</div></div>
     </Modal>}
   </div>
 }

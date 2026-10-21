@@ -1,4 +1,5 @@
 import type { AddressParts } from './address.js'
+import type { AuthActionResult, ClientAuthState } from './auth-contract.js'
 import { ASSIGNMENT_STATUSES, type AssignmentStatus } from './assignment-model.js'
 export type { AssignmentStatus } from './assignment-model.js'
 
@@ -284,6 +285,13 @@ export type GeneratedBankStatement = { id: string; fileName: string; recordCount
 
 export type HromadaAidApi = {
   appName: string; platform: string
+  auth: {
+    getState: () => Promise<ClientAuthState>
+    login: (username: string, password: string) => Promise<AuthActionResult>
+    logout: () => Promise<AuthActionResult>
+    changePassword: (currentPassword: string, newPassword: string) => Promise<AuthActionResult>
+    onStateChange: (listener: (state: ClientAuthState) => void) => () => void
+  }
   recipients: { list: (includeArchived?: boolean) => Promise<RecipientSummary[]>; get: (id: string) => Promise<RecipientRecord | null>; save: (input: RecipientInput, id?: string, confirmSameName?: boolean, expectedUpdatedAt?: string) => Promise<RecipientSaveResult>; assignmentHistory: (id: string) => Promise<AssignmentRecord[]> }
   banks: { list: (query?: string) => Promise<BankRecord[]>; get: (id: string) => Promise<BankRecord | null>; details: (bankId: string) => Promise<BankDetail[]>; save: (input: BankInput, id?: string, expectedUpdatedAt?: string) => Promise<BankSaveResult>; remove: (id: string, expectedUpdatedAt?: string) => Promise<{ ok: boolean; message?: string }> }
   catalogs: { list: (includeInactive?: boolean) => Promise<CatalogList>; save: (input: CatalogEditInput) => Promise<CatalogSaveResult>; reorder: (input: CatalogOrderInput) => Promise<CatalogOrderResult> }
