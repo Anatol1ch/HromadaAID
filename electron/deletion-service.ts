@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import type { DeleteEntity, DeletePreview } from './api-contract.js'
 import { orderScope, touchOrderRevision } from './catalog-order.js'
@@ -68,7 +69,7 @@ export function previewDeletion(database: DatabaseSync, entity: DeleteEntity, id
       if (orphanApprovals) dependencies.push({ label: 'Реквізити затвердження, пов’язані лише з цією програмою', count: orphanApprovals })
     }
   }
-  return name === null ? null : { entity, id, name, dependencies }
+  return name === null ? null : { entity, id, name, dependencies, confirmationToken: createHash('sha256').update(JSON.stringify({ entity, id, name, dependencies })).digest('hex') }
 }
 
 function removeAssignments(database: DatabaseSync, where: string, value: string) {
@@ -82,10 +83,12 @@ function removeAssignments(database: DatabaseSync, where: string, value: string)
   }
 }
 
-export function executeDeletion(database: DatabaseSync, entity: DeleteEntity, id: string) {
+export function executeDeletion(database: DatabaseSync, entity: DeleteEntity, id: string, confirmationToken?: unknown) {
   try {
     database.exec('BEGIN IMMEDIATE')
-    if (!previewDeletion(database, entity, id)) { database.exec('ROLLBACK'); return { ok: false, message: 'Запис уже видалено або його не знайдено. Оновіть список.' } }
+    const current = previewDeletion(database, entity, id)
+    if (!current) { database.exec('ROLLBACK'); return { ok: false, message: 'Запис уже видалено або його не знайдено. Оновіть список.' } }
+    if (typeof confirmationToken !== 'string' || confirmationToken !== current.confirmationToken) { database.exec('ROLLBACK'); return { ok: false, message: 'Пов’язані дані змінилися. Оновіть попередній перегляд перед видаленням.' } }
     if (entity === 'assignment') removeAssignments(database, 'id=?', id)
     if (entity === 'recipient') {
       removeAssignments(database, 'recipient_id=?', id)

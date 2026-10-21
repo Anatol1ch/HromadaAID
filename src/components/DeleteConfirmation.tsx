@@ -22,7 +22,7 @@ export default function DeleteConfirmation({ preview, onClose, onDeleted }: {
     if (committed.current) return
     setError('')
     try {
-      const result = await window.hromadaAid.deletion.execute(preview.entity, preview.id)
+      const result = await window.hromadaAid.deletion.execute(preview.entity, preview.id, preview.confirmationToken)
       if (!result.ok) { setError(result.message ?? 'Не вдалося видалити запис.'); return }
       committed.current = true; setDeleted(true)
       if (preview.entity === 'program' || preview.entity === 'aidType') notifyCatalogsChanged()

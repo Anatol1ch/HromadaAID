@@ -16,6 +16,7 @@ import { addDecisionAssignments, saveDecision } from '../../electron/decision-st
 import { saveAssignment } from '../../electron/assignment-store.js'
 import { changeAssignmentStatuses } from '../../electron/assignment-status.js'
 import { listStatementAssignments } from '../../electron/statement-list-data.js'
+import { executeDeletion, isDeleteEntity, previewDeletion } from '../../electron/deletion-service.js'
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, BankSaveResult, CatalogList, DashboardData, DecisionRecord, DecisionSummary, HealthResponse, ProgramApproval, RecipientRecord, RecipientSaveResult, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from '../../shared/api-contract.js'
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -129,6 +130,9 @@ export function createApp(database: DatabaseSync): FastifyInstance {
 
   app.get<{ Querystring: { year?: string } }>('/api/statements', async (request): Promise<AssignmentListResult> =>
     listStatementAssignments(database, request.query.year === undefined ? undefined : Number(request.query.year)))
+
+  app.get<{ Params: { entity: string; id: string } }>('/api/deletion/:entity/:id', async (request) => isDeleteEntity(request.params.entity) ? previewDeletion(database, request.params.entity, request.params.id) : null)
+  app.post<{ Params: { entity: string; id: string }; Body: { confirmationToken?: unknown } }>('/api/deletion/:entity/:id', async (request, reply) => { if (!isDeleteEntity(request.params.entity)) return reply.status(400).send({ ok:false,message:'Некоректний тип запису.' }); const result=executeDeletion(database, request.params.entity, request.params.id, request.body?.confirmationToken); return reply.status(result.ok?200:409).send(result) })
 
   app.get('/api/program-approvals', async (): Promise<ProgramApproval[]> => listProgramApprovals(database))
   app.post<{ Body: unknown }>('/api/program-approvals', async (request, reply) => {

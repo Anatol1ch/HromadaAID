@@ -55,7 +55,7 @@ const api: HromadaAidApi = {
   },
   deletion: {
     preview: (entity, id) => invoke('deletion:preview', entity, id),
-    execute: (entity, id) => invoke('deletion:execute', entity, id),
+    execute: (entity, id, confirmationToken) => invoke('deletion:execute', entity, id, confirmationToken),
   },
   statements: {
     list: (year) => invoke('statements:list', year),
