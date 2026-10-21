@@ -23,7 +23,7 @@ export function listAnnualPlanEntries(database: DatabaseSync, yearValue: unknown
   const year = resolveAccountingYear(yearValue)
   return database.prepare(`SELECT e.id,e.year,e.aid_type_id AS aidTypeId,t.short_name AS aidTypeName,t.official_name AS aidTypeOfficialName,
     p.short_name AS programName,p.official_name AS programOfficialName,
-    e.reference_label AS referenceLabel,e.planned_recipient_count AS plannedRecipientCount,e.planned_amount_minor AS plannedAmountMinor
+    e.reference_label AS referenceLabel,e.planned_recipient_count AS plannedRecipientCount,e.planned_amount_minor AS plannedAmountMinor,e.updated_at AS updatedAt
     FROM annual_plan_entries e JOIN aid_types t ON t.id=e.aid_type_id JOIN programs p ON p.id=t.program_id
     WHERE e.year=? ORDER BY p.short_name,t.short_name,e.reference_label`).all(year) as AnnualPlanEntry[]
 }

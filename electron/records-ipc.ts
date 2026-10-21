@@ -41,7 +41,7 @@ export function registerRecordsIpc(database: DatabaseSync) {
   ipcMain.handle('reports:summary', (_event, yearValue: unknown, periodValue: unknown) => reportSummary(database, yearValue, periodValue))
 
   ipcMain.handle('reports:annual-plan-list', (_event, year: unknown) => listAnnualPlans(database, resolveAccountingYear(year)))
-  ipcMain.handle('reports:annual-plan-save', (_event, input: unknown) => saveAnnualPlan(database, input))
+  ipcMain.handle('reports:annual-plan-save', (_event, input: unknown, expectedUpdatedAt?: unknown) => saveAnnualPlan(database, input, expectedUpdatedAt))
 
   ipcMain.handle('reports:plan-list', (_event, yearValue: unknown) => {
     return listAnnualPlanEntries(database, yearValue)

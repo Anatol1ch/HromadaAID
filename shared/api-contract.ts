@@ -195,7 +195,7 @@ export function isProgramApprovalList(value: unknown): value is ProgramApproval[
 
 export function isAnnualAidPlan(value: unknown): value is AnnualAidPlan {
   return isRecord(value) && typeof value.year === 'number' && typeof value.aidTypeId === 'string' &&
-    (typeof value.plannedRecipientCount === 'number' || value.plannedRecipientCount === null) && typeof value.plannedAmountMinor === 'number'
+    (typeof value.plannedRecipientCount === 'number' || value.plannedRecipientCount === null) && typeof value.plannedAmountMinor === 'number' && typeof value.updatedAt === 'string'
 }
 
 export function isAnnualAidPlanList(value: unknown): value is AnnualAidPlan[] {
@@ -256,10 +256,10 @@ export type DashboardData = { year: number; assignmentCount: number; totalMinor:
 export type ReportSheet = 'ПЛАН' | 'ФАКТ (МІСЯЦЬ)' | 'ФАКТ (КВАРТАЛ)' | 'ПЛАН-ФАКТ (РІК)'
 export type ReportSourceRow = { rowNumber: number; label: string; values: (string | number | null)[]; formulas: (string | null)[]; asOf: string | null }
 export type ReportPeriod = { kind: 'year-to-date'; endDate: string } | { kind: 'annual' } | { kind: 'year-to-month'; value: number } | { kind: 'month'; value: number } | { kind: 'quarter'; value: number }
-export type AnnualAidPlan = { year: number; aidTypeId: string; plannedRecipientCount: number | null; plannedAmountMinor: number }
+export type AnnualAidPlan = { year: number; aidTypeId: string; plannedRecipientCount: number | null; plannedAmountMinor: number; updatedAt: string }
 export type AnnualAidPlanInput = { year: number; aidTypeId: string; plannedRecipientCount: number; plannedAmountMinor: number }
 export type AnnualPlanEntry = { id: string; year: number; aidTypeId: string; aidTypeName: string; aidTypeOfficialName: string; programName: string; programOfficialName: string; referenceLabel: string; plannedRecipientCount: number | null; plannedAmountMinor: number }
-export type AnnualPlanInput = { year: number; aidTypeId: string; referenceLabel: string; plannedRecipientCount: number | null; plannedAmountMinor: number }
+export type AnnualPlanInput = { year: number; aidTypeId: string; referenceLabel: string; plannedRecipientCount: number | null; plannedAmountMinor: number; updatedAt: string }
 export type ReportSummaryRow = { programId?: string; plannedRecipientCount?: number; plannedAmountMinor?: number; aidTypeId: string; officialName: string; programOfficialName: string; assignmentCount: number; amountMinor: number; paidCount: number; paidAmountMinor: number }
 export type ReportSummary = { programs?: { id: string; shortName: string; officialName: string }[]; year: number; periodLabel: string; rows: ReportSummaryRow[] }
 export type ReportExportSnapshot = { kind: ReportPdfKind; period: ReportPeriod; periodRange: string; summary: ReportSummary }
@@ -285,7 +285,7 @@ export type HromadaAidApi = {
   decisions: { list: () => Promise<DecisionSummary[]>; get: (id: string) => Promise<DecisionRecord | null>; save: (input: DecisionInput, id?: string, expectedUpdatedAt?: string) => Promise<DecisionSaveResult>; addAssignments: (decisionId: string, assignments: AssignmentDraft[], requestId: string) => Promise<AssignmentSaveResult> }
   assignments: { list: (year: number) => Promise<AssignmentListResult>; save: (input: AssignmentInput, id?: string, expectedUpdatedAt?: string, requestId?: string) => Promise<AssignmentChangeResult>; changeStatuses: (input: AssignmentStatusBatchInput, requestId?: string) => Promise<AssignmentStatusBatchResult> }
   dashboard: { get: (year: number) => Promise<DashboardData> }
-  reports: { get: (sheet: ReportSheet) => Promise<ReportSourceRow[]>; summary: (year: number, period: ReportPeriod) => Promise<ReportSummary>; annualPlanList: (year: number) => Promise<AnnualAidPlan[]>; annualPlanSave: (input: AnnualAidPlanInput) => Promise<{ ok: boolean; message?: string }>; generate: (snapshot: ReportExportSnapshot) => Promise<{ ok: true; document: PreparedReport } | { ok: false; message: string }>; savePdf: (documentId: string) => Promise<ReportExportResult>; saveExcel: (documentId: string) => Promise<ReportExportResult>; release: (documentId: string) => Promise<void>; planList: (year: number) => Promise<AnnualPlanEntry[]>; planSave: (input: AnnualPlanInput, id?: string) => Promise<{ ok: boolean; message?: string }>; planRemove: (id: string) => Promise<{ ok: boolean; message?: string }> }
+  reports: { get: (sheet: ReportSheet) => Promise<ReportSourceRow[]>; summary: (year: number, period: ReportPeriod) => Promise<ReportSummary>; annualPlanList: (year: number) => Promise<AnnualAidPlan[]>; annualPlanSave: (input: AnnualAidPlanInput, expectedUpdatedAt?: string) => Promise<{ ok: boolean; message?: string }>; generate: (snapshot: ReportExportSnapshot) => Promise<{ ok: true; document: PreparedReport } | { ok: false; message: string }>; savePdf: (documentId: string) => Promise<ReportExportResult>; saveExcel: (documentId: string) => Promise<ReportExportResult>; release: (documentId: string) => Promise<void>; planList: (year: number) => Promise<AnnualPlanEntry[]>; planSave: (input: AnnualPlanInput, id?: string) => Promise<{ ok: boolean; message?: string }>; planRemove: (id: string) => Promise<{ ok: boolean; message?: string }> }
   deletion: { preview: (entity: DeleteEntity, id: string) => Promise<DeletePreview | null>; execute: (entity: DeleteEntity, id: string) => Promise<{ ok: boolean; message?: string }> }
   statements: { list: (year: number) => Promise<AssignmentListResult>; generate: (kind: StatementKind, assignmentIds: string[], year: number, parameters: StatementParameters[]) => Promise<{ ok: true; documents: GeneratedStatement[] } | { ok: false; message: string }>; generateBank: (assignmentIds: string[], year: number) => Promise<{ ok: true; document: GeneratedBankStatement } | { ok: false; message: string }>; save: (documentId: string) => Promise<{ ok: boolean; message?: string }>; savePdf: (documentId: string) => Promise<{ ok: boolean; message?: string }> }
 }

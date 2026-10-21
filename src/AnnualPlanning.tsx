@@ -63,7 +63,7 @@ function PlanModal({ year, type, program, plan, onClose, onSaved }: { year: numb
     setErrors(next)
     if (Object.keys(next).length) { form.current?.querySelector<HTMLInputElement>(`[data-plan-field="${Object.keys(next)[0]}"]`)?.focus(); return }
     saving.current = true; setBusy(true)
-    try { const result = await window.hromadaAid.reports.annualPlanSave({year,aidTypeId:type.id,plannedRecipientCount:count,plannedAmountMinor:amount!}); if (!result.ok) setError(result.message ?? 'Не вдалося зберегти план.'); else onSaved() }
+    try { const result = await window.hromadaAid.reports.annualPlanSave({year,aidTypeId:type.id,plannedRecipientCount:count,plannedAmountMinor:amount!}, plan?.updatedAt); if (!result.ok) setError(result.message ?? 'Не вдалося зберегти план.'); else onSaved() }
     catch { setError('Не вдалося зберегти план. Введені дані залишено у формі.') }
     finally { saving.current = false; setBusy(false) }
   }

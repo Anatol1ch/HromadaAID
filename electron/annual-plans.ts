@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
+import { nextRecordRevision } from '../shared/record-revision.js'
 import type { AnnualAidPlan, AnnualAidPlanInput } from './api-contract.js'
 
 export function listAnnualPlans(db: DatabaseSync, year: number): AnnualAidPlan[] {
@@ -7,7 +8,7 @@ export function listAnnualPlans(db: DatabaseSync, year: number): AnnualAidPlan[]
     FROM annual_aid_plans WHERE year=?`).all(year) as AnnualAidPlan[]
 }
 
-export function saveAnnualPlan(db: DatabaseSync, value: unknown) {
+export function saveAnnualPlan(db: DatabaseSync, value: unknown, expectedUpdatedAt?: unknown) {
   if (!value || typeof value !== 'object') return { ok: false, message: 'Перевірте планові показники.' }
   const input = value as AnnualAidPlanInput
   if (!Number.isInteger(input.year) || input.year < 2000 || input.year > 2200 || typeof input.aidTypeId !== 'string' || !input.aidTypeId ||

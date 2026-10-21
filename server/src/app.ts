@@ -155,7 +155,7 @@ export function createApp(database: DatabaseSync): FastifyInstance {
   app.get<{ Querystring: { year?: string } }>('/api/reports/plan-entries', async (request): Promise<AnnualPlanEntry[]> =>
     listAnnualPlanEntries(database, request.query.year === undefined ? undefined : Number(request.query.year)))
 
-  app.post<{ Body: unknown }>('/api/reports/annual-plans', async (request, reply) => { const result = isRecord(request.body) && 'input' in request.body ? saveAnnualPlan(database, request.body.input) : { ok: false, message: 'Некоректні дані плану.' }; return reply.status(result.ok ? 200 : 400).send(result) })
+  app.post<{ Body: unknown }>('/api/reports/annual-plans', async (request, reply) => { const result = isRecord(request.body) && 'input' in request.body ? saveAnnualPlan(database, request.body.input, request.body.expectedUpdatedAt) : { ok: false, message: 'Некоректні дані плану.' }; return reply.status(result.ok ? 200 : 400).send(result) })
   app.post<{ Body: unknown }>('/api/reports/plan-entries', async (request, reply) => {
     if (!isRecord(request.body) || !('input' in request.body)) return reply.status(400).send({ ok:false, message:'Некоректні дані плану.' })
     const input=request.body.input as Record<string,unknown>; if (!Number.isInteger(Number(input.year))||typeof String(input.aidTypeId)!=='string'||typeof input.referenceLabel!=='string'||!String(input.referenceLabel).trim()||!Number.isInteger(Number(input.plannedAmountMinor))||(input.plannedRecipientCount as number | null!==null&&!Number.isInteger(input.plannedRecipientCount as number | null))) return reply.status(400).send({ok:false,message:'Заповніть підставу, вид допомоги та коректні планові показники.'})

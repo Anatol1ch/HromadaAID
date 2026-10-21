@@ -228,7 +228,7 @@ if (!hasSingleInstanceLock) {
           const path = yearValue === undefined ? '/api/reports/plan-entries' : `/api/reports/plan-entries?year=${encodeURIComponent(String(yearValue))}`
           return http.getJson(path, isAnnualPlanEntryList)
         })
-        trustedIpcMain.handle('reports:annual-plan-save', async (_event, input: unknown) => http.postJson('/api/reports/annual-plans', { input }))
+        trustedIpcMain.handle('reports:annual-plan-save', async (_event, input: unknown, expectedUpdatedAt: unknown) => http.postJson('/api/reports/annual-plans', { input, expectedUpdatedAt }))
         trustedIpcMain.handle('reports:plan-save', async (_event, input: unknown, id: unknown) => http.postJson('/api/reports/plan-entries', { input, id }))
         trustedIpcMain.handle('reports:plan-remove', async (_event, id: unknown) => { if(typeof id!=='string'||!id) return {ok:false,message:'Плановий рядок не знайдено.'}; return http.deleteJson(`/api/reports/plan-entries/${encodeURIComponent(id)}`) })
         trustedIpcMain.handle('statements:list', async (_event, yearValue: unknown): Promise<AssignmentListResult> => {
