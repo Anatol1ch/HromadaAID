@@ -8,7 +8,8 @@ import { registerRecipientIpc } from './recipient-ipc.js'
 import { registerRecordsIpc } from './records-ipc.js'
 import { registerDeletionIpc } from './deletion-ipc.js'
 import { cleanupGeneratedStatements, registerStatementsIpc } from './statements-ipc.js'
-import { configureIpcSecurity, isTrustedAppUrl } from './ipc-security.js'
+import { configureIpcSecurity, isTrustedAppUrl, registerRemoteIpcBlockers } from './ipc-security.js'
+import { ElectronRuntimeConfigError, readElectronRuntimeConfig, type ElectronRuntimeConfig } from './runtime-config.js'
 
 // Match the future Windows package/shortcut identity without changing userData.
 if (process.platform === 'win32') app.setAppUserModelId('local.hromadaaid')
@@ -19,6 +20,7 @@ const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const iconDirectory = app.isPackaged ? join(process.resourcesPath, 'assets') : join(currentDirectory, 'assets')
 let closeDatabase: (() => void) | undefined
 let mainWindow: BrowserWindow | null = null
+let runtimeConfig: ElectronRuntimeConfig | undefined
 const appPageUrl = isDev ? devServerUrl : pathToFileURL(join(currentDirectory, '../../dist/index.html')).href
 configureIpcSecurity(() => mainWindow, appPageUrl)
 
@@ -118,18 +120,23 @@ if (!hasSingleInstanceLock) {
 
   app.whenReady().then(() => {
     try {
-      const database = openAppDatabase(app.getPath('userData'))
-      closeDatabase = () => database.close()
-      registerBankIpc(database)
-      registerRecipientIpc(database)
-      registerRecordsIpc(database)
-      registerReportExportIpc()
-      registerDeletionIpc(database)
-      registerStatementsIpc(database)
+      runtimeConfig = readElectronRuntimeConfig()
+      if (runtimeConfig.mode === 'local') {
+        const database = openAppDatabase(app.getPath('userData'))
+        closeDatabase = () => database.close()
+        registerBankIpc(database)
+        registerRecipientIpc(database)
+        registerRecordsIpc(database)
+        registerReportExportIpc()
+        registerDeletionIpc(database)
+        registerStatementsIpc(database)
+      } else {
+        registerRemoteIpcBlockers()
+      }
     } catch (error) {
-      dialog.showErrorBox('HromadaAid', error instanceof DatabaseSchemaError || error instanceof DatabaseIntegrityError
+      dialog.showErrorBox('HromadaAid', error instanceof ElectronRuntimeConfigError || error instanceof DatabaseSchemaError || error instanceof DatabaseIntegrityError
         ? error.message
-        : 'Не вдалося відкрити локальне сховище. Перевірте доступ до папки даних користувача та перезапустіть застосунок.')
+        : 'Не вдалося підготувати режим роботи застосунку. Перевірте конфігурацію та перезапустіть застосунок.')
       app.quit()
       return
     }
@@ -151,7 +158,10 @@ if (!hasSingleInstanceLock) {
     event.preventDefault()
     if (shutdownStarted) return
     shutdownStarted = true
-    void cleanupGeneratedReports().then(() => cleanupGeneratedStatements()).catch(() => {
+    const cleanup = runtimeConfig?.mode === 'local'
+      ? cleanupGeneratedReports().then(() => cleanupGeneratedStatements())
+      : Promise.resolve()
+    void cleanup.catch(() => {
       console.warn('[HromadaAid] Частину тимчасових документів буде перевірено під час наступного запуску.')
     }).finally(() => {
       try { closeDatabase?.() } catch { console.warn('[HromadaAid] Не вдалося підтвердити закриття сховища.') }
