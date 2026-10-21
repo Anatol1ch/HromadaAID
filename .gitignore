@@ -57,3 +57,6 @@ __pycache__/
 Thumbs.db
 .idea/
 .vs/
+
+# Isolated API development databases
+server/.data/
