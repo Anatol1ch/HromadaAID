@@ -18,6 +18,13 @@ export type ApiRoutePolicy = {
  * public by omission.
  */
 export const API_ROUTE_POLICIES: readonly ApiRoutePolicy[] = [
+  { method: 'GET', url: '/api/users', permissions: ['users.manage'] },
+  { method: 'GET', url: '/api/users/:id', permissions: ['users.manage'] },
+  { method: 'POST', url: '/api/users', permissions: ['users.manage'] },
+  { method: 'PUT', url: '/api/users/:id', permissions: ['users.manage'] },
+  { method: 'POST', url: '/api/users/:id/status', permissions: ['users.manage'] },
+  { method: 'POST', url: '/api/users/:id/reset-password', permissions: ['users.manage'] },
+
   { method: 'GET', url: '/api/catalogs', permissions: ['catalogs.read'] },
   { method: 'POST', url: '/api/catalogs/save', permissions: ['catalogs.manage'] },
   { method: 'POST', url: '/api/catalogs/reorder', permissions: ['catalogs.manage'] },
@@ -110,6 +117,9 @@ export function installApiAuthorization(app: FastifyInstance, database: Database
     }
     const session = requireAuthenticated(database, request, reply)
     if (!session) return reply
+    if (session.user.mustChangePassword) {
+      return reply.status(403).send({ message: 'Потрібно змінити тимчасовий пароль перед початком роботи.' })
+    }
     for (const permission of policy.permissions) {
       if (!requirePermission(session, permission, reply)) return reply
     }

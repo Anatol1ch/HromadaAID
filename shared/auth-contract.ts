@@ -9,6 +9,7 @@ export type AuthenticatedUser = {
   displayName: string | null
   roles: UserRole[]
   permissions: Permission[]
+  mustChangePassword: boolean
 }
 
 export type LoginInput = { username: string; password: string }
@@ -19,6 +20,7 @@ export type ChangePasswordInput = { currentPassword: string; newPassword: string
 export type ClientAuthState =
   | { mode: 'local'; status: 'authenticated'; user: null }
   | { mode: 'remote'; status: 'authenticated'; user: AuthenticatedUser }
+  | { mode: 'remote'; status: 'password-change-required'; user: AuthenticatedUser }
   | { mode: 'remote'; status: 'unauthenticated' | 'unavailable'; user: null; message?: string }
 
 export type AuthActionResult = { ok: true; state: ClientAuthState } | { ok: false; state: ClientAuthState; message: string }
@@ -36,7 +38,7 @@ export function isAuthenticatedUser(value: unknown): value is AuthenticatedUser 
   const item = value as Record<string, unknown>
   return typeof item.id === 'string' && typeof item.username === 'string' &&
     (typeof item.displayName === 'string' || item.displayName === null) &&
-    isStringArray(item.roles) && isStringArray(item.permissions)
+    isStringArray(item.roles) && isStringArray(item.permissions) && typeof item.mustChangePassword === 'boolean'
 }
 
 export function isLoginResult(value: unknown): value is LoginResult {

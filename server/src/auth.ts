@@ -15,6 +15,7 @@ type UserRow = {
   display_name: string | null
   password_hash: string
   status: string
+  must_change_password: number
 }
 
 export type AuthenticatedSession = {
@@ -49,7 +50,7 @@ function displayUsername(value: unknown): string | null {
   return normalized.length >= 3 && normalized.length <= 80 && !/[\u0000-\u001F\u007F]/.test(normalized) ? normalized : null
 }
 
-function validatePassword(value: unknown): string | null {
+export function validatePassword(value: unknown): string | null {
   return typeof value === 'string' && value.length >= 12 && value.length <= 256 ? value : null
 }
 
@@ -66,7 +67,7 @@ async function verifyCredentialHash(hash: string | undefined, password: string):
   }
 }
 
-async function hashPassword(password: string): Promise<string> {
+export async function hashPassword(password: string): Promise<string> {
   return argon2.hash(password, ARGON_OPTIONS)
 }
 
@@ -83,11 +84,12 @@ function profile(database: DatabaseSync, row: UserRow): AuthenticatedUser {
     displayName: row.display_name,
     roles,
     permissions: effectivePermissions(roles),
+    mustChangePassword: row.must_change_password === 1,
   }
 }
 
 function activeUser(database: DatabaseSync, usernameKey: string): UserRow | undefined {
-  return database.prepare('SELECT id,username,display_name,password_hash,status FROM users WHERE username_key=?').get(usernameKey) as UserRow | undefined
+  return database.prepare('SELECT id,username,display_name,password_hash,status,must_change_password FROM users WHERE username_key=?').get(usernameKey) as UserRow | undefined
 }
 
 function cleanExpiredSessions(database: DatabaseSync, current: string): void {
@@ -142,7 +144,7 @@ export function authenticateSession(database: DatabaseSync, token: string | unde
   if (!token || token.length > 1024) return { ok: false, status: 401, message: 'Потрібна чинна сесія.' }
   const current = nowRevision(now)
   cleanExpiredSessions(database, current)
-  const row = database.prepare(`SELECT s.token_hash,s.expires_at,u.id,u.username,u.display_name,u.password_hash,u.status
+  const row = database.prepare(`SELECT s.token_hash,s.expires_at,u.id,u.username,u.display_name,u.password_hash,u.status,u.must_change_password
     FROM user_sessions s JOIN users u ON u.id=s.user_id
     WHERE s.token_hash=? AND s.expires_at>?`).get(tokenHash(token), current) as (UserRow & { token_hash: string; expires_at: string }) | undefined
   if (!row || row.status !== 'active') return { ok: false, status: 401, message: 'Потрібна чинна сесія.' }
@@ -177,7 +179,7 @@ export async function changePassword(database: DatabaseSync, session: Authentica
       return { ok: false, status: 409, message: 'Пароль уже змінився в іншій сесії. Увійдіть повторно.' }
     }
     const changedAt = nextRecordRevision(latest.updated_at)
-    database.prepare('UPDATE users SET password_hash=?,password_changed_at=?,updated_at=? WHERE id=?').run(passwordHash, changedAt, changedAt, session.user.id)
+    database.prepare('UPDATE users SET password_hash=?,password_changed_at=?,must_change_password=0,updated_at=? WHERE id=?').run(passwordHash, changedAt, changedAt, session.user.id)
     revokeUserSessions(database, session.user.id)
     database.exec('COMMIT')
     return { ok: true, value: undefined }
@@ -207,10 +209,10 @@ export async function createFirstAdministrator(database: DatabaseSync, input: { 
       return { ok: false, status: 409, message: 'Початковий адміністратор уже створений.' }
     }
     const createdAt = nowRevision()
-    database.prepare('INSERT INTO users(id,username,username_key,display_name,password_hash,status,password_changed_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)')
+    database.prepare('INSERT INTO users(id,username,username_key,display_name,password_hash,status,password_changed_at,created_at,updated_at,must_change_password) VALUES(?,?,?,?,?,?,?,?,?,0)')
       .run(id, username, usernameKey, displayName, passwordHash, 'active', createdAt, createdAt, createdAt)
     database.prepare('INSERT INTO user_roles(user_id,role) VALUES(?,?)').run(id, 'administrator')
-    const user = profile(database, { id, username, display_name: displayName, password_hash: passwordHash, status: 'active' })
+    const user = profile(database, { id, username, display_name: displayName, password_hash: passwordHash, status: 'active', must_change_password: 0 })
     database.exec('COMMIT')
     return { ok: true, value: user }
   } catch {

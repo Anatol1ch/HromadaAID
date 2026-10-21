@@ -639,6 +639,29 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .user-actions { display: flex; margin-left: auto; gap: 2px; }
 .user-actions .icon-button { width: 30px; height: 30px; color: #687b8d; }
 
+.users-admin { display: grid; gap: var(--space-5); }
+.users-admin .page-heading { align-items: flex-end; }
+.users-table-wrap { overflow: auto; border: 1px solid var(--border-surface); border-radius: var(--radius-card); background: var(--surface-card); }
+.users-table { width: 100%; min-width: 760px; border-collapse: collapse; }
+.users-table th, .users-table td { padding: 12px 14px; border-bottom: 1px solid var(--border-surface); vertical-align: middle; text-align: left; }
+.users-table th { background: var(--accent-green-soft); color: var(--color-text-control); font-size: 12px; font-weight: 700; }
+.users-table tbody tr:last-child td { border-bottom: 0; }
+.users-table th:last-child, .users-table td:last-child { text-align: center; width: 132px; }
+.users-actions { display: inline-flex; gap: 4px; justify-content: center; }
+.users-actions .icon-button { width: 32px; height: 32px; }
+.status-badge { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.status-active { color: #22613a; background: #e4f2e7; }
+.status-inactive { color: #6b7280; background: #eef0f2; }
+.status-blocked { color: #9b3030; background: #fae7e7; }
+.user-password-note { display: block; margin-top: 4px; color: var(--color-text-secondary); font-size: 11px; }
+.user-form fieldset { margin: 0; padding: 12px; border: 1px solid var(--border-control); border-radius: var(--radius-control); }
+.user-form legend { padding: 0 4px; color: var(--color-text-secondary); font-size: 13px; font-weight: 600; }
+.role-checkboxes { display: grid; gap: 8px; }
+.role-checkboxes label { display: flex; align-items: center; gap: 9px; color: var(--color-text-control); font-size: 14px; }
+.role-checkboxes input { width: 17px; height: 17px; accent-color: var(--accent-green); }
+
+@media (max-width: 760px) { .users-admin .page-heading { align-items: stretch; } .users-admin .page-heading > .primary-button { width: 100%; justify-content: center; } }
+
 .auth-screen { min-height: 100dvh; display: grid; place-items: center; padding: clamp(20px, 5vh, 48px) var(--space-5); background: var(--surface-app); }
 .auth-card { width: min(100%, 430px); padding: clamp(28px, 5vw, 42px); border: 1px solid var(--border-surface); border-radius: var(--radius-modal); background: var(--surface-card); box-shadow: 0 18px 45px rgb(32 58 43 / 10%); }
 .auth-identity { display: grid; justify-items: center; text-align: center; margin-bottom: var(--space-5); }

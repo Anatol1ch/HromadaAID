@@ -31,7 +31,7 @@ export class RemoteAuthSession {
     try {
       const result = await this.http.postJson('/auth/login', { username, password }, isLoginResult, { authorize: false })
       this.token = result.token
-      const state = this.publish({ mode: 'remote', status: 'authenticated', user: result.user })
+      const state = this.publish({ mode: 'remote', status: result.user.mustChangePassword ? 'password-change-required' : 'authenticated', user: result.user })
       return { ok: true, state }
     } catch (error) {
       const message = error instanceof HttpClientError ? error.message : 'Не вдалося виконати вхід.'

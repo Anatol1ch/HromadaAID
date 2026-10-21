@@ -3,7 +3,7 @@ import DataState from './components/DataState'
 import LoginScreen from './components/LoginScreen'
 import { useEffect, useMemo, useState } from 'react'
 import { initialAccountingYear, rememberAccountingYear } from './lib/accountingYear'
-import { Activity, ChevronRight, CircleHelp, Code2, Plus, ArrowUpRight, CalendarDays, FileText, HandCoins, HeartHandshake, Home, LogOut, Settings, BookOpen, ChartNoAxesCombined } from 'lucide-react'
+import { Activity, ChevronRight, CircleHelp, Code2, Plus, ArrowUpRight, CalendarDays, FileText, HandCoins, HeartHandshake, Home, LogOut, Settings, BookOpen, ChartNoAxesCombined, UsersRound } from 'lucide-react'
 import type { ClientAuthState } from '../shared/auth-contract'
 import { USER_ROLE_LABELS, type Permission } from '../shared/authorization'
 import StatementFormation from './StatementFormation'
@@ -11,6 +11,8 @@ import Dictionaries, { type DictionarySection } from './Dictionaries'
 import AidRegistry from './AidRegistry'
 import Dashboard from './Dashboard'
 import Reports from './Reports'
+import UsersAdmin from './UsersAdmin'
+import TemporaryPasswordScreen from './components/TemporaryPasswordScreen'
 import communityCoat from '../reference/ГЕРБ.png'
 import YearPicker from './components/YearPicker'
 import { UnsavedChangesConfirmation } from './components/ConfirmDialog'
@@ -25,6 +27,7 @@ const nav = [
   { label: 'Формування відомостей', icon: FileText, permission: 'statements.generate' as Permission },
   { label: 'Звітність', icon: ChartNoAxesCombined, permission: 'reports.read' as Permission },
   { label: 'Довідники', icon: BookOpen, permission: 'catalogs.read' as Permission },
+  { label: 'Користувачі', icon: UsersRound, permission: 'users.manage' as Permission },
 ]
 
 function App() {
@@ -40,6 +43,7 @@ function App() {
     return { ok: result.ok, message: 'message' in result ? result.message : undefined }
   }
   if (!auth) return <StartupScreen/>
+  if (auth.mode === 'remote' && auth.status === 'password-change-required') return <TemporaryPasswordScreen state={auth} onChangePassword={async (currentPassword, newPassword) => { const result = await window.hromadaAid.auth.changePassword(currentPassword, newPassword); setAuth(result.state); return { ok: result.ok, message: 'message' in result ? result.message : undefined } }}/>
   if (auth.mode === 'remote' && auth.status !== 'authenticated') return <LoginScreen state={auth} onLogin={login}/>
   return <Workspace auth={auth}/>
 }
@@ -52,7 +56,7 @@ function Workspace({ auth }: { auth: Extract<ClientAuthState, { status: 'authent
   const [logoutBusy, setLogoutBusy] = useState(false)
   const permissions = useMemo(() => new Set(auth.mode === 'local' ? nav.map((item) => item.permission).concat(['catalogs.manage', 'program_approvals.manage', 'personal_data.read', 'recipients.manage', 'banks.manage', 'decisions.read', 'decisions.manage', 'assignments.manage', 'assignments.change_financial_status', 'planning.read', 'planning.manage', 'reports.export', 'protected_entities.delete', 'users.manage'] as Permission[]) : auth.user.permissions), [auth])
   const can = (permission: Permission) => permissions.has(permission)
-  const allowedNav = nav.filter((item) => can(item.permission))
+  const allowedNav = nav.filter((item) => can(item.permission) && (auth.mode === 'remote' || item.label !== 'Користувачі'))
   const dictionarySections = (['people', 'programs', 'decisions', 'banks', 'plans'] as DictionarySection[]).filter((section) =>
     section === 'people' || section === 'banks' ? can('personal_data.read') : section === 'decisions' ? can('decisions.read') : section === 'plans' ? can('planning.read') : can('catalogs.read'))
   useEffect(() => { rememberAccountingYear(year) }, [year])
@@ -83,7 +87,7 @@ function Workspace({ auth }: { auth: Extract<ClientAuthState, { status: 'authent
           activeNav === 'Реєстр допомог' ? <AidRegistry createOnOpen={createAssignment}/> :
           activeNav === 'Формування відомостей' ? <StatementFormation/> :
           activeNav === 'Довідники' ? <Dictionaries allowedSections={dictionarySections} canManageCatalogs={can('catalogs.manage')} canManagePlans={can('planning.manage')} canManageDecisions={can('decisions.manage')} canManagePersonal={can('recipients.manage') || can('banks.manage')}/> :
-          activeNav === 'Огляд' ? <Dashboard/> : <Reports/>}</div>
+          activeNav === 'Огляд' ? <Dashboard/> : activeNav === 'Користувачі' && auth.mode === 'remote' ? <UsersAdmin currentUserId={auth.user.id}/> : <Reports/>}</div>
       </div>
     </main>
   </div><UnsavedChangesConfirmation/></YearContext.Provider>

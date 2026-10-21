@@ -1,5 +1,6 @@
 import type { AddressParts } from './address.js'
 import type { AuthActionResult, ClientAuthState } from './auth-contract.js'
+import type { UserRole } from './authorization.js'
 import { ASSIGNMENT_STATUSES, type AssignmentStatus } from './assignment-model.js'
 export type { AssignmentStatus } from './assignment-model.js'
 
@@ -282,6 +283,9 @@ export type StatementKind = 'personal' | 'summary'
 export type StatementParameters = { aidTypeId: string; partIndex: number; documentNumber: string; documentDate: string; periodStart: string; periodEnd: string }
 export type GeneratedStatement = { id: string; fileName: string; aidTypeName: string; recordCount: number; totalMinor: number; pdfBase64: string; documentNumber: string; documentDate: string }
 export type GeneratedBankStatement = { id: string; fileName: string; recordCount: number; totalMinor: number }
+export type ManagedUser = { id: string; username: string; displayName: string | null; roles: UserRole[]; status: 'active' | 'inactive' | 'blocked'; mustChangePassword: boolean; createdAt: string; updatedAt: string }
+export type ManagedUserInput = { username: string; displayName: string | null; roles: UserRole[]; password?: string }
+export type ManagedUserSaveResult = { ok: true; user: ManagedUser } | { ok: false; reason: 'validation' | 'conflict' | 'not-found'; message: string }
 
 export type HromadaAidApi = {
   appName: string; platform: string
@@ -291,6 +295,14 @@ export type HromadaAidApi = {
     logout: () => Promise<AuthActionResult>
     changePassword: (currentPassword: string, newPassword: string) => Promise<AuthActionResult>
     onStateChange: (listener: (state: ClientAuthState) => void) => () => void
+  }
+  users: {
+    list: () => Promise<ManagedUser[]>
+    get: (id: string) => Promise<ManagedUser | null>
+    create: (input: ManagedUserInput) => Promise<ManagedUserSaveResult>
+    update: (id: string, input: ManagedUserInput, expectedUpdatedAt: string) => Promise<ManagedUserSaveResult>
+    setStatus: (id: string, status: 'active' | 'inactive' | 'blocked', expectedUpdatedAt: string) => Promise<ManagedUserSaveResult>
+    resetPassword: (id: string, newPassword: string, expectedUpdatedAt: string) => Promise<ManagedUserSaveResult>
   }
   recipients: { list: (includeArchived?: boolean) => Promise<RecipientSummary[]>; get: (id: string) => Promise<RecipientRecord | null>; save: (input: RecipientInput, id?: string, confirmSameName?: boolean, expectedUpdatedAt?: string) => Promise<RecipientSaveResult>; assignmentHistory: (id: string) => Promise<AssignmentRecord[]> }
   banks: { list: (query?: string) => Promise<BankRecord[]>; get: (id: string) => Promise<BankRecord | null>; details: (bankId: string) => Promise<BankDetail[]>; save: (input: BankInput, id?: string, expectedUpdatedAt?: string) => Promise<BankSaveResult>; remove: (id: string, expectedUpdatedAt?: string) => Promise<{ ok: boolean; message?: string }> }

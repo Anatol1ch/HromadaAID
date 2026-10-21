@@ -15,6 +15,14 @@ const api: HromadaAidApi = {
       return () => ipcRenderer.removeListener('auth:state', receive)
     },
   },
+  users: {
+    list: () => invoke('users:list'),
+    get: (id) => invoke('users:get', id),
+    create: (input) => invoke('users:create', input),
+    update: (id, input, expectedUpdatedAt) => invoke('users:update', id, input, expectedUpdatedAt),
+    setStatus: (id, status, expectedUpdatedAt) => invoke('users:set-status', id, status, expectedUpdatedAt),
+    resetPassword: (id, newPassword, expectedUpdatedAt) => invoke('users:reset-password', id, newPassword, expectedUpdatedAt),
+  },
   recipients: {
     list: (includeArchived) => invoke('recipients:list', includeArchived),
     get: (id) => invoke('recipients:get', id),

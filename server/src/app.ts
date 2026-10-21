@@ -25,6 +25,7 @@ import { changePassword, login, logout } from './auth.js'
 import { requireAuthenticated } from './auth-http.js'
 import { currentApiSession, installApiAuthorization } from './api-authorization.js'
 import { LoginRateLimiter } from './login-rate-limit.js'
+import { createManagedUser, getManagedUser, listManagedUsers, resetManagedUserPassword, setManagedUserStatus, updateManagedUser } from './user-admin.js'
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const saveStatus = (result: { ok: boolean; reason?: string }) => result.ok ? 200 : result.reason === 'conflict' ? 409 : result.reason === 'storage' ? 500 : 400
@@ -90,6 +91,28 @@ export function createApp(database: DatabaseSync): FastifyInstance {
   })
 
   installApiAuthorization(app, database)
+
+  app.get('/api/users', async () => listManagedUsers(database))
+  app.get<{ Params: { id: string } }>('/api/users/:id', async (request) => getManagedUser(database, request.params.id))
+  app.post<{ Body: unknown }>('/api/users', async (request, reply) => {
+    const result = await createManagedUser(database, isRecord(request.body) ? request.body.input : undefined)
+    return reply.status(result.ok ? 200 : result.reason === 'conflict' ? 409 : 400).send(result)
+  })
+  app.put<{ Params: { id: string }; Body: unknown }>('/api/users/:id', async (request, reply) => {
+    const body = isRecord(request.body) ? request.body : {}
+    const result = updateManagedUser(database, request.params.id, body.input, body.expectedUpdatedAt)
+    return reply.status(result.ok ? 200 : result.reason === 'not-found' ? 404 : result.reason === 'conflict' ? 409 : 400).send(result)
+  })
+  app.post<{ Params: { id: string }; Body: unknown }>('/api/users/:id/status', async (request, reply) => {
+    const body = isRecord(request.body) ? request.body : {}
+    const result = setManagedUserStatus(database, currentApiSession(request).user.id, request.params.id, body.status, body.expectedUpdatedAt)
+    return reply.status(result.ok ? 200 : result.reason === 'not-found' ? 404 : result.reason === 'conflict' ? 409 : 400).send(result)
+  })
+  app.post<{ Params: { id: string }; Body: unknown }>('/api/users/:id/reset-password', async (request, reply) => {
+    const body = isRecord(request.body) ? request.body : {}
+    const result = await resetManagedUserPassword(database, request.params.id, body.newPassword, body.expectedUpdatedAt)
+    return reply.status(result.ok ? 200 : result.reason === 'not-found' ? 404 : result.reason === 'conflict' ? 409 : 400).send(result)
+  })
 
   app.get<{ Querystring: { includeInactive?: string } }>('/api/catalogs', async (request): Promise<CatalogList> =>
     listCatalogs(database, request.query.includeInactive === 'true'))

@@ -394,6 +394,11 @@ const migrations: Migration[] = [{
       DELETE FROM user_sessions WHERE user_id=NEW.user_id;
     END;
   `,
+}, {
+  version: 26,
+  sql: `
+    ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0 CHECK(must_change_password IN (0,1));
+  `,
 }]
 
 const maximumSupportedSchemaVersion = Math.max(...migrations.map(({ version }) => version))
