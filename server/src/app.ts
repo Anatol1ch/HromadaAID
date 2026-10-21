@@ -173,6 +173,9 @@ export function createApp(database: DatabaseSync): FastifyInstance {
   })
   app.delete<{ Params: { id: string } }>('/api/reports/plan-entries/:id', async (request, reply) => { try { database.exec('BEGIN IMMEDIATE'); const previous=database.prepare('SELECT year,aid_type_id FROM annual_plan_entries WHERE id=?').get(request.params.id) as Record<string,unknown>|undefined; if(!previous){database.exec('ROLLBACK');return reply.status(400).send({ok:false,message:'Плановий рядок не знайдено.'})}database.prepare('DELETE FROM annual_plan_entries WHERE id=?').run(request.params.id);syncLegacyPlan(database,Number(previous.year),String(previous.aid_type_id));database.exec('COMMIT');return {ok:true} }catch{try{database.exec('ROLLBACK')}catch{};return reply.status(500).send({ok:false,message:'Не вдалося видалити плановий рядок.'})} })
 
+  app.setNotFoundHandler((_request, reply) =>
+    reply.status(404).send({ status: 'error', message: 'Запитаний ресурс сервера не знайдено.' }))
+
   app.setErrorHandler((error, _request, reply) => {
     const details = error as { statusCode?: unknown; code?: unknown }
     const status = typeof details.statusCode === 'number' && details.statusCode >= 400 && details.statusCode < 500 ? details.statusCode : 500
