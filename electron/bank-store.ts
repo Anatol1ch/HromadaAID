@@ -69,14 +69,17 @@ export function saveBank(database: DatabaseSync, value: unknown, idValue?: unkno
   }
 }
 
-export function removeBank(database: DatabaseSync, id: string): { ok: boolean; message?: string } {
+export function removeBank(database: DatabaseSync, id: string, expectedUpdatedAt?: unknown): { ok: boolean; message?: string } {
   try {
     database.exec('BEGIN IMMEDIATE')
     const bank = getBank(database, id)
     if (!bank) throw new BankConflict('Банк не знайдено. Оновіть довідник.')
+    if (typeof expectedUpdatedAt !== 'string' || !expectedUpdatedAt) throw new BankConflict('Для видалення потрібна актуальна версія картки банку.', 'validation')
+    if (bank.updatedAt !== expectedUpdatedAt) throw new BankConflict('Картку банку вже змінив інший користувач. Оновіть довідник.', 'conflict')
     if (bank.recipientCount) throw new BankConflict(`Банк використовується у ${bank.recipientCount} картках отримувачів. Спочатку змініть банк у цих картках. Видалення заборонено.`)
     database.prepare('DELETE FROM bank_details WHERE bank_id=?').run(id)
-    database.prepare('DELETE FROM banks WHERE id=?').run(id)
+    const deleted = database.prepare('DELETE FROM banks WHERE id=? AND updated_at=?').run(id, expectedUpdatedAt)
+    if (Number(deleted.changes) !== 1) throw new BankConflict('Картку банку вже змінив інший користувач. Оновіть довідник.', 'conflict')
     database.exec('COMMIT')
     return { ok: true }
   } catch (error) {

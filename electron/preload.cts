@@ -15,7 +15,7 @@ const api: HromadaAidApi = {
     get: (id) => invoke('banks:get', id),
     details: (bankId) => invoke('banks:details', bankId),
     save: (input, id, expectedUpdatedAt) => invoke('banks:save', input, id, expectedUpdatedAt),
-    remove: (id) => invoke('banks:remove', id),
+    remove: (id, expectedUpdatedAt) => invoke('banks:remove', id, expectedUpdatedAt),
   },
   catalogs: {
     list: (includeInactive) => invoke('catalogs:list', includeInactive),

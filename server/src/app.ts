@@ -1,6 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
-import { bankDetails, getBank, listBanks, saveBank } from '../../electron/bank-store.js'
+import { bankDetails, getBank, listBanks, removeBank, saveBank } from '../../electron/bank-store.js'
 import { getDecision, listAssignments, listDecisions, listRecipientAssignmentHistory } from '../../electron/assignment-data.js'
 import { resolveAccountingYear } from '../../electron/accounting-year.js'
 import { listCatalogs } from '../../electron/catalog-data.js'
@@ -76,6 +76,8 @@ export function createApp(database: DatabaseSync): FastifyInstance {
 
   app.get<{ Params: { id: string } }>('/api/banks/:id/details', async (request): Promise<BankDetail[]> =>
     bankDetails(database, request.params.id))
+
+  app.delete<{ Params: { id: string }; Body: { expectedUpdatedAt?: unknown } }>('/api/banks/:id', async (request, reply) => { const result = removeBank(database, request.params.id, request.body?.expectedUpdatedAt); return reply.status(result.ok ? 200 : result.message?.includes('вже змінив') ? 409 : 400).send(result) })
 
   app.post<{ Body: unknown }>('/api/banks', async (request, reply) => {
     if (!isRecord(request.body) || !('input' in request.body)) return reply.status(400).send({ message: 'Некоректні дані банку.' })
@@ -173,3 +175,4 @@ export function createApp(database: DatabaseSync): FastifyInstance {
 
   return app
 }
+

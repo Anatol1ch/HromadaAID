@@ -135,7 +135,7 @@ if (!hasSingleInstanceLock) {
         registerStatementsIpc(database)
       } else {
         const http = new HttpClient(runtimeConfig.apiUrl)
-        registerRemoteIpcBlockers(['catalogs:list', 'catalogs:save', 'catalogs:reorder', 'recipients:list', 'recipients:get', 'recipients:save', 'recipients:assignment-history', 'banks:list', 'banks:get', 'banks:details', 'banks:save', 'decisions:list', 'decisions:get', 'decisions:save', 'decisions:add-assignments', 'assignments:list', 'assignments:save', 'assignments:change-statuses', 'program-approvals:list', 'program-approvals:save', 'dashboard:get', 'reports:get', 'reports:summary', 'reports:annual-plan-list', 'reports:plan-list', 'reports:annual-plan-save', 'reports:plan-save', 'reports:plan-remove', 'statements:list'])
+        registerRemoteIpcBlockers(['catalogs:list', 'catalogs:save', 'catalogs:reorder', 'recipients:list', 'recipients:get', 'recipients:save', 'recipients:assignment-history', 'banks:list', 'banks:get', 'banks:details', 'banks:save', 'banks:remove', 'decisions:list', 'decisions:get', 'decisions:save', 'decisions:add-assignments', 'assignments:list', 'assignments:save', 'assignments:change-statuses', 'program-approvals:list', 'program-approvals:save', 'dashboard:get', 'reports:get', 'reports:summary', 'reports:annual-plan-list', 'reports:plan-list', 'reports:annual-plan-save', 'reports:plan-save', 'reports:plan-remove', 'statements:list'])
         trustedIpcMain.handle('catalogs:list', async (_event, includeInactiveValue: unknown): Promise<CatalogList> =>
           http.getJson(includeInactiveValue === true ? '/api/catalogs?includeInactive=true' : '/api/catalogs', isCatalogList))
         trustedIpcMain.handle('catalogs:save', async (_event, input: unknown) => http.postJson('/api/catalogs/save', { input }, isCatalogSaveResult))
@@ -172,6 +172,7 @@ if (!hasSingleInstanceLock) {
           if (typeof id !== 'string' || !id) return []
           return http.getJson(`/api/banks/${encodeURIComponent(id)}/details`, isBankDetailList)
         })
+        trustedIpcMain.handle('banks:remove', async (_event, id: unknown, expectedUpdatedAt: unknown) => { if(typeof id!=='string'||!id) return {ok:false,message:'Оберіть банк для видалення.'}; return http.deleteJson(`/api/banks/${encodeURIComponent(id)}`, { expectedUpdatedAt }) })
         trustedIpcMain.handle('banks:save', async (_event, input: unknown, id: unknown, expectedUpdatedAt: unknown) => {
           try {
             if (typeof id === 'string' && id) return await http.putJson(`/api/banks/${encodeURIComponent(id)}`, { input, expectedUpdatedAt }, isBankSaveResult)

@@ -45,7 +45,7 @@ export default function BankRegistry() {
     {editing && <BankFormModal initial={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); setRevision(current => current + 1) }}/>}
     {deleting && <ConfirmDialog title="Видалити банк?" message={`«${deleting.name}». Буде безповоротно видалено банк та ${deleting.details.length} наборів реквізитів. Картки отримувачів не видалятимуться.`} confirmLabel="Видалити" confirmIcon={<Trash2 size={17}/>} error={deleteError} onCancel={() => setDeleting(null)} onConfirm={async () => {
       try {
-        const result = await bankRepository.remove(deleting.id)
+        const result = await bankRepository.remove(deleting.id, deleting.updatedAt)
         if (!result.ok) { setDeleteError(result.message ?? 'Не вдалося видалити банк.'); return }
         setDeleting(null); setRevision(current => current + 1)
       } catch { setDeleteError('Не вдалося видалити банк. Повторіть спробу.') }

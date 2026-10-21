@@ -19,7 +19,7 @@ export class HttpClient {
   }
 
   async putJson<T>(path: string, body: unknown, validator?: JsonValidator<T>): Promise<T> { return this.requestJson('PUT', path, body, validator) }
-  async deleteJson<T>(path: string, validator?: JsonValidator<T>): Promise<T> { return this.requestJson('DELETE', path, undefined, validator) }
+  async deleteJson<T>(path: string, body?: unknown, validator?: JsonValidator<T>): Promise<T> { return this.requestJson('DELETE', path, body, validator) }
 
   private async requestJson<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body: unknown, validator?: JsonValidator<T>): Promise<T> {
     if (!path.startsWith('/')) throw new HttpClientError('Шлях HTTP API має починатися з «/».')
