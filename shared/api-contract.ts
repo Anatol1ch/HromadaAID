@@ -286,6 +286,7 @@ export type GeneratedBankStatement = { id: string; fileName: string; recordCount
 export type ManagedUser = { id: string; username: string; displayName: string | null; roles: UserRole[]; status: 'active' | 'inactive' | 'blocked'; mustChangePassword: boolean; createdAt: string; updatedAt: string }
 export type ManagedUserInput = { username: string; displayName: string | null; roles: UserRole[]; password?: string }
 export type ManagedUserSaveResult = { ok: true; user: ManagedUser } | { ok: false; reason: 'validation' | 'conflict' | 'not-found'; message: string }
+export type ManagedUserRemoveResult = { ok: true } | { ok: false; reason: 'conflict' | 'not-found'; message: string }
 
 export type HromadaAidApi = {
   appName: string; platform: string
@@ -303,6 +304,7 @@ export type HromadaAidApi = {
     update: (id: string, input: ManagedUserInput, expectedUpdatedAt: string) => Promise<ManagedUserSaveResult>
     setStatus: (id: string, status: 'active' | 'inactive' | 'blocked', expectedUpdatedAt: string) => Promise<ManagedUserSaveResult>
     resetPassword: (id: string, newPassword: string, expectedUpdatedAt: string) => Promise<ManagedUserSaveResult>
+    remove: (id: string, expectedUpdatedAt: string) => Promise<ManagedUserRemoveResult>
   }
   recipients: { list: (includeArchived?: boolean) => Promise<RecipientSummary[]>; get: (id: string) => Promise<RecipientRecord | null>; save: (input: RecipientInput, id?: string, confirmSameName?: boolean, expectedUpdatedAt?: string) => Promise<RecipientSaveResult>; assignmentHistory: (id: string) => Promise<AssignmentRecord[]> }
   banks: { list: (query?: string) => Promise<BankRecord[]>; get: (id: string) => Promise<BankRecord | null>; details: (bankId: string) => Promise<BankDetail[]>; save: (input: BankInput, id?: string, expectedUpdatedAt?: string) => Promise<BankSaveResult>; remove: (id: string, expectedUpdatedAt?: string) => Promise<{ ok: boolean; message?: string }> }

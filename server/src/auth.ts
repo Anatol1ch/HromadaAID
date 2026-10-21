@@ -107,9 +107,11 @@ export async function login(database: DatabaseSync, input: LoginInput, now = Dat
 
   const user = activeUser(database, usernameKey)
   const credentialValid = await verifyCredentialHash(user?.password_hash, password)
-  if (!user || !credentialValid || user.status !== 'active') {
+  if (!user || !credentialValid) {
     return { ok: false, status: 401, message: 'Неправильний логін або пароль.' }
   }
+  if (user.status === 'blocked') return { ok: false, status: 401, message: 'Обліковий запис заблоковано. Зверніться до адміністратора системи.' }
+  if (user.status === 'inactive') return { ok: false, status: 401, message: 'Обліковий запис деактивовано. Зверніться до адміністратора системи.' }
 
   const createdAt = nowRevision(now)
   const expiresAt = new Date(now + SESSION_DURATION_MS).toISOString()

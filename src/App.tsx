@@ -3,9 +3,9 @@ import DataState from './components/DataState'
 import LoginScreen from './components/LoginScreen'
 import { useEffect, useMemo, useState } from 'react'
 import { initialAccountingYear, rememberAccountingYear } from './lib/accountingYear'
-import { Activity, ChevronRight, CircleHelp, Code2, Plus, ArrowUpRight, CalendarDays, FileText, HandCoins, HeartHandshake, Home, LogOut, Settings, BookOpen, ChartNoAxesCombined, UsersRound } from 'lucide-react'
+import { Activity, ChevronRight, CircleHelp, Code2, Plus, ArrowUpRight, CalendarDays, FileText, HandCoins, HeartHandshake, Home, LogOut, Settings, BookOpen, ChartNoAxesCombined, UsersRound, LockKeyhole } from 'lucide-react'
 import type { ClientAuthState } from '../shared/auth-contract'
-import { USER_ROLE_LABELS, type Permission } from '../shared/authorization'
+import { ROLE_PERMISSIONS, USER_ROLE_LABELS, USER_ROLES, type Permission } from '../shared/authorization'
 import StatementFormation from './StatementFormation'
 import Dictionaries, { type DictionarySection } from './Dictionaries'
 import AidRegistry from './AidRegistry'
@@ -29,6 +29,7 @@ const nav = [
   { label: 'Довідники', icon: BookOpen, permission: 'catalogs.read' as Permission },
   { label: 'Користувачі', icon: UsersRound, permission: 'users.manage' as Permission },
 ]
+const rolesFor = (permission: Permission) => USER_ROLES.filter((role) => ROLE_PERMISSIONS[role].includes(permission)).map((role) => USER_ROLE_LABELS[role]).join(', ')
 
 function App() {
   const [auth, setAuth] = useState<ClientAuthState | null>(null)
@@ -56,12 +57,12 @@ function Workspace({ auth }: { auth: Extract<ClientAuthState, { status: 'authent
   const [logoutBusy, setLogoutBusy] = useState(false)
   const permissions = useMemo(() => new Set(auth.mode === 'local' ? nav.map((item) => item.permission).concat(['catalogs.manage', 'program_approvals.manage', 'personal_data.read', 'recipients.manage', 'banks.manage', 'decisions.read', 'decisions.manage', 'assignments.manage', 'assignments.change_financial_status', 'planning.read', 'planning.manage', 'reports.export', 'protected_entities.delete', 'users.manage'] as Permission[]) : auth.user.permissions), [auth])
   const can = (permission: Permission) => permissions.has(permission)
-  const allowedNav = nav.filter((item) => can(item.permission) && (auth.mode === 'remote' || item.label !== 'Користувачі'))
+  const visibleNav = nav.filter((item) => item.label !== 'Користувачі' || (auth.mode === 'remote' && can('users.manage')))
   const dictionarySections = (['people', 'programs', 'decisions', 'banks', 'plans'] as DictionarySection[]).filter((section) =>
     section === 'people' || section === 'banks' ? can('personal_data.read') : section === 'decisions' ? can('decisions.read') : section === 'plans' ? can('planning.read') : can('catalogs.read'))
   useEffect(() => { rememberAccountingYear(year) }, [year])
-  useEffect(() => { if (!allowedNav.some((item) => item.label === activeNav)) setActiveNav(allowedNav[0]?.label ?? 'Головна') }, [activeNav, allowedNav])
-  const navigate = (label: string) => { if (!allowedNav.some((item) => item.label === label)) return; setCreateAssignment(false); setActiveNav(label); setNotice('') }
+  useEffect(() => { if (!visibleNav.some((item) => item.label === activeNav && can(item.permission))) setActiveNav('Головна') }, [activeNav, visibleNav])
+  const navigate = (label: string) => { const item = visibleNav.find((value) => value.label === label); if (!item) return; if (!can(item.permission)) { setNotice(`Доступ до розділу «${label}» мають ролі: ${rolesFor(item.permission)}.`); return }; setCreateAssignment(false); setActiveNav(label); setNotice('') }
   const newAssignment = () => { if (!can('assignments.manage')) return; setCreateAssignment(true); setActiveNav('Реєстр допомог'); setNotice('') }
   const logout = async () => {
     if (logoutBusy) return
@@ -76,14 +77,21 @@ function Workspace({ auth }: { auth: Extract<ClientAuthState, { status: 'authent
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark"><HeartHandshake size={22} strokeWidth={2.1}/></div><div className="brand-copy"><div className="brand-name">Hromada<span>Aid</span></div><div className="brand-caption">Автоматизована система обліку матеріальних допомог</div></div></div>
       <div className="nav-label">РОБОЧИЙ ПРОСТІР</div>
-      <nav className="nav-list">{allowedNav.map(({ label, icon: Icon }) => <button key={label} type="button" aria-label={label} title={label} aria-current={activeNav === label ? 'page' : undefined} className={`nav-item ${activeNav === label ? 'active' : ''}`} onClick={() => navigate(label)}><Icon size={19} strokeWidth={1.8} aria-hidden="true"/><span>{label}</span></button>)}</nav>
+      <nav className="nav-list">{visibleNav.map(({ label, icon: Icon, permission }) => {
+        const available = can(permission)
+        const hint = available ? label : `Доступ мають ролі: ${rolesFor(permission)}.`
+        return <button key={label} type="button" aria-label={available ? label : `${label}. ${hint}`} title={hint}
+          aria-current={available && activeNav === label ? 'page' : undefined} aria-disabled={!available}
+          className={`nav-item ${available && activeNav === label ? 'active' : ''}${available ? '' : ' nav-item-locked'}`}
+          onClick={() => navigate(label)}><Icon size={19} strokeWidth={1.8} aria-hidden="true"/><span>{label}</span>{!available && <LockKeyhole className="nav-lock" size={14} aria-hidden="true"/>}</button>
+      })}</nav>
       <div className="sidebar-bottom"><div className="nav-label">СИСТЕМА</div><button type="button" className="nav-item" aria-label="Налаштування" title="Налаштування" onClick={() => setNotice('Налаштування будуть доступні у наступному етапі.')}><Settings size={19} strokeWidth={1.8} aria-hidden="true"/><span>Налаштування</span></button><div className="help-card"><div className="help-icon"><CircleHelp size={18}/></div><div><strong>Потрібна допомога?</strong><p>Зверніться до адміністратора системи</p></div><ChevronRight size={17}/></div><div className="user-row"><div className="avatar">{user ? displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() : 'Л'}</div><div className="user-copy"><strong>{displayName}</strong><span title={roles}>{roles}</span></div>{user && <div className="user-actions"><button type="button" className="icon-button" title="Вийти" aria-label="Вийти" disabled={logoutBusy} onClick={() => void logout()}><LogOut size={16}/></button></div>}</div></div>
     </aside>
     <main className="main-area">
       <header className="topbar"><Breadcrumbs items={[{ label: 'Робочий простір', section: 'Головна' }, { label: activeNav }]} navigate={navigate}/><div className="top-actions"><YearPicker value={year} onChange={setYear} label="Рік"/></div></header>
       <div className={`content${activeNav === 'Головна' ? ' home-content' : ''}`}>
         {notice && <Alert variant="info" onDismiss={() => setNotice('')}>{notice}</Alert>}
-        <div>{activeNav === 'Головна' ? <StartPage navigate={navigate} onCreate={newAssignment} canCreate={can('assignments.manage')} allowedLinks={new Set(allowedNav.map((item) => item.label))}/> :
+        <div>{activeNav === 'Головна' ? <StartPage navigate={navigate} onCreate={newAssignment} canCreate={can('assignments.manage')} allowedLinks={new Set(visibleNav.filter((item) => can(item.permission)).map((item) => item.label))}/> :
           activeNav === 'Реєстр допомог' ? <AidRegistry createOnOpen={createAssignment}/> :
           activeNav === 'Формування відомостей' ? <StatementFormation/> :
           activeNav === 'Довідники' ? <Dictionaries allowedSections={dictionarySections} canManageCatalogs={can('catalogs.manage')} canManagePlans={can('planning.manage')} canManageDecisions={can('decisions.manage')} canManagePersonal={can('recipients.manage') || can('banks.manage')}/> :

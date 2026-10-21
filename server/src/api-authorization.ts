@@ -24,6 +24,7 @@ export const API_ROUTE_POLICIES: readonly ApiRoutePolicy[] = [
   { method: 'PUT', url: '/api/users/:id', permissions: ['users.manage'] },
   { method: 'POST', url: '/api/users/:id/status', permissions: ['users.manage'] },
   { method: 'POST', url: '/api/users/:id/reset-password', permissions: ['users.manage'] },
+  { method: 'DELETE', url: '/api/users/:id', permissions: ['users.manage'] },
 
   { method: 'GET', url: '/api/catalogs', permissions: ['catalogs.read'] },
   { method: 'POST', url: '/api/catalogs/save', permissions: ['catalogs.manage'] },

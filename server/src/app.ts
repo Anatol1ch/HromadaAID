@@ -25,7 +25,7 @@ import { changePassword, login, logout } from './auth.js'
 import { requireAuthenticated } from './auth-http.js'
 import { currentApiSession, installApiAuthorization } from './api-authorization.js'
 import { LoginRateLimiter } from './login-rate-limit.js'
-import { createManagedUser, getManagedUser, listManagedUsers, resetManagedUserPassword, setManagedUserStatus, updateManagedUser } from './user-admin.js'
+import { createManagedUser, getManagedUser, listManagedUsers, removeManagedUser, resetManagedUserPassword, setManagedUserStatus, updateManagedUser } from './user-admin.js'
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const saveStatus = (result: { ok: boolean; reason?: string }) => result.ok ? 200 : result.reason === 'conflict' ? 409 : result.reason === 'storage' ? 500 : 400
@@ -112,6 +112,11 @@ export function createApp(database: DatabaseSync): FastifyInstance {
     const body = isRecord(request.body) ? request.body : {}
     const result = await resetManagedUserPassword(database, request.params.id, body.newPassword, body.expectedUpdatedAt)
     return reply.status(result.ok ? 200 : result.reason === 'not-found' ? 404 : result.reason === 'conflict' ? 409 : 400).send(result)
+  })
+  app.delete<{ Params: { id: string }; Body: unknown }>('/api/users/:id', async (request, reply) => {
+    const body = isRecord(request.body) ? request.body : {}
+    const result = removeManagedUser(database, currentApiSession(request).user.id, request.params.id, body.expectedUpdatedAt)
+    return reply.status(result.ok ? 200 : result.reason === 'not-found' ? 404 : 409).send(result)
   })
 
   app.get<{ Querystring: { includeInactive?: string } }>('/api/catalogs', async (request): Promise<CatalogList> =>

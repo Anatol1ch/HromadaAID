@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import type { ManagedUser, ManagedUserInput, ManagedUserSaveResult } from '../../shared/api-contract.js'
+import type { ManagedUser, ManagedUserInput, ManagedUserRemoveResult, ManagedUserSaveResult } from '../../shared/api-contract.js'
 import { isUserRole, USER_ROLES, type UserRole } from '../../shared/authorization.js'
 import { nextRecordRevision } from '../../shared/record-revision.js'
 import { hashPassword, normalizeUsername, revokeUserSessions, validatePassword } from './auth.js'
@@ -155,5 +155,25 @@ export async function resetManagedUserPassword(database: DatabaseSync, id: strin
   } catch {
     if (open) try { database.exec('ROLLBACK') } catch { /* already closed */ }
     return failure('conflict', 'Не вдалося скинути пароль користувача.')
+  }
+}
+
+export function removeManagedUser(database: DatabaseSync, actorId: string, id: string, expectedUpdatedAt: unknown): ManagedUserRemoveResult {
+  if (typeof expectedUpdatedAt !== 'string' || !expectedUpdatedAt) return { ok: false, reason: 'conflict', message: 'Для видалення потрібна актуальна версія облікового запису.' }
+  if (actorId === id) return { ok: false, reason: 'conflict', message: 'Не можна видалити власний активний обліковий запис. Скористайтеся іншим адміністратором.' }
+  let open = false
+  try {
+    database.exec('BEGIN IMMEDIATE'); open = true
+    const current = readUser(database, id)
+    if (!current) { database.exec('ROLLBACK'); return { ok: false, reason: 'not-found', message: 'Користувача не знайдено.' } }
+    if (current.updated_at !== expectedUpdatedAt) { database.exec('ROLLBACK'); return { ok: false, reason: 'conflict', message: 'Обліковий запис уже змінив інший користувач. Оновіть список.' } }
+    const administratorError = requireActiveAdministrator(database, current, 'inactive', [])
+    if (administratorError) { database.exec('ROLLBACK'); return { ok: false, reason: 'conflict', message: administratorError } }
+    // users are referenced only by user_roles and user_sessions, both safely cascade.
+    database.prepare('DELETE FROM users WHERE id=? AND updated_at=?').run(id, expectedUpdatedAt)
+    database.exec('COMMIT'); return { ok: true }
+  } catch {
+    if (open) try { database.exec('ROLLBACK') } catch { /* already closed */ }
+    return { ok: false, reason: 'conflict', message: 'Не вдалося видалити користувача. Спробуйте деактивувати обліковий запис.' }
   }
 }

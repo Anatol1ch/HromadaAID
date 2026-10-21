@@ -142,6 +142,7 @@ if (!hasSingleInstanceLock) {
         trustedIpcMain.handle('users:update', async () => { throw new Error('Керування користувачами доступне лише у віддаленому режимі.') })
         trustedIpcMain.handle('users:set-status', async () => { throw new Error('Керування користувачами доступне лише у віддаленому режимі.') })
         trustedIpcMain.handle('users:reset-password', async () => { throw new Error('Керування користувачами доступне лише у віддаленому режимі.') })
+        trustedIpcMain.handle('users:remove', async () => { throw new Error('Керування користувачами доступне лише у віддаленому режимі.') })
         const database = openAppDatabase(app.getPath('userData'))
         closeDatabase = () => database.close()
         registerBankIpc(database)
@@ -171,6 +172,7 @@ if (!hasSingleInstanceLock) {
         trustedIpcMain.handle('users:update', async (_event, id: unknown, input: unknown, expectedUpdatedAt: unknown) => typeof id === 'string' ? http.putJson(`/api/users/${encodeURIComponent(id)}`, { input, expectedUpdatedAt }) : { ok: false, reason: 'not-found', message: 'Користувача не знайдено.' })
         trustedIpcMain.handle('users:set-status', async (_event, id: unknown, status: unknown, expectedUpdatedAt: unknown) => typeof id === 'string' ? http.postJson(`/api/users/${encodeURIComponent(id)}/status`, { status, expectedUpdatedAt }) : { ok: false, reason: 'not-found', message: 'Користувача не знайдено.' })
         trustedIpcMain.handle('users:reset-password', async (_event, id: unknown, newPassword: unknown, expectedUpdatedAt: unknown) => typeof id === 'string' ? http.postJson(`/api/users/${encodeURIComponent(id)}/reset-password`, { newPassword, expectedUpdatedAt }) : { ok: false, reason: 'not-found', message: 'Користувача не знайдено.' })
+        trustedIpcMain.handle('users:remove', async (_event, id: unknown, expectedUpdatedAt: unknown) => typeof id === 'string' ? http.deleteJson(`/api/users/${encodeURIComponent(id)}`, { expectedUpdatedAt }) : { ok: false, reason: 'not-found', message: 'Користувача не знайдено.' })
         // PDF snapshots and their release are per-window Electron resources; they never access SQLite.
         registerReportExportIpc()
         registerStatementsIpc(undefined, { readRows: async (ids, year) => http.postJson('/api/statements/snapshot', { ids, year: Number(year) }), readBankRows: async (ids, year) => http.postJson('/api/statements/bank-snapshot', { ids, year }) })

@@ -22,6 +22,7 @@ const api: HromadaAidApi = {
     update: (id, input, expectedUpdatedAt) => invoke('users:update', id, input, expectedUpdatedAt),
     setStatus: (id, status, expectedUpdatedAt) => invoke('users:set-status', id, status, expectedUpdatedAt),
     resetPassword: (id, newPassword, expectedUpdatedAt) => invoke('users:reset-password', id, newPassword, expectedUpdatedAt),
+    remove: (id, expectedUpdatedAt) => invoke('users:remove', id, expectedUpdatedAt),
   },
   recipients: {
     list: (includeArchived) => invoke('recipients:list', includeArchived),
