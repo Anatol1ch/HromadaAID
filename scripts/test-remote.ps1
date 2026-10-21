@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Starts an isolated remote-mode HromadaAID session for manual integration checks.
 
