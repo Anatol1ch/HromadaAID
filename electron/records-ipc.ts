@@ -27,7 +27,7 @@ export function isIsoDate(value: string) {
 }
 
 export function registerRecordsIpc(database: DatabaseSync) {
-  ipcMain.handle('assignments:change-statuses', (_event, value: unknown) => changeAssignmentStatuses(database, value))
+  ipcMain.handle('assignments:change-statuses', (_event, value: unknown, requestId?: unknown) => changeAssignmentStatuses(database, value, requestId))
   ipcMain.handle('assignments:list', (_event, yearValue: unknown): AssignmentListResult => listAssignments(database, yearValue))
 
   ipcMain.handle('assignments:save', (_event, value: unknown, idValue?: unknown, expectedUpdatedAt?: unknown, requestId?: unknown) => saveAssignment(database, value, idValue, expectedUpdatedAt, requestId))

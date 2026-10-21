@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { ASSIGNMENT_STATUSES } from './assignment-model.js'
 import { paymentYearError } from './accounting-year.js'
@@ -24,11 +25,13 @@ function readInput(value: unknown): AssignmentStatusBatchInput | null {
 }
 
 /** One write lock covers both eligibility checks and every status change. */
-export function changeAssignmentStatuses(database: DatabaseSync, value: unknown): AssignmentStatusBatchResult {
+export function changeAssignmentStatuses(database: DatabaseSync, value: unknown, requestId?: unknown): AssignmentStatusBatchResult {
   if (value && typeof value === 'object' && 'assignmentIds' in value && Array.isArray(value.assignmentIds) && value.assignmentIds.length > 10000) {
     return { ok: false, reason: 'validation', message: 'За одну операцію можна змінити не більше 10 000 призначень. Звузьте вибір за допомогою фільтрів.' }
   }
   const input = readInput(value)
+  const validRequestId = typeof requestId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)
+  if (!validRequestId) return { ok: false, reason: 'validation', message: 'Для пакетної зміни статусів потрібен ключ операції.' }
   if (!input) return { ok: false, reason: 'validation', message: 'Перевірте вибір призначень, робочий рік, статус і дату виплати. Для статусу «Виплачено» дата обов’язкова.' }
   if (input.status === 'Виплачено') {
     const message = paymentYearError(input.paidOn, input.year)
@@ -38,6 +41,14 @@ export function changeAssignmentStatuses(database: DatabaseSync, value: unknown)
   try {
     database.exec('BEGIN IMMEDIATE')
     transactionOpen = true
+    const payloadHash = createHash('sha256').update(JSON.stringify({ assignmentIds: [...input.assignmentIds].sort(), year: input.year, status: input.status, paidOn: input.paidOn ?? null })).digest('hex')
+    const existingRequest = database.prepare('SELECT payload_hash,result_json FROM assignment_status_requests WHERE request_id=?').get(String(requestId)) as { payload_hash: string; result_json: string } | undefined
+    if (existingRequest) {
+      if (existingRequest.payload_hash !== payloadHash) { database.exec('ROLLBACK'); transactionOpen = false; return { ok: false, reason: 'conflict', message: 'Цей ключ операції вже використано з іншими даними.' } }
+      const replay = JSON.parse(existingRequest.result_json) as AssignmentStatusBatchResult
+      database.exec('COMMIT'); transactionOpen = false
+      return replay
+    }
     const reject = (reason: 'not-found' | 'conflict', message: string): AssignmentStatusBatchResult => {
       database.exec('ROLLBACK'); transactionOpen = false
       return { ok: false, reason, message }
@@ -62,6 +73,7 @@ export function changeAssignmentStatuses(database: DatabaseSync, value: unknown)
       if (Number(result.changes) !== 1) throw new Error('Unexpected assignment update count')
     }
     const result: AssignmentStatusBatchResult = { ok: true, updatedCount: changes.length, unchangedCount: input.assignmentIds.length - changes.length }
+    database.prepare('INSERT INTO assignment_status_requests(request_id,payload_hash,result_json,created_at) VALUES(?,?,?,?)').run(String(requestId), payloadHash, JSON.stringify(result), new Date().toISOString())
     database.exec('COMMIT')
     transactionOpen = false
     return result
@@ -70,3 +82,4 @@ export function changeAssignmentStatuses(database: DatabaseSync, value: unknown)
     return { ok: false, reason: 'storage', message: 'Не вдалося змінити статуси. Операцію скасовано повністю; жодних змін не внесено.' }
   }
 }
+
