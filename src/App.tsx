@@ -1,10 +1,9 @@
 import Alert from './components/Alert'
 import DataState from './components/DataState'
 import LoginScreen from './components/LoginScreen'
-import ChangePasswordModal from './components/ChangePasswordModal'
 import { useEffect, useMemo, useState } from 'react'
 import { initialAccountingYear, rememberAccountingYear } from './lib/accountingYear'
-import { Activity, ChevronRight, CircleHelp, Code2, Plus, ArrowUpRight, CalendarDays, FileText, HandCoins, HeartHandshake, Home, LogOut, Settings, BookOpen, ChartNoAxesCombined, KeyRound } from 'lucide-react'
+import { Activity, ChevronRight, CircleHelp, Code2, Plus, ArrowUpRight, CalendarDays, FileText, HandCoins, HeartHandshake, Home, LogOut, Settings, BookOpen, ChartNoAxesCombined } from 'lucide-react'
 import type { ClientAuthState } from '../shared/auth-contract'
 import { USER_ROLE_LABELS, type Permission } from '../shared/authorization'
 import StatementFormation from './StatementFormation'
@@ -42,15 +41,14 @@ function App() {
   }
   if (!auth) return <StartupScreen/>
   if (auth.mode === 'remote' && auth.status !== 'authenticated') return <LoginScreen state={auth} onLogin={login}/>
-  return <Workspace auth={auth} setAuth={setAuth}/>
+  return <Workspace auth={auth}/>
 }
 
-function Workspace({ auth, setAuth }: { auth: Extract<ClientAuthState, { status: 'authenticated' }>; setAuth: (state: ClientAuthState) => void }) {
+function Workspace({ auth }: { auth: Extract<ClientAuthState, { status: 'authenticated' }> }) {
   const [activeNav, setActiveNav] = useState('Головна')
   const [createAssignment, setCreateAssignment] = useState(false)
   const [notice, setNotice] = useState('')
   const [year, setYear] = useState(initialAccountingYear)
-  const [changePassword, setChangePassword] = useState(false)
   const [logoutBusy, setLogoutBusy] = useState(false)
   const permissions = useMemo(() => new Set(auth.mode === 'local' ? nav.map((item) => item.permission).concat(['catalogs.manage', 'program_approvals.manage', 'personal_data.read', 'recipients.manage', 'banks.manage', 'decisions.read', 'decisions.manage', 'assignments.manage', 'assignments.change_financial_status', 'planning.read', 'planning.manage', 'reports.export', 'protected_entities.delete', 'users.manage'] as Permission[]) : auth.user.permissions), [auth])
   const can = (permission: Permission) => permissions.has(permission)
@@ -75,7 +73,7 @@ function Workspace({ auth, setAuth }: { auth: Extract<ClientAuthState, { status:
       <div className="brand"><div className="brand-mark"><HeartHandshake size={22} strokeWidth={2.1}/></div><div className="brand-copy"><div className="brand-name">Hromada<span>Aid</span></div><div className="brand-caption">Автоматизована система обліку матеріальних допомог</div></div></div>
       <div className="nav-label">РОБОЧИЙ ПРОСТІР</div>
       <nav className="nav-list">{allowedNav.map(({ label, icon: Icon }) => <button key={label} type="button" aria-label={label} title={label} aria-current={activeNav === label ? 'page' : undefined} className={`nav-item ${activeNav === label ? 'active' : ''}`} onClick={() => navigate(label)}><Icon size={19} strokeWidth={1.8} aria-hidden="true"/><span>{label}</span></button>)}</nav>
-      <div className="sidebar-bottom"><div className="nav-label">СИСТЕМА</div><button type="button" className="nav-item" aria-label="Налаштування" title="Налаштування" onClick={() => setNotice('Налаштування будуть доступні у наступному етапі.')}><Settings size={19} strokeWidth={1.8} aria-hidden="true"/><span>Налаштування</span></button><div className="help-card"><div className="help-icon"><CircleHelp size={18}/></div><div><strong>Потрібна допомога?</strong><p>Зверніться до адміністратора системи</p></div><ChevronRight size={17}/></div><div className="user-row"><div className="avatar">{user ? displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() : 'Л'}</div><div className="user-copy"><strong>{displayName}</strong><span title={roles}>{roles}</span></div>{user && <div className="user-actions"><button type="button" className="icon-button" title="Змінити пароль" aria-label="Змінити пароль" onClick={() => setChangePassword(true)}><KeyRound size={16}/></button><button type="button" className="icon-button" title="Вийти" aria-label="Вийти" disabled={logoutBusy} onClick={() => void logout()}><LogOut size={16}/></button></div>}</div></div>
+      <div className="sidebar-bottom"><div className="nav-label">СИСТЕМА</div><button type="button" className="nav-item" aria-label="Налаштування" title="Налаштування" onClick={() => setNotice('Налаштування будуть доступні у наступному етапі.')}><Settings size={19} strokeWidth={1.8} aria-hidden="true"/><span>Налаштування</span></button><div className="help-card"><div className="help-icon"><CircleHelp size={18}/></div><div><strong>Потрібна допомога?</strong><p>Зверніться до адміністратора системи</p></div><ChevronRight size={17}/></div><div className="user-row"><div className="avatar">{user ? displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() : 'Л'}</div><div className="user-copy"><strong>{displayName}</strong><span title={roles}>{roles}</span></div>{user && <div className="user-actions"><button type="button" className="icon-button" title="Вийти" aria-label="Вийти" disabled={logoutBusy} onClick={() => void logout()}><LogOut size={16}/></button></div>}</div></div>
     </aside>
     <main className="main-area">
       <header className="topbar"><Breadcrumbs items={[{ label: 'Робочий простір', section: 'Головна' }, { label: activeNav }]} navigate={navigate}/><div className="top-actions"><YearPicker value={year} onChange={setYear} label="Рік"/></div></header>
@@ -88,7 +86,7 @@ function Workspace({ auth, setAuth }: { auth: Extract<ClientAuthState, { status:
           activeNav === 'Огляд' ? <Dashboard/> : <Reports/>}</div>
       </div>
     </main>
-  </div>{changePassword && <ChangePasswordModal onClose={() => setChangePassword(false)} onChangePassword={async (currentPassword, newPassword) => { const result = await window.hromadaAid.auth.changePassword(currentPassword, newPassword); setAuth(result.state); return { ok: result.ok, message: 'message' in result ? result.message : undefined } }}/>}<UnsavedChangesConfirmation/></YearContext.Provider>
+  </div><UnsavedChangesConfirmation/></YearContext.Provider>
 }
 
 function StartupScreen() { return <main className="app-startup" aria-busy="true" aria-label="Підготовка робочого простору HromadaAid"><div className="app-startup-content" role="status" aria-live="polite"><div className="app-startup-mark"><HeartHandshake size={34} strokeWidth={2}/></div><div className="app-startup-name">Hromada<span>Aid</span></div><p>Автоматизована система обліку матеріальних допомог</p><span className="app-startup-loader" aria-hidden="true"/><span className="visually-hidden">Підготовка робочого простору…</span></div></main> }

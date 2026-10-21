@@ -26,6 +26,7 @@ const iconDirectory = app.isPackaged ? join(process.resourcesPath, 'assets') : j
 let closeDatabase: (() => void) | undefined
 let mainWindow: BrowserWindow | null = null
 let runtimeConfig: ElectronRuntimeConfig | undefined
+let remoteAuth: RemoteAuthSession | undefined
 const appPageUrl = isDev ? devServerUrl : pathToFileURL(join(currentDirectory, '../../dist/index.html')).href
 configureIpcSecurity(() => mainWindow, appPageUrl)
 
@@ -150,6 +151,7 @@ if (!hasSingleInstanceLock) {
           onUnauthorized: () => { void session?.expired() },
         })
         session = new RemoteAuthSession(app.getPath('userData'), http, publishAuthState)
+        remoteAuth = session
         await session.initialize()
         trustedIpcMain.handle('auth:get-state', async () => session.currentState)
         trustedIpcMain.handle('auth:login', async (_event, username: unknown, password: unknown): Promise<AuthActionResult> =>
@@ -291,7 +293,7 @@ if (!hasSingleInstanceLock) {
     shutdownStarted = true
     const cleanup = runtimeConfig?.mode === 'local'
       ? cleanupGeneratedReports().then(() => cleanupGeneratedStatements())
-      : Promise.resolve()
+      : remoteAuth?.close() ?? Promise.resolve()
     void cleanup.catch(() => {
       console.warn('[HromadaAid] Частину тимчасових документів буде перевірено під час наступного запуску.')
     }).finally(() => {

@@ -21,9 +21,11 @@ export default function LoginScreen({ state, onLogin }: { state: ClientAuthState
   const message = state.mode === 'remote' && 'message' in state ? state.message : undefined
   return <main className="auth-screen" aria-busy={busy || undefined}>
     <section className="auth-card" aria-labelledby="auth-title">
-      <div className="auth-mark"><HeartHandshake size={28} aria-hidden="true"/></div>
-      <div className="auth-brand">Hromada<span>Aid</span></div>
-      <p className="auth-caption">Автоматизована система обліку матеріальних допомог</p>
+      <div className="auth-identity">
+        <div className="auth-mark"><HeartHandshake size={28} aria-hidden="true"/></div>
+        <div className="auth-brand">Hromada<span>AID</span></div>
+        <p className="auth-caption">Автоматизована система обліку матеріальних допомог</p>
+      </div>
       <h1 id="auth-title">Вхід до системи</h1>
       <p className="auth-description">Використайте облікові дані, надані адміністратором.</p>
       {(error || message) && <div className="auth-message" role="alert">{error || message}</div>}
