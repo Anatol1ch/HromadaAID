@@ -11,8 +11,8 @@ import { cleanupGeneratedStatements, registerStatementsIpc } from './statements-
 import { configureIpcSecurity, isTrustedAppUrl, registerRemoteIpcBlockers, trustedIpcMain } from './ipc-security.js'
 import { ElectronRuntimeConfigError, readElectronRuntimeConfig, type ElectronRuntimeConfig } from './runtime-config.js'
 import { HttpClient } from './http-client.js'
-import type { CatalogList } from './api-contract.js'
-import { isCatalogList } from '../shared/api-contract.js'
+import type { BankDetail, BankRecord, CatalogList, RecipientRecord, RecipientSummary } from './api-contract.js'
+import { isBankDetailList, isBankRecordList, isCatalogList, isNullableBankRecord, isNullableRecipientRecord, isRecipientSummaryList } from '../shared/api-contract.js'
 
 // Match the future Windows package/shortcut identity without changing userData.
 if (process.platform === 'win32') app.setAppUserModelId('local.hromadaaid')
@@ -135,9 +135,28 @@ if (!hasSingleInstanceLock) {
         registerStatementsIpc(database)
       } else {
         const http = new HttpClient(runtimeConfig.apiUrl)
-        registerRemoteIpcBlockers(['catalogs:list'])
+        registerRemoteIpcBlockers(['catalogs:list', 'recipients:list', 'recipients:get', 'banks:list', 'banks:get', 'banks:details'])
         trustedIpcMain.handle('catalogs:list', async (_event, includeInactiveValue: unknown): Promise<CatalogList> =>
           http.getJson(includeInactiveValue === true ? '/api/catalogs?includeInactive=true' : '/api/catalogs', isCatalogList))
+        trustedIpcMain.handle('recipients:list', async (): Promise<RecipientSummary[]> =>
+          http.getJson('/api/recipients', isRecipientSummaryList))
+        trustedIpcMain.handle('recipients:get', async (_event, id: unknown): Promise<RecipientRecord | null> => {
+          if (typeof id !== 'string' || !id) return null
+          return http.getJson(`/api/recipients/${encodeURIComponent(id)}`, isNullableRecipientRecord)
+        })
+        trustedIpcMain.handle('banks:list', async (_event, query: unknown): Promise<BankRecord[]> => {
+          if (query !== undefined && typeof query !== 'string') throw new Error('Некоректний пошуковий запит.')
+          const path = typeof query === 'string' && query ? `/api/banks?query=${encodeURIComponent(query)}` : '/api/banks'
+          return http.getJson(path, isBankRecordList)
+        })
+        trustedIpcMain.handle('banks:get', async (_event, id: unknown): Promise<BankRecord | null> => {
+          if (typeof id !== 'string' || !id) return null
+          return http.getJson(`/api/banks/${encodeURIComponent(id)}`, isNullableBankRecord)
+        })
+        trustedIpcMain.handle('banks:details', async (_event, id: unknown): Promise<BankDetail[]> => {
+          if (typeof id !== 'string' || !id) return []
+          return http.getJson(`/api/banks/${encodeURIComponent(id)}/details`, isBankDetailList)
+        })
       }
     } catch (error) {
       dialog.showErrorBox('HromadaAid', error instanceof ElectronRuntimeConfigError || error instanceof DatabaseSchemaError || error instanceof DatabaseIntegrityError

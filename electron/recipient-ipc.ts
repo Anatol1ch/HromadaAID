@@ -1,65 +1,19 @@
-import { addressColumns, addressFromRow, addressKeys, addressValues, storedAddressText } from './address.js'
+import { addressColumns, addressKeys, addressValues } from './address.js'
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { trustedIpcMain as ipcMain } from './ipc-security.js'
-import type { DuplicateMatch, RecipientRecord, RecipientSaveResult, RecipientSummary } from './api-contract.js'
+import type { DuplicateMatch, RecipientSaveResult } from './api-contract.js'
 import { validateRecipientInput } from './recipient-validation.js'
-
-type RecipientRow = Record<string, string | number | null>
-
-function fullNameOf(row: RecipientRow) {
-  return [row.last_name, row.first_name, row.patronymic].filter((part) => typeof part === 'string' && part.trim()).join(' ')
-}
-
-function toSummary(row: RecipientRow): RecipientSummary {
-  return {
-    id: String(row.id),
-    fullName: fullNameOf(row),
-    rnokpp: typeof row.rnokpp === 'string' ? row.rnokpp : null,
-    phone: typeof row.phone === 'string' ? row.phone : null,
-    registeredAddress: storedAddressText(row, 'registration'),
-    sex: row.sex === 'Жінка' || row.sex === 'Чоловік' ? row.sex : null,
-    updatedAt: String(row.updated_at),
-    isDemo: Number(row.is_demo) === 1,
-    isVpo: row.is_vpo === 0 || row.is_vpo === 1 ? Number(row.is_vpo) === 1 : null,
-  }
-}
-
-function toRecord(row: RecipientRow): RecipientRecord {
-  return {
-    ...toSummary(row),
-    lastName: String(row.last_name),
-    firstName: String(row.first_name),
-    patronymic: typeof row.patronymic === 'string' ? row.patronymic : null,
-    sex: row.sex === 'Жінка' || row.sex === 'Чоловік' ? row.sex : null,
-    isVpo: row.is_vpo === 0 || row.is_vpo === 1 ? Number(row.is_vpo) === 1 : null,
-    address: storedAddressText(row, 'residence'),
-    registeredAddressParts: addressFromRow(row, 'registration'),
-    addressParts: addressFromRow(row, 'residence'),
-    email: typeof row.email === 'string' ? row.email : null,
-    bankDetailsId: typeof row.bank_details_id === 'string' ? row.bank_details_id : null,
-    bankAccount: typeof row.bank_account === 'string' ? row.bank_account : null,
-    bankName: typeof row.bank_name === 'string' ? row.bank_name : null,
-    bankMfo: typeof row.bank_mfo === 'string' ? row.bank_mfo : null,
-    bankEdrpou: typeof row.bank_edrpou === 'string' ? row.bank_edrpou : null,
-    passport: typeof row.passport === 'string' ? row.passport : null,
-    createdAt: String(row.created_at),
-  }
-}
-
-const selectFields = 'r.*, b.name AS bank_name, bd.mfo AS bank_mfo, bd.edrpou AS bank_edrpou'
-const recipientSource = 'recipients r LEFT JOIN bank_details bd ON bd.id=r.bank_details_id LEFT JOIN banks b ON b.id=bd.bank_id'
+import { getRecipient, listRecipients, recipientFullName, recipientRecordFromRow, type RecipientRow } from './recipient-data.js'
 
 export function registerRecipientIpc(database: DatabaseSync) {
   ipcMain.handle('recipients:list', (_event, _includeArchived: unknown) => {
-    const rows = database.prepare(`SELECT ${selectFields} FROM ${recipientSource}`).all() as RecipientRow[]
-    return rows.map(toSummary).sort((a, b) => a.fullName.localeCompare(b.fullName, 'uk'))
+    return listRecipients(database)
   })
 
   ipcMain.handle('recipients:get', (_event, id: unknown) => {
     if (typeof id !== 'string' || !id) return null
-    const row = database.prepare(`SELECT ${selectFields} FROM ${recipientSource} WHERE r.id = ?`).get(id) as RecipientRow | undefined
-    return row ? toRecord(row) : null
+    return getRecipient(database, id)
   })
 
   ipcMain.handle('recipients:save', (_event, value: unknown, idValue?: unknown, confirmSameName?: unknown): RecipientSaveResult => {
@@ -87,7 +41,7 @@ export function registerRecipientIpc(database: DatabaseSync) {
       }
 
       const normalizedName = normalizeName([input.lastName, input.firstName, input.patronymic].join(' '))
-      const nameMatches = others.filter((row) => normalizeName(fullNameOf(row)) === normalizedName)
+      const nameMatches = others.filter((row) => normalizeName(recipientFullName(row)) === normalizedName)
       if (nameMatches.length && !confirmName) {
         database.exec('ROLLBACK')
         return { ok: false, reason: 'name-match', matches: nameMatches.map(toDuplicateMatch), message: 'Збіг ПІБ потребує перевірки. Це може бути інша людина; автоматичного об’єднання немає.' }
@@ -120,12 +74,12 @@ export function registerRecipientIpc(database: DatabaseSync) {
       const columns = ['registration', 'residence'].flatMap(prefix => addressKeys.map(key => prefix + '_' + addressColumns[key]))
       database.prepare('UPDATE recipients SET ' + columns.map(column => column + '=?').join(',') + ' WHERE id=?')
         .run(...addressValues(input.registeredAddressParts), ...addressValues(input.addressParts), savedId)
-      const row = database.prepare(`SELECT ${selectFields} FROM ${recipientSource} WHERE r.id = ?`).get(savedId) as RecipientRow | undefined
+      const row = database.prepare(`SELECT r.*, b.name AS bank_name, bd.mfo AS bank_mfo, bd.edrpou AS bank_edrpou FROM recipients r LEFT JOIN bank_details bd ON bd.id=r.bank_details_id LEFT JOIN banks b ON b.id=bd.bank_id WHERE r.id = ?`).get(savedId) as RecipientRow | undefined
       if (!row) {
         database.exec('ROLLBACK')
         return { ok: false, reason: 'storage', matches: [], message: 'Не вдалося прочитати картку перед збереженням; зміни скасовано.' }
       }
-      const response: RecipientSaveResult = { ok: true, recipient: toRecord(row) }
+      const response: RecipientSaveResult = { ok: true, recipient: recipientRecordFromRow(row) }
       database.exec('COMMIT')
       return response
     } catch {
@@ -146,7 +100,7 @@ function nullable(value: string) {
 function toDuplicateMatch(row: RecipientRow): DuplicateMatch {
   return {
     id: String(row.id),
-    fullName: fullNameOf(row),
+    fullName: recipientFullName(row),
     rnokpp: typeof row.rnokpp === 'string' ? row.rnokpp : null,
   }
 }

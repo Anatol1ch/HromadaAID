@@ -36,6 +36,58 @@ export function isCatalogList(value: unknown): value is CatalogList {
       isNullableString(item.direction) && isNullableString(item.fundingSource) && typeof item.isActive === 'boolean' &&
       typeof item.assignmentCount === 'number')
 }
+
+const isSex = (value: unknown): value is 'Жінка' | 'Чоловік' | null => value === 'Жінка' || value === 'Чоловік' || value === null
+const isNullableBoolean = (value: unknown): value is boolean | null => typeof value === 'boolean' || value === null
+const isAddressParts = (value: unknown): boolean => value === null || (isRecord(value) &&
+  ['postalCode', 'region', 'district', 'settlementType', 'settlementName', 'streetType', 'customStreetType', 'streetName', 'building', 'apartment']
+    .every((key) => typeof value[key] === 'string'))
+
+export function isRecipientSummary(value: unknown): value is RecipientSummary {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.fullName === 'string' &&
+    isNullableString(value.rnokpp) && isNullableString(value.phone) && isNullableString(value.registeredAddress) &&
+    isSex(value.sex) && typeof value.updatedAt === 'string' && typeof value.isDemo === 'boolean' && isNullableBoolean(value.isVpo)
+}
+
+export function isRecipientSummaryList(value: unknown): value is RecipientSummary[] {
+  return Array.isArray(value) && value.every(isRecipientSummary)
+}
+
+export function isRecipientRecord(value: unknown): value is RecipientRecord {
+  if (!isRecipientSummary(value) || !isRecord(value)) return false
+  const record = value as Record<string, unknown>
+  return typeof record.lastName === 'string' && typeof record.firstName === 'string' &&
+    isNullableString(record.patronymic) && isNullableString(record.address) && isAddressParts(record.addressParts) &&
+    isAddressParts(record.registeredAddressParts) && isNullableString(record.email) && isNullableString(record.bankDetailsId) &&
+    isNullableString(record.bankAccount) && isNullableString(record.bankName) && isNullableString(record.bankMfo) &&
+    isNullableString(record.bankEdrpou) && isNullableString(record.passport) && typeof record.createdAt === 'string'
+}
+
+export function isNullableRecipientRecord(value: unknown): value is RecipientRecord | null {
+  return value === null || isRecipientRecord(value)
+}
+
+export function isBankDetail(value: unknown): value is BankDetail {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.bankId === 'string' &&
+    typeof value.mfo === 'string' && typeof value.edrpou === 'string' && typeof value.recipientCount === 'number'
+}
+
+export function isBankDetailList(value: unknown): value is BankDetail[] {
+  return Array.isArray(value) && value.every(isBankDetail)
+}
+
+export function isBankRecord(value: unknown): value is BankRecord {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.name === 'string' &&
+    typeof value.recipientCount === 'number' && isBankDetailList(value.details)
+}
+
+export function isBankRecordList(value: unknown): value is BankRecord[] {
+  return Array.isArray(value) && value.every(isBankRecord)
+}
+
+export function isNullableBankRecord(value: unknown): value is BankRecord | null {
+  return value === null || isBankRecord(value)
+}
 export type CatalogEditInput = { kind: 'program' | 'aidType'; id?: string; shortName: string; officialName: string; programId?: string; direction?: string; fundingSource?: string; isActive?: boolean; approvalId?: string | null; approvalNumber?: string; approvalDate?: string; approvalTitle?: string }
 export type DecisionInput = { decisionNumber: string; decisionDate: string; title: string }
 export type DecisionSummary = { id: string; decisionNumber: string; decisionDate: string; title: string | null; assignmentCount: number; assignedTotalMinor: number; createdAt: string; updatedAt: string }
