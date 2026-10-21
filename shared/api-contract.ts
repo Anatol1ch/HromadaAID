@@ -7,13 +7,13 @@ export type HealthResponse = { status: 'ok'; service: 'hromada-aid-api' }
 export type BankDetailInput = { id?: string; mfo: string; edrpou: string }
 export type BankInput = { name: string; details: BankDetailInput[] }
 export type BankDetail = { id: string; bankId: string; mfo: string; edrpou: string; recipientCount: number }
-export type BankRecord = { id: string; name: string; details: BankDetail[]; recipientCount: number }
-export type BankSaveResult = { ok: true; bank: BankRecord } | { ok: false; message: string }
+export type BankRecord = { id: string; name: string; details: BankDetail[]; recipientCount: number; updatedAt: string }
+export type BankSaveResult = { ok: true; bank: BankRecord } | { ok: false; reason: 'validation' | 'not-found' | 'conflict' | 'storage'; message: string }
 export type RecipientInput = { lastName: string; firstName: string; patronymic: string; rnokpp: string; sex: '' | 'Жінка' | 'Чоловік'; address: string; registeredAddress: string; addressParts: AddressParts | null; registeredAddressParts: AddressParts | null; phone: string; email: string; bankAccount: string; bankDetailsId: string; passport: string; isVpo: boolean | null }
 export type RecipientSummary = { id: string; fullName: string; rnokpp: string | null; phone: string | null; registeredAddress: string | null; sex: 'Жінка' | 'Чоловік' | null; updatedAt: string; isDemo: boolean; isVpo: boolean | null }
 export type RecipientRecord = RecipientSummary & { lastName: string; firstName: string; patronymic: string | null; sex: 'Жінка' | 'Чоловік' | null; isVpo: boolean | null; address: string | null; addressParts: AddressParts | null; registeredAddressParts: AddressParts | null; email: string | null; bankDetailsId: string | null; bankAccount: string | null; bankName: string | null; bankMfo: string | null; bankEdrpou: string | null; passport: string | null; createdAt: string }
 export type DuplicateMatch = { id: string; fullName: string; rnokpp: string | null }
-export type RecipientSaveResult = | { ok: true; recipient: RecipientRecord } | { ok: false; reason: 'name-match' | 'rnokpp-match' | 'not-found' | 'validation' | 'storage'; matches: DuplicateMatch[]; message: string }
+export type RecipientSaveResult = | { ok: true; recipient: RecipientRecord } | { ok: false; reason: 'name-match' | 'rnokpp-match' | 'not-found' | 'conflict' | 'validation' | 'storage'; matches: DuplicateMatch[]; message: string }
 
 export type ProgramApproval = { id: string; documentNumber: string; documentDate: string; title: string | null; programCount: number }
 export type ProgramApprovalInput = { documentNumber: string; documentDate: string; title: string }
@@ -78,7 +78,7 @@ export function isBankDetailList(value: unknown): value is BankDetail[] {
 
 export function isBankRecord(value: unknown): value is BankRecord {
   return isRecord(value) && typeof value.id === 'string' && typeof value.name === 'string' &&
-    typeof value.recipientCount === 'number' && isBankDetailList(value.details)
+    typeof value.recipientCount === 'number' && typeof value.updatedAt === 'string' && isBankDetailList(value.details)
 }
 
 export function isBankRecordList(value: unknown): value is BankRecord[] {
@@ -87,6 +87,19 @@ export function isBankRecordList(value: unknown): value is BankRecord[] {
 
 export function isNullableBankRecord(value: unknown): value is BankRecord | null {
   return value === null || isBankRecord(value)
+}
+
+export function isBankSaveResult(value: unknown): value is BankSaveResult {
+  return isRecord(value) && typeof value.ok === 'boolean' && (value.ok
+    ? isBankRecord(value.bank)
+    : (value.reason === 'validation' || value.reason === 'not-found' || value.reason === 'conflict' || value.reason === 'storage') && typeof value.message === 'string')
+}
+
+export function isRecipientSaveResult(value: unknown): value is RecipientSaveResult {
+  return isRecord(value) && typeof value.ok === 'boolean' && (value.ok
+    ? isRecipientRecord(value.recipient)
+    : (value.reason === 'name-match' || value.reason === 'rnokpp-match' || value.reason === 'not-found' || value.reason === 'conflict' || value.reason === 'validation' || value.reason === 'storage') &&
+      Array.isArray(value.matches) && value.matches.every((match) => isRecord(match) && typeof match.id === 'string' && typeof match.fullName === 'string' && isNullableString(match.rnokpp)) && typeof value.message === 'string')
 }
 export type CatalogEditInput = { kind: 'program' | 'aidType'; id?: string; shortName: string; officialName: string; programId?: string; direction?: string; fundingSource?: string; isActive?: boolean; approvalId?: string | null; approvalNumber?: string; approvalDate?: string; approvalTitle?: string }
 export type DecisionInput = { decisionNumber: string; decisionDate: string; title: string }
@@ -234,8 +247,8 @@ export type GeneratedBankStatement = { id: string; fileName: string; recordCount
 
 export type HromadaAidApi = {
   appName: string; platform: string
-  recipients: { list: (includeArchived?: boolean) => Promise<RecipientSummary[]>; get: (id: string) => Promise<RecipientRecord | null>; save: (input: RecipientInput, id?: string, confirmSameName?: boolean) => Promise<RecipientSaveResult>; assignmentHistory: (id: string) => Promise<AssignmentRecord[]> }
-  banks: { list: (query?: string) => Promise<BankRecord[]>; get: (id: string) => Promise<BankRecord | null>; details: (bankId: string) => Promise<BankDetail[]>; save: (input: BankInput, id?: string) => Promise<BankSaveResult>; remove: (id: string) => Promise<{ ok: boolean; message?: string }> }
+  recipients: { list: (includeArchived?: boolean) => Promise<RecipientSummary[]>; get: (id: string) => Promise<RecipientRecord | null>; save: (input: RecipientInput, id?: string, confirmSameName?: boolean, expectedUpdatedAt?: string) => Promise<RecipientSaveResult>; assignmentHistory: (id: string) => Promise<AssignmentRecord[]> }
+  banks: { list: (query?: string) => Promise<BankRecord[]>; get: (id: string) => Promise<BankRecord | null>; details: (bankId: string) => Promise<BankDetail[]>; save: (input: BankInput, id?: string, expectedUpdatedAt?: string) => Promise<BankSaveResult>; remove: (id: string) => Promise<{ ok: boolean; message?: string }> }
   catalogs: { list: (includeInactive?: boolean) => Promise<CatalogList>; save: (input: CatalogEditInput) => Promise<{ ok: boolean; message?: string }>; reorder: (input: CatalogOrderInput) => Promise<{ ok: boolean; message?: string }> }
   programApprovals: { list: () => Promise<ProgramApproval[]>; save: (input: ProgramApprovalInput, id?: string) => Promise<{ ok: boolean; approval?: ProgramApproval; message?: string }> }
   decisions: { list: () => Promise<DecisionSummary[]>; get: (id: string) => Promise<DecisionRecord | null>; save: (input: DecisionInput, id?: string) => Promise<DecisionSaveResult>; addAssignments: (decisionId: string, assignments: AssignmentDraft[]) => Promise<AssignmentSaveResult> }

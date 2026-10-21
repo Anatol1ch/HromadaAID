@@ -5,6 +5,6 @@ export const recipientRepository = {
   list: (includeArchived = false) => window.hromadaAid.recipients.list(includeArchived),
   get: (id: string) => window.hromadaAid.recipients.get(id),
   assignmentHistory: (id: string) => window.hromadaAid.recipients.assignmentHistory(id),
-  save: (input: RecipientInput, id?: string, confirmSameName = false) =>
-    withOverviewRefresh(window.hromadaAid.recipients.save(input, id, confirmSameName)),
+  save: (input: RecipientInput, id?: string, confirmSameName = false, expectedUpdatedAt?: string) =>
+    withOverviewRefresh(window.hromadaAid.recipients.save(input, id, confirmSameName, expectedUpdatedAt)),
 }

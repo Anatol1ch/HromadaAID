@@ -53,6 +53,7 @@ function RecipientRegistry({ embedded = false }: { embedded?: boolean }) {
   const [search, setSearch] = useState('')
   const [form, setForm] = useState<RecipientInput | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingUpdatedAt, setEditingUpdatedAt] = useState<string | null>(null)
   const [viewing, setViewing] = useState<RecipientRecord | null>(null)
   const [history, setHistory] = useState<AssignmentRecord[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -83,6 +84,7 @@ function RecipientRegistry({ embedded = false }: { embedded?: boolean }) {
     const initial: RecipientInput = { ...emptyRecipient }
     setForm(initial)
     setEditingId(null)
+    setEditingUpdatedAt(null)
     setError('')
   }
 
@@ -96,6 +98,7 @@ function RecipientRegistry({ embedded = false }: { embedded?: boolean }) {
       }
       setForm(recipientInputFromRecord(recipient))
       setEditingId(recipient.id)
+      setEditingUpdatedAt(recipient.updatedAt)
     } catch {
       setError('Не вдалося відкрити картку. Спробуйте оновити список.')
     }
@@ -136,7 +139,7 @@ function RecipientRegistry({ embedded = false }: { embedded?: boolean }) {
 
     {error && !form && <Alert variant="error" action={<button type="button" onClick={() => void loadRecipients()}>Оновити список</button>}>{error}</Alert>}
 
-    {form && <RecipientFormModal key={editingId ?? "new"} initial={form} editingId={editingId ?? undefined} onView={(id) => void openDetails(id)} onClose={() => { setForm(null); setEditingId(null) }} onSaved={() => { setForm(null); setEditingId(null); void loadRecipients() }}/>}
+    {form && <RecipientFormModal key={editingId ?? "new"} initial={form} editingId={editingId ?? undefined} expectedUpdatedAt={editingUpdatedAt ?? undefined} onView={(id) => void openDetails(id)} onClose={() => { setForm(null); setEditingId(null); setEditingUpdatedAt(null) }} onSaved={() => { setForm(null); setEditingId(null); setEditingUpdatedAt(null); void loadRecipients() }}/>}
 
     <section className="dashboard-panel registry-panel dictionary-registry">
       <DictionaryToolbar unavailable={Boolean(loadError)} title="Отримувачі" count={`Карток: ${visibleRecipients.length}${search.trim() ? ` з ${recipients.length}` : ''}`} loading={loading}>
@@ -162,8 +165,8 @@ function RecipientRegistry({ embedded = false }: { embedded?: boolean }) {
   </>
 }
 
-export function RecipientFormModal({ initial = emptyRecipient, editingId, onClose, onSaved, onView, onUseExisting }: {
-  initial?: RecipientInput; editingId?: string; onClose: () => void; onSaved: (recipient: RecipientRecord) => void; onView?: (id: string) => void; onUseExisting?: (id: string) => void
+export function RecipientFormModal({ initial = emptyRecipient, editingId, expectedUpdatedAt, onClose, onSaved, onView, onUseExisting }: {
+  initial?: RecipientInput; editingId?: string; expectedUpdatedAt?: string; onClose: () => void; onSaved: (recipient: RecipientRecord) => void; onView?: (id: string) => void; onUseExisting?: (id: string) => void
 }) {
   const [form, setForm] = useState<RecipientInput>(() => ({ ...initial }))
   const addressErrorId = useId()
@@ -233,7 +236,7 @@ export function RecipientFormModal({ initial = emptyRecipient, editingId, onClos
     }
     savingRef.current = true; setSaving(true); setError(''); setDuplicate(null)
     try {
-      const result = await recipientRepository.save(validation.input, editingId, confirmSameName)
+      const result = await recipientRepository.save(validation.input, editingId, confirmSameName, expectedUpdatedAt)
       if (result.ok) { onSaved(result.recipient); return }
       if (result.reason === 'name-match' || result.reason === 'rnokpp-match') setDuplicate(result)
       else setError(result.message)

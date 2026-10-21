@@ -44,7 +44,7 @@ export default function BankFormModal({ initial, onClose, onSaved }: { initial?:
     }
     savingRef.current = true; setSaving(true)
     try {
-      const result = await bankRepository.save(validation.input, initial?.id)
+      const result = await bankRepository.save(validation.input, initial?.id, initial?.updatedAt)
       if (result.ok) onSaved(result.bank)
       else setError(result.message)
     } catch { setError('Не вдалося зберегти банк. Введені дані залишилися у формі.') }

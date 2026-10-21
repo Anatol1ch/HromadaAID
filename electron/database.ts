@@ -287,6 +287,14 @@ const migrations: Migration[] = [{
       FROM annual_plan_entries GROUP BY year,aid_type_id;
     CREATE INDEX idx_annual_aid_plans_type ON annual_aid_plans(aid_type_id,year);
   `,
+}, {
+  // Version tokens for optimistic bank edits. Existing records retain all
+  // content and receive a migration-time revision before remote writes begin.
+  version: 20,
+  sql: `
+    ALTER TABLE banks ADD COLUMN updated_at TEXT;
+    UPDATE banks SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE updated_at IS NULL;
+  `,
 }]
 
 const maximumSupportedSchemaVersion = Math.max(...migrations.map(({ version }) => version))

@@ -1,5 +1,5 @@
 export class HttpClientError extends Error {
-  constructor(message: string) {
+  constructor(message: string, readonly status?: number) {
     super(message)
     this.name = 'HttpClientError'
   }
@@ -11,12 +11,26 @@ export class HttpClient {
   constructor(private readonly baseUrl: URL, private readonly timeoutMs = 5_000) {}
 
   async getJson<T>(path: string, validator?: JsonValidator<T>): Promise<T> {
+    return this.requestJson('GET', path, undefined, validator)
+  }
+
+  async postJson<T>(path: string, body: unknown, validator?: JsonValidator<T>): Promise<T> {
+    return this.requestJson('POST', path, body, validator)
+  }
+
+  async putJson<T>(path: string, body: unknown, validator?: JsonValidator<T>): Promise<T> {
+    return this.requestJson('PUT', path, body, validator)
+  }
+
+  private async requestJson<T>(method: 'GET' | 'POST' | 'PUT', path: string, body: unknown, validator?: JsonValidator<T>): Promise<T> {
     if (!path.startsWith('/')) throw new HttpClientError('Шлях HTTP API має починатися з «/».')
 
     let response: Response
     try {
       response = await fetch(new URL(path, this.baseUrl), {
-        headers: { accept: 'application/json' },
+        method,
+        headers: { accept: 'application/json', ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: AbortSignal.timeout(this.timeoutMs),
       })
     } catch (error) {
@@ -26,12 +40,17 @@ export class HttpClient {
       throw new HttpClientError('Не вдалося підключитися до сервера.')
     }
 
-    if (!response.ok) throw new HttpClientError(`Сервер повернув помилку HTTP ${response.status}.`)
-
-    let body: unknown
-    try { body = await response.json() }
+    let responseBody: unknown
+    try { responseBody = await response.json() }
     catch { throw new HttpClientError('Сервер повернув некоректну JSON-відповідь.') }
-    if (validator && !validator(body)) throw new HttpClientError('Сервер повернув відповідь у непідтримуваному форматі.')
-    return body as T
+    if (!response.ok) {
+      // Write endpoints deliberately return their typed validation/conflict
+      // result with 4xx status. Preserve it for existing renderer handling.
+      if (validator && validator(responseBody)) return responseBody
+      const message = responseBody && typeof responseBody === 'object' && 'message' in responseBody && typeof responseBody.message === 'string' ? responseBody.message : `Сервер повернув помилку HTTP ${response.status}.`
+      throw new HttpClientError(message, response.status)
+    }
+    if (validator && !validator(responseBody)) throw new HttpClientError('Сервер повернув відповідь у непідтримуваному форматі.')
+    return responseBody as T
   }
 }

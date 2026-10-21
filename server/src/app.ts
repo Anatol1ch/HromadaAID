@@ -1,15 +1,19 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
-import { bankDetails, getBank, listBanks } from '../../electron/bank-store.js'
+import { bankDetails, getBank, listBanks, saveBank } from '../../electron/bank-store.js'
 import { getDecision, listAssignments, listDecisions, listRecipientAssignmentHistory } from '../../electron/assignment-data.js'
 import { resolveAccountingYear } from '../../electron/accounting-year.js'
 import { listCatalogs } from '../../electron/catalog-data.js'
 import { dashboardSummary, reportSummary } from '../../electron/financial-summary.js'
 import { getRecipient, listRecipients } from '../../electron/recipient-data.js'
+import { saveRecipient } from '../../electron/recipient-store.js'
 import { listAnnualPlans } from '../../electron/annual-plans.js'
 import { listAnnualPlanEntries, listProgramApprovals, listReportSourceRows } from '../../electron/report-read-data.js'
 import { listStatementAssignments } from '../../electron/statement-list-data.js'
-import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, CatalogList, DashboardData, DecisionRecord, DecisionSummary, HealthResponse, ProgramApproval, RecipientRecord, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from '../../shared/api-contract.js'
+import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, BankSaveResult, CatalogList, DashboardData, DecisionRecord, DecisionSummary, HealthResponse, ProgramApproval, RecipientRecord, RecipientSaveResult, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from '../../shared/api-contract.js'
+
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+const saveStatus = (result: { ok: boolean; reason?: string }) => result.ok ? 200 : result.reason === 'conflict' ? 409 : result.reason === 'storage' ? 500 : 400
 
 function readJsonQuery(value: string | undefined): unknown {
   if (value === undefined) return undefined
@@ -36,6 +40,20 @@ export function createApp(database: DatabaseSync): FastifyInstance {
   app.get<{ Params: { id: string } }>('/api/recipients/:id/assignment-history', async (request): Promise<AssignmentRecord[]> =>
     listRecipientAssignmentHistory(database, request.params.id))
 
+  app.post<{ Body: unknown }>('/api/recipients', async (request, reply) => {
+    if (!isRecord(request.body) || !('input' in request.body)) return reply.status(400).send({ message: 'Некоректні дані картки отримувача.' })
+    const result = saveRecipient(database, request.body.input)
+    return reply.status(saveStatus(result)).send(result satisfies RecipientSaveResult)
+  })
+
+  app.put<{ Params: { id: string; }; Body: unknown }>('/api/recipients/:id', async (request, reply) => {
+    if (!isRecord(request.body) || !('input' in request.body) || typeof request.body.expectedUpdatedAt !== 'string' || !request.body.expectedUpdatedAt) {
+      return reply.status(400).send({ message: 'Для редагування потрібна початкова версія картки отримувача.' })
+    }
+    const result = saveRecipient(database, request.body.input, request.params.id, request.body.confirmSameName, request.body.expectedUpdatedAt)
+    return reply.status(saveStatus(result)).send(result satisfies RecipientSaveResult)
+  })
+
   app.get<{ Querystring: { query?: string } }>('/api/banks', async (request): Promise<BankRecord[]> =>
     listBanks(database, request.query.query ?? ''))
 
@@ -44,6 +62,20 @@ export function createApp(database: DatabaseSync): FastifyInstance {
 
   app.get<{ Params: { id: string } }>('/api/banks/:id/details', async (request): Promise<BankDetail[]> =>
     bankDetails(database, request.params.id))
+
+  app.post<{ Body: unknown }>('/api/banks', async (request, reply) => {
+    if (!isRecord(request.body) || !('input' in request.body)) return reply.status(400).send({ message: 'Некоректні дані банку.' })
+    const result = saveBank(database, request.body.input)
+    return reply.status(saveStatus(result)).send(result satisfies BankSaveResult)
+  })
+
+  app.put<{ Params: { id: string }; Body: unknown }>('/api/banks/:id', async (request, reply) => {
+    if (!isRecord(request.body) || !('input' in request.body) || typeof request.body.expectedUpdatedAt !== 'string' || !request.body.expectedUpdatedAt) {
+      return reply.status(400).send({ message: 'Для редагування потрібна початкова версія картки банку.' })
+    }
+    const result = saveBank(database, request.body.input, request.params.id, request.body.expectedUpdatedAt)
+    return reply.status(saveStatus(result)).send(result satisfies BankSaveResult)
+  })
 
   app.get('/api/decisions', async (): Promise<DecisionSummary[]> => listDecisions(database))
 
@@ -74,8 +106,11 @@ export function createApp(database: DatabaseSync): FastifyInstance {
     listAnnualPlanEntries(database, request.query.year === undefined ? undefined : Number(request.query.year)))
 
   app.setErrorHandler((error, _request, reply) => {
-    app.log.error(error)
-    return reply.status(500).send({ status: 'error', message: 'Внутрішня помилка сервера.' })
+    const details = error as { statusCode?: unknown; code?: unknown }
+    const status = typeof details.statusCode === 'number' && details.statusCode >= 400 && details.statusCode < 500 ? details.statusCode : 500
+    if (status >= 500) app.log.error(error)
+    else app.log.warn({ status, code: details.code }, 'Некоректний HTTP-запит')
+    return reply.status(status).send({ status: 'error', message: status === 500 ? 'Внутрішня помилка сервера.' : 'Некоректний запит до сервера.' })
   })
 
   return app

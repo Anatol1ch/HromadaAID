@@ -292,7 +292,7 @@ export default function AidRegistry({ createOnOpen = false }: { createOnOpen?: b
       setRecipients((current) => [...current.filter((item) => item.id !== person.id), person].sort((a, b) => a.fullName.localeCompare(b.fullName, 'uk')))
       update({ recipientId: person.id, recipientSearch: person.fullName }); setShowPersonForm(false)
     }}/>}
-    {draft && recipientEditor && <RecipientFormModal key={recipientEditor.id} initial={recipientInputFromRecord(recipientEditor)} editingId={recipientEditor.id} onClose={() => setRecipientEditor(null)} onSaved={(person) => {
+    {draft && recipientEditor && <RecipientFormModal key={recipientEditor.id} initial={recipientInputFromRecord(recipientEditor)} editingId={recipientEditor.id} expectedUpdatedAt={recipientEditor.updatedAt} onClose={() => setRecipientEditor(null)} onSaved={(person) => {
       setRecipients((current) => [...current.filter((item) => item.id !== person.id), person].sort((a, b) => a.fullName.localeCompare(b.fullName, 'uk')))
       update({ recipientId: person.id, recipientSearch: person.fullName }); setRecipientEditor(null)
     }}/>}

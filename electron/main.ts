@@ -10,9 +10,9 @@ import { registerDeletionIpc } from './deletion-ipc.js'
 import { cleanupGeneratedStatements, registerStatementsIpc } from './statements-ipc.js'
 import { configureIpcSecurity, isTrustedAppUrl, registerRemoteIpcBlockers, trustedIpcMain } from './ipc-security.js'
 import { ElectronRuntimeConfigError, readElectronRuntimeConfig, type ElectronRuntimeConfig } from './runtime-config.js'
-import { HttpClient } from './http-client.js'
+import { HttpClient, HttpClientError } from './http-client.js'
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, CatalogList, DashboardData, DecisionRecord, DecisionSummary, ProgramApproval, RecipientRecord, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from './api-contract.js'
-import { isAnnualAidPlanList, isAnnualPlanEntryList, isAssignmentListResult, isAssignmentRecordList, isBankDetailList, isBankRecordList, isCatalogList, isDashboardData, isDecisionSummaryList, isNullableBankRecord, isNullableDecisionRecord, isNullableRecipientRecord, isProgramApprovalList, isRecipientSummaryList, isReportSourceRowList, isReportSummary, isStatementListResult } from '../shared/api-contract.js'
+import { isAnnualAidPlanList, isAnnualPlanEntryList, isAssignmentListResult, isAssignmentRecordList, isBankDetailList, isBankRecordList, isBankSaveResult, isCatalogList, isDashboardData, isDecisionSummaryList, isNullableBankRecord, isNullableDecisionRecord, isNullableRecipientRecord, isProgramApprovalList, isRecipientSaveResult, isRecipientSummaryList, isReportSourceRowList, isReportSummary, isStatementListResult } from '../shared/api-contract.js'
 
 // Match the future Windows package/shortcut identity without changing userData.
 if (process.platform === 'win32') app.setAppUserModelId('local.hromadaaid')
@@ -135,7 +135,7 @@ if (!hasSingleInstanceLock) {
         registerStatementsIpc(database)
       } else {
         const http = new HttpClient(runtimeConfig.apiUrl)
-        registerRemoteIpcBlockers(['catalogs:list', 'recipients:list', 'recipients:get', 'recipients:assignment-history', 'banks:list', 'banks:get', 'banks:details', 'decisions:list', 'decisions:get', 'assignments:list', 'program-approvals:list', 'dashboard:get', 'reports:get', 'reports:summary', 'reports:annual-plan-list', 'reports:plan-list', 'statements:list'])
+        registerRemoteIpcBlockers(['catalogs:list', 'recipients:list', 'recipients:get', 'recipients:save', 'recipients:assignment-history', 'banks:list', 'banks:get', 'banks:details', 'banks:save', 'decisions:list', 'decisions:get', 'assignments:list', 'program-approvals:list', 'dashboard:get', 'reports:get', 'reports:summary', 'reports:annual-plan-list', 'reports:plan-list', 'statements:list'])
         trustedIpcMain.handle('catalogs:list', async (_event, includeInactiveValue: unknown): Promise<CatalogList> =>
           http.getJson(includeInactiveValue === true ? '/api/catalogs?includeInactive=true' : '/api/catalogs', isCatalogList))
         trustedIpcMain.handle('recipients:list', async (): Promise<RecipientSummary[]> =>
@@ -147,6 +147,15 @@ if (!hasSingleInstanceLock) {
         trustedIpcMain.handle('recipients:assignment-history', async (_event, id: unknown): Promise<AssignmentRecord[]> => {
           if (typeof id !== 'string' || !id) return []
           return http.getJson(`/api/recipients/${encodeURIComponent(id)}/assignment-history`, isAssignmentRecordList)
+        })
+        trustedIpcMain.handle('recipients:save', async (_event, input: unknown, id: unknown, confirmSameName: unknown, expectedUpdatedAt: unknown) => {
+          try {
+            if (typeof id === 'string' && id) return await http.putJson(`/api/recipients/${encodeURIComponent(id)}`, { input, confirmSameName: confirmSameName === true, expectedUpdatedAt }, isRecipientSaveResult)
+            return await http.postJson('/api/recipients', { input }, isRecipientSaveResult)
+          } catch (error) {
+            if (error instanceof HttpClientError && (error.status === 400 || error.status === 409)) return { ok: false as const, reason: error.status === 409 ? 'conflict' as const : 'validation' as const, matches: [], message: error.message }
+            throw error
+          }
         })
         trustedIpcMain.handle('banks:list', async (_event, query: unknown): Promise<BankRecord[]> => {
           if (query !== undefined && typeof query !== 'string') throw new Error('Некоректний пошуковий запит.')
@@ -160,6 +169,15 @@ if (!hasSingleInstanceLock) {
         trustedIpcMain.handle('banks:details', async (_event, id: unknown): Promise<BankDetail[]> => {
           if (typeof id !== 'string' || !id) return []
           return http.getJson(`/api/banks/${encodeURIComponent(id)}/details`, isBankDetailList)
+        })
+        trustedIpcMain.handle('banks:save', async (_event, input: unknown, id: unknown, expectedUpdatedAt: unknown) => {
+          try {
+            if (typeof id === 'string' && id) return await http.putJson(`/api/banks/${encodeURIComponent(id)}`, { input, expectedUpdatedAt }, isBankSaveResult)
+            return await http.postJson('/api/banks', { input }, isBankSaveResult)
+          } catch (error) {
+            if (error instanceof HttpClientError && (error.status === 400 || error.status === 409)) return { ok: false as const, reason: error.status === 409 ? 'conflict' as const : 'validation' as const, message: error.message }
+            throw error
+          }
         })
         trustedIpcMain.handle('decisions:list', async (): Promise<DecisionSummary[]> =>
           http.getJson('/api/decisions', isDecisionSummaryList))

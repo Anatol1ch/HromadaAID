@@ -7,14 +7,14 @@ const api: HromadaAidApi = {
   recipients: {
     list: (includeArchived) => invoke('recipients:list', includeArchived),
     get: (id) => invoke('recipients:get', id),
-    save: (input, id, confirmSameName) => invoke('recipients:save', input, id, confirmSameName),
+    save: (input, id, confirmSameName, expectedUpdatedAt) => invoke('recipients:save', input, id, confirmSameName, expectedUpdatedAt),
     assignmentHistory: (id) => invoke('recipients:assignment-history', id),
   },
   banks: {
     list: (query) => invoke('banks:list', query),
     get: (id) => invoke('banks:get', id),
     details: (bankId) => invoke('banks:details', bankId),
-    save: (input, id) => invoke('banks:save', input, id),
+    save: (input, id, expectedUpdatedAt) => invoke('banks:save', input, id, expectedUpdatedAt),
     remove: (id) => invoke('banks:remove', id),
   },
   catalogs: {

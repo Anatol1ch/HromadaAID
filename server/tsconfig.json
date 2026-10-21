@@ -10,5 +10,5 @@
     "types": ["node"],
     "esModuleInterop": true
   },
-  "include": ["src/**/*.ts", "../shared/**/*.ts", "../electron/database.ts", "../electron/catalog-data.ts", "../electron/recipient-data.ts", "../electron/assignment-data.ts", "../electron/statement-list-data.ts", "../electron/report-read-data.ts", "../electron/financial-summary.ts", "../electron/annual-plans.ts", "../electron/address.ts", "../electron/accounting-year.ts", "../electron/assignment-model.ts", "../electron/bank-store.ts", "../electron/bank-validation.ts", "../electron/migration-*.ts"]
+  "include": ["src/**/*.ts", "../shared/**/*.ts", "../electron/database.ts", "../electron/catalog-data.ts", "../electron/recipient-data.ts", "../electron/recipient-store.ts", "../electron/recipient-validation.ts", "../electron/assignment-data.ts", "../electron/statement-list-data.ts", "../electron/report-read-data.ts", "../electron/financial-summary.ts", "../electron/annual-plans.ts", "../electron/address.ts", "../electron/accounting-year.ts", "../electron/assignment-model.ts", "../electron/bank-store.ts", "../electron/bank-validation.ts", "../electron/migration-*.ts", "../electron/field-formats.ts"]
 }
