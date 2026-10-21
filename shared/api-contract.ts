@@ -178,6 +178,12 @@ export function isAssignmentSaveResult(value: unknown): value is AssignmentSaveR
     : (value.reason === 'validation' || value.reason === 'not-found' || value.reason === 'conflict' || value.reason === 'storage') && typeof value.message === 'string')
 }
 
+export function isAssignmentChangeResult(value: unknown): value is AssignmentChangeResult {
+  return isRecord(value) && typeof value.ok === 'boolean' && (value.ok
+    ? isAssignmentRecord(value.assignment)
+    : (value.reason === 'validation' || value.reason === 'not-found' || value.reason === 'conflict' || value.reason === 'storage') && typeof value.message === 'string')
+}
+
 export function isProgramApproval(value: unknown): value is ProgramApproval {
   return isRecord(value) && typeof value.id === 'string' && typeof value.documentNumber === 'string' &&
     typeof value.documentDate === 'string' && isNullableString(value.title) && typeof value.programCount === 'number' && typeof value.updatedAt === 'string'

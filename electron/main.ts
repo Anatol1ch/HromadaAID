@@ -12,7 +12,7 @@ import { configureIpcSecurity, isTrustedAppUrl, registerRemoteIpcBlockers, trust
 import { ElectronRuntimeConfigError, readElectronRuntimeConfig, type ElectronRuntimeConfig } from './runtime-config.js'
 import { HttpClient, HttpClientError } from './http-client.js'
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, CatalogList, DashboardData, DecisionRecord, DecisionSummary, ProgramApproval, RecipientRecord, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from './api-contract.js'
-import { isAnnualAidPlanList, isAnnualPlanEntryList, isAssignmentListResult, isAssignmentRecordList, isAssignmentSaveResult, isBankDetailList, isBankRecordList, isBankSaveResult, isCatalogList, isCatalogOrderResult, isCatalogSaveResult, isDashboardData, isDecisionSaveResult, isDecisionSummaryList, isNullableBankRecord, isNullableDecisionRecord, isNullableRecipientRecord, isProgramApprovalList, isProgramApprovalSaveResult, isRecipientSaveResult, isRecipientSummaryList, isReportSourceRowList, isReportSummary, isStatementListResult } from '../shared/api-contract.js'
+import { isAnnualAidPlanList, isAnnualPlanEntryList, isAssignmentChangeResult, isAssignmentListResult, isAssignmentRecordList, isAssignmentSaveResult, isBankDetailList, isBankRecordList, isBankSaveResult, isCatalogList, isCatalogOrderResult, isCatalogSaveResult, isDashboardData, isDecisionSaveResult, isDecisionSummaryList, isNullableBankRecord, isNullableDecisionRecord, isNullableRecipientRecord, isProgramApprovalList, isProgramApprovalSaveResult, isRecipientSaveResult, isRecipientSummaryList, isReportSourceRowList, isReportSummary, isStatementListResult } from '../shared/api-contract.js'
 
 // Match the future Windows package/shortcut identity without changing userData.
 if (process.platform === 'win32') app.setAppUserModelId('local.hromadaaid')
@@ -204,7 +204,7 @@ if (!hasSingleInstanceLock) {
           return http.getJson(path, isAssignmentListResult)
         })
         trustedIpcMain.handle('assignments:change-statuses', async (_event, input: unknown, requestId: unknown) => http.postJson('/api/assignments/change-statuses', { input, requestId }))
-        trustedIpcMain.handle('assignments:save', async (_event, input: unknown, id: unknown, expectedUpdatedAt: unknown, requestId: unknown) => { if (typeof id === 'string' && id) return http.putJson(`/api/assignments/${encodeURIComponent(id)}`, { input, expectedUpdatedAt }, isAssignmentSaveResult); return http.postJson('/api/assignments', { input, requestId }, isAssignmentSaveResult) })
+        trustedIpcMain.handle('assignments:save', async (_event, input: unknown, id: unknown, expectedUpdatedAt: unknown, requestId: unknown) => { if (typeof id === 'string' && id) return http.putJson(`/api/assignments/${encodeURIComponent(id)}`, { input, expectedUpdatedAt }, isAssignmentChangeResult); return http.postJson('/api/assignments', { input, requestId }, isAssignmentChangeResult) })
         trustedIpcMain.handle('program-approvals:list', async (): Promise<ProgramApproval[]> =>
           http.getJson('/api/program-approvals', isProgramApprovalList))
         trustedIpcMain.handle('program-approvals:save', async (_event, input: unknown, id: unknown, expectedUpdatedAt: unknown) => {
