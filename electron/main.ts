@@ -11,8 +11,8 @@ import { cleanupGeneratedStatements, registerStatementsIpc } from './statements-
 import { configureIpcSecurity, isTrustedAppUrl, registerRemoteIpcBlockers, trustedIpcMain } from './ipc-security.js'
 import { ElectronRuntimeConfigError, readElectronRuntimeConfig, type ElectronRuntimeConfig } from './runtime-config.js'
 import { HttpClient } from './http-client.js'
-import type { BankDetail, BankRecord, CatalogList, RecipientRecord, RecipientSummary } from './api-contract.js'
-import { isBankDetailList, isBankRecordList, isCatalogList, isNullableBankRecord, isNullableRecipientRecord, isRecipientSummaryList } from '../shared/api-contract.js'
+import type { AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, CatalogList, DecisionRecord, DecisionSummary, RecipientRecord, RecipientSummary } from './api-contract.js'
+import { isAssignmentListResult, isAssignmentRecordList, isBankDetailList, isBankRecordList, isCatalogList, isDecisionSummaryList, isNullableBankRecord, isNullableDecisionRecord, isNullableRecipientRecord, isRecipientSummaryList } from '../shared/api-contract.js'
 
 // Match the future Windows package/shortcut identity without changing userData.
 if (process.platform === 'win32') app.setAppUserModelId('local.hromadaaid')
@@ -135,7 +135,7 @@ if (!hasSingleInstanceLock) {
         registerStatementsIpc(database)
       } else {
         const http = new HttpClient(runtimeConfig.apiUrl)
-        registerRemoteIpcBlockers(['catalogs:list', 'recipients:list', 'recipients:get', 'banks:list', 'banks:get', 'banks:details'])
+        registerRemoteIpcBlockers(['catalogs:list', 'recipients:list', 'recipients:get', 'recipients:assignment-history', 'banks:list', 'banks:get', 'banks:details', 'decisions:list', 'decisions:get', 'assignments:list'])
         trustedIpcMain.handle('catalogs:list', async (_event, includeInactiveValue: unknown): Promise<CatalogList> =>
           http.getJson(includeInactiveValue === true ? '/api/catalogs?includeInactive=true' : '/api/catalogs', isCatalogList))
         trustedIpcMain.handle('recipients:list', async (): Promise<RecipientSummary[]> =>
@@ -143,6 +143,10 @@ if (!hasSingleInstanceLock) {
         trustedIpcMain.handle('recipients:get', async (_event, id: unknown): Promise<RecipientRecord | null> => {
           if (typeof id !== 'string' || !id) return null
           return http.getJson(`/api/recipients/${encodeURIComponent(id)}`, isNullableRecipientRecord)
+        })
+        trustedIpcMain.handle('recipients:assignment-history', async (_event, id: unknown): Promise<AssignmentRecord[]> => {
+          if (typeof id !== 'string' || !id) return []
+          return http.getJson(`/api/recipients/${encodeURIComponent(id)}/assignment-history`, isAssignmentRecordList)
         })
         trustedIpcMain.handle('banks:list', async (_event, query: unknown): Promise<BankRecord[]> => {
           if (query !== undefined && typeof query !== 'string') throw new Error('Некоректний пошуковий запит.')
@@ -156,6 +160,16 @@ if (!hasSingleInstanceLock) {
         trustedIpcMain.handle('banks:details', async (_event, id: unknown): Promise<BankDetail[]> => {
           if (typeof id !== 'string' || !id) return []
           return http.getJson(`/api/banks/${encodeURIComponent(id)}/details`, isBankDetailList)
+        })
+        trustedIpcMain.handle('decisions:list', async (): Promise<DecisionSummary[]> =>
+          http.getJson('/api/decisions', isDecisionSummaryList))
+        trustedIpcMain.handle('decisions:get', async (_event, id: unknown): Promise<DecisionRecord | null> => {
+          if (typeof id !== 'string' || !id) return null
+          return http.getJson(`/api/decisions/${encodeURIComponent(id)}`, isNullableDecisionRecord)
+        })
+        trustedIpcMain.handle('assignments:list', async (_event, yearValue: unknown): Promise<AssignmentListResult> => {
+          const path = yearValue === undefined ? '/api/assignments' : `/api/assignments?year=${encodeURIComponent(String(yearValue))}`
+          return http.getJson(path, isAssignmentListResult)
         })
       }
     } catch (error) {

@@ -1,5 +1,5 @@
 import type { AddressParts } from './address.js'
-import type { AssignmentStatus } from './assignment-model.js'
+import { ASSIGNMENT_STATUSES, type AssignmentStatus } from './assignment-model.js'
 export type { AssignmentStatus } from './assignment-model.js'
 
 export type ReportPdfKind = 'month' | 'quarter' | 'annual' | 'cumulative'
@@ -97,6 +97,44 @@ export type AssignmentListResult = { assignments: AssignmentRecord[]; years: num
 export type AssignmentStatusBatchInput = { assignmentIds: string[]; year: number; status: AssignmentStatus; paidOn?: string }
 export type AssignmentStatusBatchResult = | { ok: true; updatedCount: number; unchangedCount: number } | { ok: false; reason: 'validation' | 'not-found' | 'conflict' | 'storage'; message: string }
 export type AssignmentChangeResult = { ok: true; assignment: AssignmentRecord } | { ok: false; reason: 'validation' | 'not-found' | 'conflict' | 'storage'; message: string }
+
+const isAssignmentStatus = (value: unknown): value is AssignmentStatus => typeof value === 'string' && (ASSIGNMENT_STATUSES as readonly string[]).includes(value)
+
+export function isAssignmentRecord(value: unknown): value is AssignmentRecord {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.createdAt === 'string' &&
+    typeof value.recipientId === 'string' && typeof value.recipientName === 'string' && typeof value.recipientIsDemo === 'boolean' &&
+    isSex(value.recipientSex) && isNullableBoolean(value.recipientIsVpo) && typeof value.decisionId === 'string' &&
+    typeof value.decisionNumber === 'string' && typeof value.decisionDate === 'string' && typeof value.programId === 'string' &&
+    typeof value.programName === 'string' && typeof value.aidTypeId === 'string' && typeof value.aidTypeName === 'string' &&
+    typeof value.amountMinor === 'number' && isAssignmentStatus(value.status) && isNullableString(value.paidOn)
+}
+
+export function isAssignmentRecordList(value: unknown): value is AssignmentRecord[] {
+  return Array.isArray(value) && value.every(isAssignmentRecord)
+}
+
+export function isAssignmentListResult(value: unknown): value is AssignmentListResult {
+  return isRecord(value) && Array.isArray(value.years) && value.years.every((year) => typeof year === 'number') &&
+    isAssignmentRecordList(value.assignments)
+}
+
+export function isDecisionSummary(value: unknown): value is DecisionSummary {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.decisionNumber === 'string' &&
+    typeof value.decisionDate === 'string' && isNullableString(value.title) && typeof value.assignmentCount === 'number' &&
+    typeof value.assignedTotalMinor === 'number' && typeof value.createdAt === 'string' && typeof value.updatedAt === 'string'
+}
+
+export function isDecisionSummaryList(value: unknown): value is DecisionSummary[] {
+  return Array.isArray(value) && value.every(isDecisionSummary)
+}
+
+export function isDecisionRecord(value: unknown): value is DecisionRecord {
+  return isDecisionSummary(value) && isRecord(value) && isAssignmentRecordList((value as Record<string, unknown>).assignments)
+}
+
+export function isNullableDecisionRecord(value: unknown): value is DecisionRecord | null {
+  return value === null || isDecisionRecord(value)
+}
 export type DashboardData = { year: number; assignmentCount: number; totalMinor: number; paidCount: number; paidTotalMinor: number; monthlyAmountMinor: number[]; monthlyAssignmentCount: number[]; statusCounts: { status: AssignmentStatus; count: number }[]; paidBySex: { male: number; female: number; unknown: number }; paidVpo: { count: number; amountMinor: number }; programExecution: { programId?: string; programName: string; plannedMinor: number | null; amountMinor: number; paidMinor: number }[]; aidTypeDistribution: { aidTypeId?: string; programId?: string; aidTypeName: string; amountMinor: number; count: number }[]; demo: boolean }
 export type ReportSheet = 'ПЛАН' | 'ФАКТ (МІСЯЦЬ)' | 'ФАКТ (КВАРТАЛ)' | 'ПЛАН-ФАКТ (РІК)'
 export type ReportSourceRow = { rowNumber: number; label: string; values: (string | number | null)[]; formulas: (string | null)[]; asOf: string | null }
