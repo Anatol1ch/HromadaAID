@@ -50,8 +50,10 @@ export const trustedIpcMain = {
 }
 
 /** Registers one shared safe failure path until a remote equivalent is available. */
-export function registerRemoteIpcBlockers() {
+export function registerRemoteIpcBlockers(unblockedChannels: readonly string[] = []) {
+  const unblocked = new Set(unblockedChannels)
   for (const channel of localIpcChannels) {
+    if (unblocked.has(channel)) continue
     trustedIpcMain.handle(channel, () => {
       throw new Error('Віддалений режим ще не підтримує цю операцію. Доступ до локальної бази даних заблоковано.')
     })

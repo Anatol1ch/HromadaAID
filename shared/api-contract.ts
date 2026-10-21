@@ -21,6 +21,21 @@ export type CatalogOrderInput = { kind: 'program' | 'aidType'; ids: string[]; pr
 export type ProgramOption = { id: string; shortName: string; officialName: string; isActive: boolean; approvalId: string | null; approvalNumber: string | null; approvalDate: string | null; approvalTitle: string | null; assignmentCount: number }
 export type AidTypeOption = { id: string; code: string; programId: string; shortName: string; officialName: string; direction: string | null; fundingSource: string | null; isActive: boolean; assignmentCount: number }
 export type CatalogList = { programs: ProgramOption[]; aidTypes: AidTypeOption[] }
+
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+const isNullableString = (value: unknown): value is string | null => typeof value === 'string' || value === null
+
+export function isCatalogList(value: unknown): value is CatalogList {
+  if (!isRecord(value) || !Array.isArray(value.programs) || !Array.isArray(value.aidTypes)) return false
+  return value.programs.every((item) => isRecord(item) && typeof item.id === 'string' && typeof item.shortName === 'string' &&
+    typeof item.officialName === 'string' && typeof item.isActive === 'boolean' && isNullableString(item.approvalId) &&
+    isNullableString(item.approvalNumber) && isNullableString(item.approvalDate) && isNullableString(item.approvalTitle) &&
+    typeof item.assignmentCount === 'number') &&
+    value.aidTypes.every((item) => isRecord(item) && typeof item.id === 'string' && typeof item.code === 'string' &&
+      typeof item.programId === 'string' && typeof item.shortName === 'string' && typeof item.officialName === 'string' &&
+      isNullableString(item.direction) && isNullableString(item.fundingSource) && typeof item.isActive === 'boolean' &&
+      typeof item.assignmentCount === 'number')
+}
 export type CatalogEditInput = { kind: 'program' | 'aidType'; id?: string; shortName: string; officialName: string; programId?: string; direction?: string; fundingSource?: string; isActive?: boolean; approvalId?: string | null; approvalNumber?: string; approvalDate?: string; approvalTitle?: string }
 export type DecisionInput = { decisionNumber: string; decisionDate: string; title: string }
 export type DecisionSummary = { id: string; decisionNumber: string; decisionDate: string; title: string | null; assignmentCount: number; assignedTotalMinor: number; createdAt: string; updatedAt: string }

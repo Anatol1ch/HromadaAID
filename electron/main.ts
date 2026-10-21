@@ -8,8 +8,11 @@ import { registerRecipientIpc } from './recipient-ipc.js'
 import { registerRecordsIpc } from './records-ipc.js'
 import { registerDeletionIpc } from './deletion-ipc.js'
 import { cleanupGeneratedStatements, registerStatementsIpc } from './statements-ipc.js'
-import { configureIpcSecurity, isTrustedAppUrl, registerRemoteIpcBlockers } from './ipc-security.js'
+import { configureIpcSecurity, isTrustedAppUrl, registerRemoteIpcBlockers, trustedIpcMain } from './ipc-security.js'
 import { ElectronRuntimeConfigError, readElectronRuntimeConfig, type ElectronRuntimeConfig } from './runtime-config.js'
+import { HttpClient } from './http-client.js'
+import type { CatalogList } from './api-contract.js'
+import { isCatalogList } from '../shared/api-contract.js'
 
 // Match the future Windows package/shortcut identity without changing userData.
 if (process.platform === 'win32') app.setAppUserModelId('local.hromadaaid')
@@ -131,7 +134,10 @@ if (!hasSingleInstanceLock) {
         registerDeletionIpc(database)
         registerStatementsIpc(database)
       } else {
-        registerRemoteIpcBlockers()
+        const http = new HttpClient(runtimeConfig.apiUrl)
+        registerRemoteIpcBlockers(['catalogs:list'])
+        trustedIpcMain.handle('catalogs:list', async (_event, includeInactiveValue: unknown): Promise<CatalogList> =>
+          http.getJson(includeInactiveValue === true ? '/api/catalogs?includeInactive=true' : '/api/catalogs', isCatalogList))
       }
     } catch (error) {
       dialog.showErrorBox('HromadaAid', error instanceof ElectronRuntimeConfigError || error instanceof DatabaseSchemaError || error instanceof DatabaseIntegrityError

@@ -11,7 +11,8 @@ export function createApp(database: DatabaseSync): FastifyInstance {
     return { status: 'ok', service: 'hromada-aid-api' }
   })
 
-  app.get('/api/catalogs', async (): Promise<CatalogList> => listCatalogs(database))
+  app.get<{ Querystring: { includeInactive?: string } }>('/api/catalogs', async (request): Promise<CatalogList> =>
+    listCatalogs(database, request.query.includeInactive === 'true'))
 
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(error)
