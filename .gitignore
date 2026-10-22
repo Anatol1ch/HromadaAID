@@ -25,6 +25,7 @@ release/
 *.bak
 *.backup
 *.sqlite.backup
+*.sqlite.partial
 
 # Runtime logs and process artefacts
 *.log

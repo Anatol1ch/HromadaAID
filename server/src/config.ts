@@ -1,9 +1,10 @@
-import { basename, resolve } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
 
 export type ServerConfig = {
   host: '127.0.0.1'
   port: number
   databasePath: string
+  backupDirectory: string
 }
 
 const defaultDatabasePath = resolve(process.cwd(), 'server', '.data', 'hromada-aid-api-test.sqlite')
@@ -21,5 +22,7 @@ export function readServerConfig(environment = process.env): ServerConfig {
     throw new Error('Для цього етапу вкажіть окрему тестову SQLite-базу з назвою, що містить "test".')
   }
 
-  return { host: '127.0.0.1', port, databasePath }
+  const backupDirectory = resolve(environment.HROMADA_AID_API_BACKUP_DIR?.trim() || resolve(dirname(databasePath), 'backups'))
+
+  return { host: '127.0.0.1', port, databasePath, backupDirectory }
 }
