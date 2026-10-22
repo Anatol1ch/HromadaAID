@@ -650,12 +650,22 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .settings-page { display: grid; gap: var(--space-4); }
 .settings-heading { margin-bottom: 0; }
 .settings-section-nav { display: flex; flex-wrap: wrap; align-items: stretch; gap: 7px; padding: 5px; border: 1px solid #e3eae5; border-radius: var(--radius-card); background: var(--surface-panel); }
-.settings-section-current, .settings-section-future { display: inline-flex; min-height: 42px; align-items: center; gap: 9px; padding: 8px 13px; border: 1px solid transparent; border-radius: var(--radius-control); font-size: 13px; font-weight: 650; }
+.settings-section-current { display: inline-flex; min-height: 42px; align-items: center; gap: 9px; padding: 8px 13px; border: 1px solid transparent; border-radius: var(--radius-control); font-size: 13px; font-weight: 650; }
 .settings-section-current { color: #617167; background: transparent; cursor: pointer; }
 .settings-section-current:hover { background: #f4f7f4; }
 .settings-section-current.is-selected { color: var(--tab-active-text); border-color: var(--tab-active-border); background: var(--tab-active-background); }
-.settings-section-future { color: #8a9690; }
-.settings-section-future small { margin-left: 2px; color: #929d96; font-size: 10px; font-weight: 500; }
+.settings-about-page { display: grid; gap: var(--space-4); }
+.settings-about-identity { display: grid; justify-items: center; gap: 8px; padding: 24px; text-align: center; }
+.settings-about-identity img { display: block; object-fit: contain; }
+.settings-about-brand { color: #263d30; font: 700 25px/1.2 'Segoe UI', Tahoma, sans-serif; letter-spacing: -.35px; }
+.settings-about-identity p { margin: 0; color: var(--color-text-secondary); font-size: 13px; line-height: 1.5; }
+.settings-about-version { display: inline-flex; margin-top: 3px; padding: 4px 10px; border: 1px solid #dce8df; border-radius: 999px; color: #486a51; background: #f1f7f2; font-size: 12px; font-weight: 600; }
+.settings-about-details { display: grid; gap: var(--space-4); }
+.settings-about-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 0; }
+.settings-about-grid > div { min-width: 0; padding: 12px 14px; border: 1px solid #e8eee9; border-radius: var(--radius-control); background: #fbfcfb; }
+.settings-about-grid dt { color: #78877e; font-size: 12px; }
+.settings-about-grid dd { margin: 5px 0 0; color: #304b39; font-size: 13px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+.settings-about-purpose, .settings-about-address { grid-column: 1 / -1; }
 .settings-account, .settings-security { display: grid; gap: var(--space-4); }
 .settings-security-summary { grid-template-columns: minmax(0,1fr) auto; align-items: center; }
 .settings-security-summary > .secondary-button { min-width: 155px; justify-content: center; }
@@ -2044,7 +2054,8 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
   .settings-security-summary > .secondary-button { justify-self: start; }
   .settings-profile-grid { grid-template-columns: minmax(0,1fr); }
   .settings-profile-roles { grid-column: auto; }
-  .settings-section-future { flex-wrap: wrap; }
+  .settings-about-grid { grid-template-columns: minmax(0,1fr); }
+  .settings-about-purpose, .settings-about-address { grid-column: auto; }
   .server-connection-overview { align-items: flex-start; flex-direction: column; }
   .server-connection-actions { align-items: stretch; flex-direction: column; }
   .server-connection-actions > div { justify-content: flex-end; }

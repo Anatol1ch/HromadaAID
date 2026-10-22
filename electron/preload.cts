@@ -4,6 +4,9 @@ import type { HromadaAidApi } from './api-contract.js'
 const api: HromadaAidApi = {
   appName: 'HromadaAid',
   platform: process.platform,
+  appInfo: {
+    getVersion: () => invoke('app:get-version'),
+  },
   auth: {
     getState: () => invoke('auth:get-state'),
     login: (username, password) => invoke('auth:login', username, password),

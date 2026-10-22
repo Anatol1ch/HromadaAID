@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import type { AuthenticatedUser } from '../shared/auth-contract'
 import type { ServerConnectionCheckResult, ServerConnectionSaveResult, ServerConnectionState } from '../shared/api-contract'
 import { USER_ROLE_LABELS } from '../shared/authorization'
+import hromadaAidLogo from '../assets/hromadaaid.svg'
 import ChangePasswordForm from './components/ChangePasswordForm'
 import Modal from './components/Modal'
 import ServerConnectionDialog from './components/ServerConnectionDialog'
@@ -12,17 +13,19 @@ type ConnectionActions = { getState: () => Promise<ServerConnectionState>; check
 export default function SettingsPage({ user, onChangePassword, connectionActions }: { user: AuthenticatedUser | null; onChangePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; message?: string }>; connectionActions: ConnectionActions }) {
   const [passwordModalOpen, setPasswordModalOpen] = useState(false)
   const [passwordBusy, setPasswordBusy] = useState(false)
-  const [activeSection, setActiveSection] = useState<'account' | 'connection'>('account')
+  const [activeSection, setActiveSection] = useState<'account' | 'connection' | 'about'>('account')
   const [connectionModalOpen, setConnectionModalOpen] = useState(false)
   const [connection, setConnection] = useState<ServerConnectionState | null>(null)
   const [connectionMessage, setConnectionMessage] = useState('')
   const [connectionBusy, setConnectionBusy] = useState(false)
+  const [appVersion, setAppVersion] = useState<string | null>(null)
   const structuredName = [user?.firstName?.trim(), user?.lastName?.trim()].filter(Boolean).join(' ')
   const displayName = structuredName || user?.displayName?.trim() || user?.username || 'Локальний режим'
   const roles = user?.roles.map(role => USER_ROLE_LABELS[role]).join(', ') || 'Автономна робота'
 
   useEffect(() => {
     let active = true
+    void window.hromadaAid.appInfo.getVersion().then(version => { if (active) setAppVersion(version) }).catch(() => { if (active) setAppVersion(null) })
     void connectionActions.getState().then(value => { if (active) setConnection(value) }).catch(() => { if (active) setConnectionMessage('Не вдалося прочитати стан підключення.') })
     const unsubscribe = window.hromadaAid.connection.onStateChange(value => { if (active) setConnection(value) })
     return () => { active = false; unsubscribe() }
@@ -45,7 +48,7 @@ export default function SettingsPage({ user, onChangePassword, connectionActions
     <nav className="settings-section-nav" aria-label="Розділи налаштувань">
       <button type="button" className={`settings-section-current${activeSection === 'account' ? ' is-selected' : ''}`} aria-current={activeSection === 'account' ? 'page' : undefined} onClick={() => setActiveSection('account')}><CircleUserRound size={17} aria-hidden="true"/>Мій обліковий запис</button>
       <button type="button" className={`settings-section-current${activeSection === 'connection' ? ' is-selected' : ''}`} aria-current={activeSection === 'connection' ? 'page' : undefined} onClick={() => setActiveSection('connection')}><Server size={16} aria-hidden="true"/><span>Підключення до сервера</span></button>
-      <span className="settings-section-future"><Info size={16} aria-hidden="true"/><span>Про застосунок</span><small>Майбутня функція</small></span>
+      <button type="button" className={`settings-section-current${activeSection === 'about' ? ' is-selected' : ''}`} aria-current={activeSection === 'about' ? 'page' : undefined} onClick={() => setActiveSection('about')}><Info size={16} aria-hidden="true"/><span>Про застосунок</span></button>
     </nav>
     {activeSection === 'account' && <>
     <section className="dashboard-panel settings-account" aria-labelledby="settings-account-title">
@@ -72,6 +75,30 @@ export default function SettingsPage({ user, onChangePassword, connectionActions
       {connection?.lockedReason && <p className="server-connection-panel-message">{connection.lockedReason}</p>}
       <div className="server-connection-panel-actions"><button type="button" className="secondary-button" disabled={connectionBusy || !connection?.apiUrl} onClick={() => void checkCurrentConnection()}><Wifi size={17} aria-hidden="true"/>Перевірити з'єднання</button><button type="button" className="primary-button" disabled={!connection?.editable} onClick={() => setConnectionModalOpen(true)}>Змінити адресу</button></div>
     </section>}
+    {activeSection === 'about' && <div className="settings-about-page">
+      <section className="dashboard-panel settings-about-identity" aria-label="Про HromadaAID">
+        <img src={hromadaAidLogo} alt="" width="64" height="64" />
+        <div className="settings-about-brand">HromadaAID</div>
+        <p>Автоматизована система обліку матеріальних допомог</p>
+        <span className="settings-about-version">Версія {appVersion ?? '—'}</span>
+      </section>
+      <section className="dashboard-panel settings-about-details" aria-label="Інформація про застосунок">
+        <div className="settings-card-heading"><span className="settings-icon"><Info size={19} aria-hidden="true"/></span><div><h2>Відомості про програму</h2><p>Основна інформація про HromadaAID.</p></div></div>
+        <dl className="settings-about-grid">
+          <div><dt>Версія застосунку</dt><dd>{appVersion ?? 'Не вдалося визначити'}</dd></div>
+          <div><dt>Тип застосунку</dt><dd>Настільний застосунок для Windows</dd></div>
+          <div className="settings-about-purpose"><dt>Призначення</dt><dd>Облік, призначення та супровід виплат матеріальних допомог</dd></div>
+        </dl>
+      </section>
+      <section className="dashboard-panel settings-about-details" aria-label="Технічна інформація">
+        <div className="settings-card-heading"><span className="settings-icon"><Server size={19} aria-hidden="true"/></span><div><h2>Технічна інформація</h2><p>Поточний режим роботи та стан підключення.</p></div></div>
+        <dl className="settings-about-grid">
+          <div><dt>Режим роботи</dt><dd>{connection?.mode === 'remote' ? 'Клієнт-серверний' : connection?.mode === 'local' ? 'Локальний' : 'Визначається…'}</dd></div>
+          <div><dt>Стан підключення</dt><dd>{!connection ? 'Визначається…' : connection.mode === 'local' ? 'Серверне підключення не використовується' : connection.status === 'available' ? 'Сервер доступний' : connection.status === 'checking' ? 'Перевірка підключення…' : connection.status === 'unavailable' ? 'Не вдалося підключитися до сервера' : 'Підключення не перевірено'}</dd></div>
+          {connection?.mode === 'remote' && <div className="settings-about-address"><dt>Адреса сервера</dt><dd>{connection.apiUrl ?? 'Не налаштовано'}</dd></div>}
+        </dl>
+      </section>
+    </div>}
     {connectionModalOpen && <ServerConnectionDialog onClose={() => setConnectionModalOpen(false)} {...connectionActions} onSaved={(state, message) => { setConnection(state); setConnectionMessage(message ?? state.message ?? 'Адресу сервера збережено.') }} />}
   </div>
 }

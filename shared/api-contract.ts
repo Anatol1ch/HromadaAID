@@ -303,6 +303,7 @@ export type ServerConnectionSaveResult = { ok: true; state: ServerConnectionStat
 
 export type HromadaAidApi = {
   appName: string; platform: string
+  appInfo: { getVersion: () => Promise<string> }
   auth: {
     getState: () => Promise<ClientAuthState>
     login: (username: string, password: string) => Promise<AuthActionResult>

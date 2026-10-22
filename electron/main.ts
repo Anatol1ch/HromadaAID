@@ -135,6 +135,7 @@ if (!hasSingleInstanceLock) {
       const savedConnection = readSavedConnectionConfig(userDataPath)
       savedApiUrl = savedConnection.config?.apiUrl ?? null
       runtimeConfig = readElectronRuntimeConfig(process.env, savedConnection, app.isPackaged)
+      trustedIpcMain.handle('app:get-version', async () => app.getVersion())
       let savingConnection = false
       const publishAuthState = (state: ClientAuthState) => {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('auth:state', state)
