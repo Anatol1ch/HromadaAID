@@ -7,7 +7,21 @@ function useNativeFieldValidation<T extends HTMLInputElement | HTMLTextAreaEleme
   const id = useId()
   const [touched, setTouched] = useState(false)
   const [error, setError] = useState('')
-  const validate = (element: T) => setError(element.validity.valid ? '' : element.validity.valueMissing ? 'Заповніть обов’язкове поле.' : element.validationMessage)
+  const validate = (element: T) => {
+    const validity = element.validity
+    const message = validity.valid ? ''
+      : validity.valueMissing ? 'Заповніть обов’язкове поле.'
+      : validity.tooShort ? `Введіть не менше ніж ${element.minLength} символів.`
+      : validity.tooLong ? `Введіть не більше ніж ${element.maxLength} символів.`
+      : validity.typeMismatch ? 'Перевірте формат введеного значення.'
+      : validity.patternMismatch ? 'Перевірте формат поля.'
+      : validity.rangeUnderflow ? `Значення має бути не меншим за ${element.getAttribute('min')}.`
+      : validity.rangeOverflow ? `Значення має бути не більшим за ${element.getAttribute('max')}.`
+      : validity.stepMismatch ? 'Введіть значення у допустимому форматі.'
+      : validity.badInput ? 'Перевірте введене значення.'
+      : 'Перевірте значення поля.'
+    setError(message)
+  }
   const handlers: Required<FieldEvents<T>> = {
     onBlur: event => { setTouched(true); validate(event.currentTarget); events.onBlur?.(event) },
     onChange: event => { if (touched) validate(event.currentTarget); events.onChange?.(event) },

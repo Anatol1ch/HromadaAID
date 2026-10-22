@@ -1,4 +1,3 @@
-import { navigateTabs } from './lib/tabNavigation'
 import DataState from './components/DataState'
 import Alert from './components/Alert'
 import AnnualPlanning from './AnnualPlanning'
@@ -6,7 +5,7 @@ import { catalogRepository, useCatalogUpdates } from './services/catalogReposito
 import type { CatalogOrderInput } from '../electron/api-contract'
 import Select from './components/Select'
 import { useReportingYear } from './context/YearContext'
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { Check, FileCheck2, HandCoins, Landmark, Pencil, Plus, Trash2, Users, X } from 'lucide-react'
 import type { AidTypeOption, CatalogEditInput, DecisionInput, DecisionSummary, DeletePreview, ProgramOption } from '../electron/api-contract'
 import RecipientRegistry from './RecipientRegistry'
@@ -22,6 +21,7 @@ import { formatDate } from './lib/dates'
 import DeleteConfirmation from './components/DeleteConfirmation'
 import ConfirmDialog from './components/ConfirmDialog'
 import type { LucideIcon } from 'lucide-react'
+import { allowedDictionarySections as sectionsForRoles, USER_ROLE_LABELS, USER_ROLES } from '../shared/authorization'
 
 type CatalogData = Awaited<ReturnType<typeof window.hromadaAid.catalogs.list>>
 export type DictionarySection = 'people' | 'programs' | 'decisions' | 'banks' | 'plans'
@@ -34,20 +34,22 @@ const dictionaryTabGroups: readonly (readonly DictionaryTab[])[] = [
 ]
 const blankCatalog = (kind: 'program' | 'aidType', programId = ''): CatalogEditInput => ({ kind, shortName: '', officialName: '', programId, direction: '', fundingSource: '', isActive: true, approvalId: null })
 
-function DictionaryTabGroup({ tabs, section, onSelect, management }: { tabs: readonly DictionaryTab[]; section: Section; onSelect: (section: Section) => void; management?: boolean }) {
+function DictionaryTabGroup({ tabs, section, allowedSections, onSelect, management }: { tabs: readonly DictionaryTab[]; section: Section | null; allowedSections: readonly Section[]; onSelect: (section: Section) => void; management?: boolean }) {
   return <div role="presentation" className={`dictionary-tabs dictionary-navigation-group${management ? ' dictionary-management-group' : ''}`}>
-    {tabs.map(({ key, label, icon: Icon }) => <button key={key} id={`dictionary-tab-${key}`} type="button" data-tab-key={key} className={section === key ? 'active' : ''} role="tab" aria-selected={section === key} aria-controls="dictionary-content" tabIndex={section === key ? 0 : -1} onClick={() => onSelect(key)}><Icon size={17}/>{label}</button>)}
+    {tabs.map(({ key, label, icon: Icon }) => { const available = allowedSections.includes(key); const roles = USER_ROLES.filter(role => sectionsForRoles([role]).includes(key)).map(role => USER_ROLE_LABELS[role]).join(', '); return <button key={key} id={`dictionary-tab-${key}`} type="button" data-tab-key={key} className={`${section === key ? 'active' : ''}${available ? '' : ' dictionary-tab-locked'}`} role="tab" aria-selected={section === key} aria-disabled={!available} aria-controls="dictionary-content" tabIndex={section === key ? 0 : -1} title={available ? label : `Доступ мають ролі: ${roles}.`} onClick={() => onSelect(key)}><Icon size={17}/>{label}</button> })}
   </div>
 }
 
 export default function Dictionaries({
   allowedSections = ['people', 'programs', 'decisions', 'banks', 'plans'],
+  onAccessDenied = () => {},
   canManageCatalogs = true,
   canManagePlans = true,
   canManageDecisions = true,
   canManagePersonal = true,
 }: {
   allowedSections?: readonly DictionarySection[]
+  onAccessDenied?: () => void
   canManageCatalogs?: boolean
   canManagePlans?: boolean
   canManageDecisions?: boolean
@@ -71,18 +73,29 @@ export default function Dictionaries({
   const savingRef = useRef(false)
   const refreshSequence = useRef(0)
   const [catalogConfirmation, setCatalogConfirmation] = useState<{ input: CatalogEditInput; count: number } | null>(null)
-  const activeSection = allowedSections.includes(section) ? section : allowedSections[0] ?? 'programs'
-  const selectSection = (next: Section) => { if (allowedSections.includes(next)) setSection(next) }
+  const activeSection = allowedSections.includes(section) ? section : allowedSections[0] ?? null
+  const selectSection = (next: Section) => { if (allowedSections.includes(next)) setSection(next); else onAccessDenied() }
+  const navigateDictionaryTabs = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+    const index = tabs.indexOf(event.target as HTMLButtonElement)
+    if (index < 0 || !tabs.length) return
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length
+    event.preventDefault(); tabs[next].focus(); tabs[next].click()
+  }
 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current
     setLoading(true); setLoadError('')
     try {
+      const needsCatalogData = allowedSections.includes('programs') || allowedSections.includes('plans')
       const [catalogs, nextDecisions] = await Promise.all([
-        catalogRepository.list(true), allowedSections.includes('decisions') ? window.hromadaAid.decisions.list() : Promise.resolve([]),
+        needsCatalogData ? catalogRepository.list(true) : Promise.resolve(null),
+        allowedSections.includes('decisions') ? window.hromadaAid.decisions.list() : Promise.resolve([]),
       ])
       if (sequence !== refreshSequence.current) return
-      setCatalogsLoaded(true); setData(catalogs); setDecisions(nextDecisions.filter(item => item.decisionDate.slice(0, 4) === String(year))); setError('')
+      if (catalogs) { setCatalogsLoaded(true); setData(catalogs) }
+      setDecisions(nextDecisions.filter(item => item.decisionDate.slice(0, 4) === String(year))); setError('')
     } catch { if (sequence === refreshSequence.current) setLoadError('Не вдалося завантажити довідники з локального сховища.') }
     finally { if (sequence === refreshSequence.current) setLoading(false) }
   }, [year, allowedSections])
@@ -159,11 +172,11 @@ export default function Dictionaries({
 
   return <>
     <section className="page-heading"><div><div className="eyebrow">ДОВІДКОВІ ДАНІ</div><h1>Довідники</h1><p className="subtitle">Картки людей, банки, програми, види допомоги та реквізити рішень.</p></div></section>
-    <div className="dictionary-navigation"><div className="dictionary-navigation-groups" role="tablist" aria-label="Підрозділи довідників" onKeyDown={navigateTabs}>
-      {dictionaryTabGroups.map((group, index) => { const tabs = group.filter((tab) => allowedSections.includes(tab.key)); return tabs.length ? <DictionaryTabGroup key={index} tabs={tabs} section={activeSection} onSelect={selectSection} management={index === 1}/> : null })}
+    <div className="dictionary-navigation"><div className="dictionary-navigation-groups" role="tablist" aria-label="Підрозділи довідників" onKeyDown={navigateDictionaryTabs}>
+      {dictionaryTabGroups.map((group, index) => <DictionaryTabGroup key={index} tabs={group} section={activeSection} allowedSections={allowedSections} onSelect={selectSection} management={index === 1}/>)}
     </div></div>
     {error && !draft && !decisionDraft && <Alert variant="error" action={<button onClick={() => void refresh()}>Оновити</button>}>{error}</Alert>}
-    <div id="dictionary-content" role="tabpanel" aria-labelledby={`dictionary-tab-${activeSection}`}>
+    <div id="dictionary-content" role="tabpanel" aria-labelledby={activeSection ? `dictionary-tab-${activeSection}` : undefined}>
     {allowedSections.length === 0 ? <DataState kind="empty" message="Немає доступних підрозділів довідників."/> : activeSection === 'people' ? <RecipientRegistry embedded readOnly={!canManagePersonal}/> : activeSection === 'banks' ? <BankRegistry readOnly={!canManagePersonal}/> : activeSection === 'plans' ? <>{!catalogsLoaded ? loading ? <DataState kind="loading" message="Завантажуємо довідники…"/> : <Alert variant="error" action={<button type="button" onClick={() => void refresh()}>Повторити завантаження</button>}>{loadError}</Alert> : <>{loadError && <Alert variant="error" action={<button type="button" onClick={() => void refresh()}>Повторити завантаження</button>}>{loadError}</Alert>}<AnnualPlanning programs={data.programs} aidTypes={data.aidTypes} readOnly={!canManagePlans}/></>}</> : <section className={`dashboard-panel registry-panel ${activeSection === 'decisions' ? 'dictionary-registry' : 'catalog-panel'}`}>
       {activeSection === 'programs' && <ProgramsCatalog loading={loading} error={loadError} onRetry={() => void refresh()} programs={data.programs} aidTypes={data.aidTypes} ordering={ordering} onReorder={reorder} onEditProgram={editProgram} onEditAid={editAidType} onDelete={(entity, id) => void requestDelete(entity, id)} readOnly={!canManageCatalogs}/>}
       {activeSection === 'decisions' && <>

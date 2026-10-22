@@ -660,6 +660,8 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .status-inactive { color: #6b7280; background: #eef0f2; }
 .status-blocked { color: #9b3030; background: #fae7e7; }
 .user-password-note { display: block; margin-top: 4px; color: var(--color-text-secondary); font-size: 11px; }
+.user-full-name { color: #34485d; font-weight: 650; }
+.user-login { color: var(--color-text-secondary); font-weight: 400; }
 .user-form { display: grid; gap: var(--space-4); }
 .user-form-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
 .user-form label { display: grid; gap: 7px; color: var(--color-text-label); font-size: 13px; font-weight: 600; }
@@ -681,12 +683,12 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 @media (max-width: 760px) { .users-admin .dictionary-toolbar { align-items: stretch; } .users-admin .dictionary-toolbar-actions .primary-button { width: 100%; justify-content: center; } .user-form-fields, .role-checkboxes { grid-template-columns: 1fr; } }
 
 .auth-screen { min-height: 100dvh; display: grid; place-items: center; padding: clamp(20px, 5vh, 48px) var(--space-5); background: var(--surface-app); }
-.auth-card { width: min(100%, 430px); padding: clamp(28px, 5vw, 42px); border: 1px solid var(--border-surface); border-radius: var(--radius-modal); background: var(--surface-card); box-shadow: 0 18px 45px rgb(32 58 43 / 10%); }
+.auth-card { width: min(100%, 480px); padding: clamp(28px, 5vw, 42px); border: 1px solid var(--border-surface); border-radius: var(--radius-modal); background: var(--surface-card); box-shadow: 0 18px 45px rgb(32 58 43 / 10%); }
 .auth-identity { display: grid; justify-items: center; text-align: center; margin-bottom: var(--space-5); }
 .auth-mark { width: 56px; height: 56px; display: grid; place-items: center; margin-bottom: var(--space-3); border-radius: var(--radius-card); color: var(--accent-green); background: var(--accent-green-soft); }
 .auth-brand { color: #263d30; font: 700 27px/1.2 'Segoe UI', Tahoma, sans-serif; letter-spacing: -.45px; }
 .auth-brand span { color: var(--accent-green); }
-.auth-caption { max-width: 310px; margin: var(--space-2) 0 0; color: var(--color-text-secondary); font-size: 13px; line-height: 1.5; }
+.auth-caption { max-width: 100%; margin: var(--space-2) 0 0; color: var(--color-text-secondary); font-size: 13px; line-height: 1.5; white-space: nowrap; }
 .auth-card h1 { margin: 0; color: var(--color-text-control); font-size: 21px; line-height: 1.25; }
 .auth-description { margin: var(--space-2) 0 var(--space-4); color: var(--color-text-secondary); font-size: 13px; line-height: 1.5; }
 .auth-card form { display: grid; gap: var(--space-3); }
@@ -699,6 +701,13 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .auth-password .icon-button { position: absolute; right: 5px; top: 50%; width: 32px; height: 32px; transform: translateY(-50%); color: var(--color-text-hint); }
 .auth-submit { width: 100%; justify-content: center; margin-top: var(--space-2); }
 .auth-message { padding: 10px 11px; margin: 0 0 var(--space-3); border: 1px solid #f0caca; border-radius: var(--radius-control); color: var(--color-text-error); background: #fff7f7; font-size: 13px; line-height: 1.45; }
+.access-denied-toast { position: fixed; z-index: 1200; top: 16px; right: 16px; display: flex; align-items: flex-start; gap: 11px; width: min(420px, calc(100vw - 32px)); padding: 13px 14px; border: 1px solid #d7e4db; border-radius: var(--radius-panel); color: #41634b; background: var(--surface-card); box-shadow: 0 8px 24px rgb(32 58 43 / 14%); }
+.access-denied-toast > svg { flex: none; margin-top: 1px; color: var(--accent-green); }
+.access-denied-toast > div { min-width: 0; flex: 1; }
+.access-denied-toast strong { display: block; color: var(--color-text-control); font-size: 13px; font-weight: 650; }
+.access-denied-toast p { margin: 3px 0 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.45; }
+.access-denied-toast .icon-button { flex: none; width: 28px; height: 28px; margin: -5px -5px 0 0; color: var(--color-text-hint); }
+@media (max-width: 520px) { .auth-caption { white-space: normal; } }
 .auth-change-password { display: grid; gap: var(--space-3); }
 .auth-change-password .recipient-field small { color: var(--color-text-hint); font-size: 12px; font-weight: 400; }
 
@@ -911,6 +920,7 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .registry-alert { margin-bottom: var(--space-4); border: 1px solid #ead6c3; border-radius: 9px; background: #fffaf4; padding: 13px var(--space-4); color: #705b42; font-size: 13px; line-height: 1.5; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .registry-alert button { flex: none; border: 0; background: transparent; color: #315f80; font-size: 12px; font-weight: 700; text-decoration: underline; }
 .registry-panel { padding: 22px; }
+.registry-panel.catalog-panel { padding-top: 22px; }
 .registry-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
 .registry-toolbar h2, .recipient-editor-heading h2 { margin: 0; color: #28374a; font: 700 20px/1.3 'Segoe UI', Tahoma, sans-serif; }
 .registry-toolbar p, .recipient-editor-heading p { margin: 5px 0 0; color: var(--color-text-muted); font-size: 12px; line-height: 1.45; }
@@ -1119,6 +1129,8 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .dictionary-tabs button svg { flex-shrink: 0; }
 .dictionary-tabs button:hover:not(:disabled):not([aria-busy="true"]):not([aria-disabled="true"]):not(.active) { background: var(--tab-hover-background); color: var(--tab-active-text); }
 .dictionary-tabs button.active { border-color: var(--tab-active-border); background: var(--tab-active-background); color: var(--tab-active-text); }
+.dictionary-tabs button.dictionary-tab-locked { color: #8a9690; background: transparent; cursor: not-allowed; opacity: .76; }
+.dictionary-tabs button.dictionary-tab-locked:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
 .catalog-panel { padding: 10px var(--space-6) 22px; }
 .catalog-list { display: grid; }
 .catalog-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 0; border-bottom: 1px solid #edf0ed; }

@@ -13,6 +13,7 @@ import Dashboard from './Dashboard'
 import Reports from './Reports'
 import UsersAdmin from './UsersAdmin'
 import TemporaryPasswordScreen from './components/TemporaryPasswordScreen'
+import AccessDeniedToast from './components/AccessDeniedToast'
 import communityCoat from '../reference/ГЕРБ.png'
 import YearPicker from './components/YearPicker'
 import { UnsavedChangesConfirmation } from './components/ConfirmDialog'
@@ -53,6 +54,7 @@ function Workspace({ auth }: { auth: Extract<ClientAuthState, { status: 'authent
   const [activeNav, setActiveNav] = useState('Головна')
   const [createAssignment, setCreateAssignment] = useState(false)
   const [notice, setNotice] = useState('')
+  const [accessDenied, setAccessDenied] = useState(false)
   const [year, setYear] = useState(initialAccountingYear)
   const [logoutBusy, setLogoutBusy] = useState(false)
   const permissions = useMemo(() => new Set(auth.mode === 'local' ? nav.map((item) => item.permission).concat(['catalogs.manage', 'program_approvals.manage', 'personal_data.read', 'recipients.manage', 'banks.manage', 'decisions.read', 'decisions.manage', 'assignments.manage', 'assignments.change_financial_status', 'planning.read', 'planning.manage', 'reports.export', 'protected_entities.delete', 'users.manage'] as Permission[]) : auth.user.permissions), [auth])
@@ -68,7 +70,7 @@ function Workspace({ auth }: { auth: Extract<ClientAuthState, { status: 'authent
   const requiredRolesFor = (item: typeof nav[number]) => item.page === 'dictionaries'
     ? USER_ROLES.filter((role) => dictionarySectionsForRoles([role]).length > 0)
     : USER_ROLES.filter((role) => hasWorkspacePage([role], item.page))
-  const navigate = (label: string) => { const item = visibleNav.find((value) => value.label === label); if (!item) return; if (!canOpenPage(item.page, item.permission)) { const needed = requiredRolesFor(item).map((role) => USER_ROLE_LABELS[role]).join(', '); setNotice(`Доступ до розділу «${label}» мають ролі: ${needed}.`); return }; setCreateAssignment(false); setActiveNav(label); setNotice('') }
+  const navigate = (label: string) => { const item = visibleNav.find((value) => value.label === label); if (!item) return; if (!canOpenPage(item.page, item.permission)) { setAccessDenied(true); return }; setCreateAssignment(false); setActiveNav(label); setNotice(''); setAccessDenied(false) }
   const newAssignment = () => { if (!can('assignments.manage') || !canOpenPage('assignments', 'assignments.read')) return; setCreateAssignment(true); setActiveNav('Реєстр допомог'); setNotice('') }
   const logout = async () => {
     if (logoutBusy) return
@@ -101,10 +103,11 @@ function Workspace({ auth }: { auth: Extract<ClientAuthState, { status: 'authent
         <div>{activeNav === 'Головна' ? <StartPage navigate={navigate} onCreate={newAssignment} canCreate={can('assignments.manage')} allowedLinks={new Set(visibleNav.filter((item) => canOpenPage(item.page, item.permission)).map((item) => item.label))}/> :
           activeNav === 'Реєстр допомог' ? <AidRegistry createOnOpen={createAssignment}/> :
           activeNav === 'Формування відомостей' ? <StatementFormation/> :
-          activeNav === 'Довідники' ? <Dictionaries allowedSections={dictionarySections} canManageCatalogs={can('catalogs.manage')} canManagePlans={can('planning.manage')} canManageDecisions={can('decisions.manage')} canManagePersonal={can('recipients.manage') || can('banks.manage')}/> :
+          activeNav === 'Довідники' ? <Dictionaries allowedSections={dictionarySections} onAccessDenied={() => setAccessDenied(true)} canManageCatalogs={can('catalogs.manage')} canManagePlans={can('planning.manage')} canManageDecisions={can('decisions.manage')} canManagePersonal={can('recipients.manage') || can('banks.manage')}/> :
           activeNav === 'Огляд' ? <Dashboard/> : activeNav === 'Користувачі' && auth.mode === 'remote' ? <UsersAdmin currentUserId={auth.user.id}/> : <Reports/>}</div>
       </div>
     </main>
+    {accessDenied && <AccessDeniedToast onClose={() => setAccessDenied(false)}/>}
   </div><UnsavedChangesConfirmation/></YearContext.Provider>
 }
 

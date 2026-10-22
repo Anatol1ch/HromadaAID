@@ -19,6 +19,7 @@ import DateField from './components/DateField'
 import DecisionFields from './components/DecisionFields'
 import { formatDate, formatDateInput, parseDateInput, todayIsoDate } from './lib/dates'
 import DeleteConfirmation from './components/DeleteConfirmation'
+import ValidatedInput from './components/ValidatedInput'
 
 type AssignmentRowDraft = { recipientId: string; programId: string; aidTypeId: string; amount: string; status: AssignmentStatus; paidOn: string }
 
@@ -202,7 +203,7 @@ function DecisionRegistry() {
           <div className="recipient-field assignment-recipient-field"><span>Отримувач *</span><div className="assignment-recipient-select"><Select label="Отримувач" required searchable value={row.recipientId} placeholder="Знайдіть за ПІБ або РНОКПП" options={recipients.map((person) => ({ value: person.id, label: person.fullName + (person.isDemo ? ' • демо' : ''), description: person.rnokpp ? `РНОКПП ${person.rnokpp}` : 'РНОКПП не вказано', searchText: person.rnokpp ?? '' }))} onChange={(value) => updateRow(index, { recipientId: value })}/><button type="button" className="table-action" onClick={() => openQuickAdd(index)}><UserPlus size={16}/><span>Створити</span></button></div></div>
           <label className="recipient-field"><span>Програма *</span><Select label="Програма" required value={row.programId} placeholder="Оберіть програму" options={programs.map((program) => ({ value: program.id, label: program.shortName }))} onChange={(value) => updateRow(index, { programId: value })}/></label>
           <label className="recipient-field"><span>Вид допомоги *</span><Select label="Вид допомоги" required value={row.aidTypeId} placeholder="Оберіть вид допомоги" options={aidTypes.filter((type) => type.programId === row.programId).map((type) => ({ value: type.id, label: type.shortName }))} onChange={(value) => updateRow(index, { aidTypeId: value })}/></label>
-          <label className="recipient-field"><span>Сума, ₴ *</span><input required inputMode="decimal" placeholder="Наприклад, 5000" value={row.amount} onChange={(event) => updateRow(index, { amount: event.target.value })}/></label>
+          <label className="recipient-field"><span>Сума, ₴ *</span><ValidatedInput required inputMode="decimal" placeholder="Наприклад, 5000" value={row.amount} onChange={(event) => updateRow(index, { amount: event.target.value })}/></label>
           <label className="recipient-field"><span>Статус</span><Select label="Статус" value={row.status} options={ASSIGNMENT_STATUSES.map((status) => ({ value: status, label: status }))} onChange={(value) => {
             const status = value as AssignmentStatus
             updateRow(index, { status, paidOn: status === 'Виплачено' ? row.paidOn || (todayIsoDate().slice(0, 4) === String(year) ? todayIsoDate() : '') : '' })
