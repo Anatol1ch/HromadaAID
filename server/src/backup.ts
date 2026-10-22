@@ -7,11 +7,12 @@ import { backup, DatabaseSync } from 'node:sqlite'
 const backupFilePattern = /^hromada-aid-daily-(\d{4}-\d{2}-\d{2})-created-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3})-([a-f\d-]+)\.sqlite$/
 const backupPartialPattern = /^hromada-aid-daily-\d{4}-\d{2}-\d{2}-created-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}-[a-f\d-]+\.sqlite\.partial$/
 const retainedBackupCount = 14
+const maxPendingBackupBytes = 20 * 1024 * 1024 * 1024
 const maxBackupAttempts = 3
 const retryDelayMs = 5 * 60 * 1000
 
 export type BackupLogger = { error: (message: string) => void; warn: (message: string) => void }
-export type BackupResult = { status: 'created' | 'already-exists' | 'already-created-today' | 'busy'; path?: string }
+export type BackupResult = { status: 'created' | 'already-exists' | 'already-created-today' | 'busy' | 'pending-storage-limit'; path?: string }
 
 export function localDateKey(date: Date): string {
   const year = date.getFullYear().toString().padStart(4, '0')
@@ -37,15 +38,15 @@ export function nextDailyBackupTime(now: Date): Date {
   return next
 }
 
-function matchingBackups(directory: string): { name: string; slotDate: string; createdAt: string }[] {
+export function listDailyBackups(directory: string): { name: string; slotDate: string; createdAt: string; path: string }[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     if (!entry.isFile()) return []
     const match = backupFilePattern.exec(entry.name)
-    return match ? [{ name: entry.name, slotDate: match[1], createdAt: match[2] }] : []
+    return match ? [{ name: entry.name, slotDate: match[1], createdAt: match[2], path: join(directory, entry.name) }] : []
   })
 }
 
-function secureDirectory(directory: string): void {
+export function secureBackupDirectory(directory: string): void {
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   if (process.platform !== 'win32') {
     chmodSync(directory, 0o700)
@@ -71,7 +72,7 @@ export class SqliteBackupService {
   private busy = false
   private preparedDirectory = false
 
-  constructor(private readonly database: DatabaseSync, readonly directory: string, private readonly logger: BackupLogger) {
+  constructor(private readonly database: DatabaseSync, readonly directory: string, private readonly logger: BackupLogger, private readonly isPendingUpload: (fileName: string) => boolean = () => false) {
     this.directory = resolve(directory)
   }
 
@@ -81,7 +82,14 @@ export class SqliteBackupService {
     let partialPath: string | undefined
     try {
       this.prepareDirectory()
-      const currentBackups = matchingBackups(this.directory)
+      const currentBackups = listDailyBackups(this.directory)
+      const pendingBytes = currentBackups.filter((file) => this.isPendingUpload(file.name)).reduce((total, file) => {
+        try { return total + statSync(file.path).size } catch { return total }
+      }, 0)
+      if (pendingBytes >= maxPendingBackupBytes) {
+        this.logger.error('Досягнуто ліміт 20 ГіБ для локальних копій, що очікують Google Drive. Копії не видалено; нове резервування призупинено до звільнення місця або відновлення синхронізації.')
+        return { status: 'pending-storage-limit' }
+      }
       if (currentBackups.some((file) => file.slotDate === slotDate)) return { status: 'already-exists' }
       if (currentBackups.some((file) => file.createdAt.slice(0, 10) === localDateKey(createdAt))) return { status: 'already-created-today' }
 
@@ -104,6 +112,15 @@ export class SqliteBackupService {
 
       renameSync(partialPath, finalPath)
       partialPath = undefined
+      if (this.isPendingUpload(fileName)) {
+        const pendingAfterCreate = listDailyBackups(this.directory).filter((file) => this.isPendingUpload(file.name))
+        const pendingBytesAfterCreate = pendingAfterCreate.reduce((total, file) => {
+          try { return total + statSync(file.path).size } catch { return total }
+        }, 0)
+        if (pendingBytesAfterCreate >= maxPendingBackupBytes) {
+          this.logger.error('Локальні копії, що очікують Google Drive, досягли ліміту 20 ГіБ. Архіви збережено; нове резервування призупиниться до звільнення місця або відновлення синхронізації.')
+        }
+      }
       try { this.pruneOldBackups() }
       catch { this.logger.warn('Не вдалося завершити очищення застарілих резервних копій.') }
       return { status: 'created', path: finalPath }
@@ -117,7 +134,7 @@ export class SqliteBackupService {
 
   private prepareDirectory(): void {
     if (this.preparedDirectory) return
-    secureDirectory(this.directory)
+    secureBackupDirectory(this.directory)
     this.preparedDirectory = true
     // A process crash may leave only an unpublished partial file. Never treat it as a backup.
     for (const entry of readdirSync(this.directory, { withFileTypes: true })) {
@@ -130,9 +147,11 @@ export class SqliteBackupService {
   }
 
   private pruneOldBackups(): void {
-    const files = matchingBackups(this.directory).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    for (const stale of files.slice(retainedBackupCount)) {
-      try { rmSync(join(this.directory, stale.name), { force: true }) }
+    const files = listDailyBackups(this.directory).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    const retained = new Set(files.slice(0, retainedBackupCount).map((file) => file.name))
+    for (const stale of files) {
+      if (retained.has(stale.name) || this.isPendingUpload(stale.name)) continue
+      try { rmSync(stale.path, { force: true }) }
       catch { this.logger.warn('Не вдалося видалити застарілу резервну копію.') }
     }
   }
@@ -143,6 +162,7 @@ type SchedulerOptions = {
   setTimeout?: typeof setTimeout
   clearTimeout?: typeof clearTimeout
   retryDelayMs?: number
+  onBackupCreated?: (path: string) => void
 }
 
 export function startDailyBackupScheduler(service: SqliteBackupService, logger: BackupLogger, options: SchedulerOptions = {}): { initialRun: Promise<void>; stop: () => Promise<void> } {
@@ -163,7 +183,9 @@ export function startDailyBackupScheduler(service: SqliteBackupService, logger: 
   const runCycle = async (slotDate: string): Promise<void> => {
     for (let attempt = 1; attempt <= maxBackupAttempts && !stopped; attempt++) {
       try {
-        await service.createDailyBackup(slotDate, now())
+        const result = await service.createDailyBackup(slotDate, now())
+        if (result.status === 'pending-storage-limit') return
+        if (result.status === 'created' && result.path) options.onBackupCreated?.(result.path)
         return
       } catch {
         logger.error(`Не вдалося створити щоденну резервну копію (спроба ${attempt} з ${maxBackupAttempts}).`)

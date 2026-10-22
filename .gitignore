@@ -26,6 +26,11 @@ release/
 *.backup
 *.sqlite.backup
 *.sqlite.partial
+*.hraid
+*.hraid.partial
+*.hraid.*.partial
+.hromadaaid-drive-secrets.dpapi*
+.hromadaaid-drive-sync.json*
 
 # Runtime logs and process artefacts
 *.log

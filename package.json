@@ -11,7 +11,9 @@
     "server:dev": "pnpm server:build && concurrently -k \"pnpm exec tsc -p server/tsconfig.json --watch\" \"node --watch dist-server/server/src/index.js\"",
     "server:build": "tsc -p server/tsconfig.json",
     "server:start": "node dist-server/server/src/index.js",
-    "server:create-admin": "pnpm server:build && node dist-server/server/src/create-admin.js"
+    "server:create-admin": "pnpm server:build && node dist-server/server/src/create-admin.js",
+    "server:drive-setup": "pnpm server:build && node dist-server/server/src/drive-setup.js",
+    "server:backup-decrypt": "pnpm server:build && node dist-server/server/src/backup-decrypt.js"
   },
   "dependencies": {
     "argon2": "^0.45.1",
