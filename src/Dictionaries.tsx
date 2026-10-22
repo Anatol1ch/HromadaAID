@@ -6,7 +6,7 @@ import type { CatalogOrderInput } from '../electron/api-contract'
 import Select from './components/Select'
 import { useReportingYear } from './context/YearContext'
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { Check, FileCheck2, HandCoins, Landmark, Pencil, Plus, Trash2, Users, X } from 'lucide-react'
+import { Check, FileCheck2, HandCoins, Landmark, Lock, Pencil, Plus, Trash2, Users, X } from 'lucide-react'
 import type { AidTypeOption, CatalogEditInput, DecisionInput, DecisionSummary, DeletePreview, ProgramOption } from '../electron/api-contract'
 import RecipientRegistry from './RecipientRegistry'
 import DictionaryTable, { DictionaryToolbar } from './components/DictionaryTable'
@@ -36,7 +36,7 @@ const blankCatalog = (kind: 'program' | 'aidType', programId = ''): CatalogEditI
 
 function DictionaryTabGroup({ tabs, section, allowedSections, onSelect, management }: { tabs: readonly DictionaryTab[]; section: Section | null; allowedSections: readonly Section[]; onSelect: (section: Section) => void; management?: boolean }) {
   return <div role="presentation" className={`dictionary-tabs dictionary-navigation-group${management ? ' dictionary-management-group' : ''}`}>
-    {tabs.map(({ key, label, icon: Icon }) => { const available = allowedSections.includes(key); const roles = USER_ROLES.filter(role => sectionsForRoles([role]).includes(key)).map(role => USER_ROLE_LABELS[role]).join(', '); return <button key={key} id={`dictionary-tab-${key}`} type="button" data-tab-key={key} className={`${section === key ? 'active' : ''}${available ? '' : ' dictionary-tab-locked'}`} role="tab" aria-selected={section === key} aria-disabled={!available} aria-controls="dictionary-content" tabIndex={section === key ? 0 : -1} title={available ? label : `Доступ мають ролі: ${roles}.`} onClick={() => onSelect(key)}><Icon size={17}/>{label}</button> })}
+    {tabs.map(({ key, label, icon: Icon }) => { const available = allowedSections.includes(key); const roles = USER_ROLES.filter(role => sectionsForRoles([role]).includes(key)).map(role => USER_ROLE_LABELS[role]).join(', '); return <button key={key} id={`dictionary-tab-${key}`} type="button" data-tab-key={key} className={`${section === key ? 'active' : ''}${available ? '' : ' dictionary-tab-locked'}`} role="tab" aria-selected={section === key} aria-disabled={!available} aria-controls="dictionary-content" tabIndex={section === key ? 0 : -1} title={available ? label : `Доступ мають ролі: ${roles}.`} onClick={() => onSelect(key)}><Icon size={17}/><span>{label}</span>{!available && <Lock className="dictionary-tab-lock" size={13} aria-hidden="true"/>}</button> })}
   </div>
 }
 
