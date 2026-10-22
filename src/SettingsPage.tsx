@@ -1,4 +1,4 @@
-import { CircleCheck, CircleUserRound, Info, KeyRound, Server, Wifi } from 'lucide-react'
+import { CircleCheck, CircleUserRound, Code2, Info, KeyRound, MapPin, Server, Wifi } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { AuthenticatedUser } from '../shared/auth-contract'
 import type { ServerConnectionCheckResult, ServerConnectionSaveResult, ServerConnectionState } from '../shared/api-contract'
@@ -96,6 +96,13 @@ export default function SettingsPage({ user, onChangePassword, connectionActions
           <div><dt>Режим роботи</dt><dd>{connection?.mode === 'remote' ? 'Клієнт-серверний' : connection?.mode === 'local' ? 'Локальний' : 'Визначається…'}</dd></div>
           <div><dt>Стан підключення</dt><dd>{!connection ? 'Визначається…' : connection.mode === 'local' ? 'Серверне підключення не використовується' : connection.status === 'available' ? 'Сервер доступний' : connection.status === 'checking' ? 'Перевірка підключення…' : connection.status === 'unavailable' ? 'Не вдалося підключитися до сервера' : 'Підключення не перевірено'}</dd></div>
           {connection?.mode === 'remote' && <div className="settings-about-address"><dt>Адреса сервера</dt><dd>{connection.apiUrl ?? 'Не налаштовано'}</dd></div>}
+        </dl>
+      </section>
+      <section className="dashboard-panel settings-about-details" aria-labelledby="settings-origin-title">
+        <div className="settings-card-heading"><span className="settings-icon"><Code2 size={19} aria-hidden="true"/></span><div><h2 id="settings-origin-title">Розробка та походження</h2><p>Розробник системи та громада, для потреб якої її створено.</p></div></div>
+        <dl className="settings-origin-grid">
+          <div><dt><Code2 size={15} aria-hidden="true"/>Розробник системи</dt><dd>Анатолій Мироненко</dd></div>
+          <div><dt><MapPin size={15} aria-hidden="true"/>Громада, для потреб якої створено систему</dt><dd>Вишнівська селищна територіальна громада, Кам'янський район, Дніпропетровська область</dd></div>
         </dl>
       </section>
     </div>}

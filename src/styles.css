@@ -666,6 +666,11 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .settings-about-grid dt { color: #78877e; font-size: 12px; }
 .settings-about-grid dd { margin: 5px 0 0; color: #304b39; font-size: 13px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
 .settings-about-purpose, .settings-about-address { grid-column: 1 / -1; }
+.settings-origin-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 0; }
+.settings-origin-grid > div { min-width: 0; padding: 14px; border: 1px solid #e8eee9; border-radius: var(--radius-control); background: #fbfcfb; }
+.settings-origin-grid dt { display: flex; align-items: center; gap: 7px; color: #78877e; font-size: 12px; }
+.settings-origin-grid dt svg { flex: none; color: #52785c; }
+.settings-origin-grid dd { margin: 7px 0 0; color: #304b39; font-size: 14px; font-weight: 650; line-height: 1.55; overflow-wrap: anywhere; }
 .settings-account, .settings-security { display: grid; gap: var(--space-4); }
 .settings-security-summary { grid-template-columns: minmax(0,1fr) auto; align-items: center; }
 .settings-security-summary > .secondary-button { min-width: 155px; justify-content: center; }
@@ -2055,6 +2060,7 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
   .settings-profile-grid { grid-template-columns: minmax(0,1fr); }
   .settings-profile-roles { grid-column: auto; }
   .settings-about-grid { grid-template-columns: minmax(0,1fr); }
+  .settings-origin-grid { grid-template-columns: minmax(0,1fr); }
   .settings-about-purpose, .settings-about-address { grid-column: auto; }
   .server-connection-overview { align-items: flex-start; flex-direction: column; }
   .server-connection-actions { align-items: stretch; flex-direction: column; }
