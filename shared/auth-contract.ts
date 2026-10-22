@@ -7,6 +7,8 @@ export type AuthenticatedUser = {
   id: string
   username: string
   displayName: string | null
+  firstName?: string | null
+  lastName?: string | null
   roles: UserRole[]
   permissions: Permission[]
   mustChangePassword: boolean
@@ -38,6 +40,8 @@ export function isAuthenticatedUser(value: unknown): value is AuthenticatedUser 
   const item = value as Record<string, unknown>
   return typeof item.id === 'string' && typeof item.username === 'string' &&
     (typeof item.displayName === 'string' || item.displayName === null) &&
+    (item.firstName === undefined || typeof item.firstName === 'string' || item.firstName === null) &&
+    (item.lastName === undefined || typeof item.lastName === 'string' || item.lastName === null) &&
     isStringArray(item.roles) && isStringArray(item.permissions) && typeof item.mustChangePassword === 'boolean'
 }
 

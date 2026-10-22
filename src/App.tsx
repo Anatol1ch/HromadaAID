@@ -14,6 +14,7 @@ import Reports from './Reports'
 import UsersAdmin from './UsersAdmin'
 import TemporaryPasswordScreen from './components/TemporaryPasswordScreen'
 import AccessDeniedToast from './components/AccessDeniedToast'
+import SettingsPage from './SettingsPage'
 import communityCoat from '../reference/ГЕРБ.png'
 import YearPicker from './components/YearPicker'
 import { UnsavedChangesConfirmation } from './components/ConfirmDialog'
@@ -44,13 +45,18 @@ function App() {
     setAuth(result.state)
     return { ok: result.ok, message: 'message' in result ? result.message : undefined }
   }
+  const changePassword = async (currentPassword: string, newPassword: string) => {
+    const result = await window.hromadaAid.auth.changePassword(currentPassword, newPassword)
+    setAuth(result.state)
+    return { ok: result.ok, message: 'message' in result ? result.message : undefined }
+  }
   if (!auth) return <StartupScreen/>
-  if (auth.mode === 'remote' && auth.status === 'password-change-required') return <TemporaryPasswordScreen state={auth} onChangePassword={async (currentPassword, newPassword) => { const result = await window.hromadaAid.auth.changePassword(currentPassword, newPassword); setAuth(result.state); return { ok: result.ok, message: 'message' in result ? result.message : undefined } }}/>
+  if (auth.mode === 'remote' && auth.status === 'password-change-required') return <TemporaryPasswordScreen state={auth} onChangePassword={changePassword}/>
   if (auth.mode === 'remote' && auth.status !== 'authenticated') return <LoginScreen state={auth} onLogin={login}/>
-  return <Workspace key={auth.mode === 'remote' ? auth.user.id : 'local'} auth={auth}/>
+  return <Workspace key={auth.mode === 'remote' ? auth.user.id : 'local'} auth={auth} onChangePassword={changePassword}/>
 }
 
-function Workspace({ auth }: { auth: Extract<ClientAuthState, { status: 'authenticated' }> }) {
+function Workspace({ auth, onChangePassword }: { auth: Extract<ClientAuthState, { status: 'authenticated' }>; onChangePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; message?: string }> }) {
   const [activeNav, setActiveNav] = useState('Головна')
   const [createAssignment, setCreateAssignment] = useState(false)
   const [notice, setNotice] = useState('')
@@ -68,11 +74,12 @@ function Workspace({ auth }: { auth: Extract<ClientAuthState, { status: 'authent
   const showAccessDenied = useCallback(() => setAccessDeniedRevision((revision) => revision + 1), [])
   const closeAccessDenied = useCallback(() => setAccessDeniedRevision(0), [])
   useEffect(() => { rememberAccountingYear(year) }, [year])
-  useEffect(() => { if (!visibleNav.some((item) => item.label === activeNav && canOpenPage(item.page, item.permission))) setActiveNav('Головна') }, [activeNav, visibleNav, dictionarySections, permissions])
+  useEffect(() => { if (activeNav !== 'Налаштування' && !visibleNav.some((item) => item.label === activeNav && canOpenPage(item.page, item.permission))) setActiveNav('Головна') }, [activeNav, visibleNav, dictionarySections, permissions])
   const requiredRolesFor = (item: typeof nav[number]) => item.page === 'dictionaries'
     ? USER_ROLES.filter((role) => dictionarySectionsForRoles([role]).length > 0)
     : USER_ROLES.filter((role) => hasWorkspacePage([role], item.page))
   const navigate = (label: string) => { const item = visibleNav.find((value) => value.label === label); if (!item) return; if (!canOpenPage(item.page, item.permission)) { showAccessDenied(); return }; setCreateAssignment(false); setActiveNav(label); setNotice(''); closeAccessDenied() }
+  const navigateSettings = () => { setCreateAssignment(false); setActiveNav('Налаштування'); setNotice(''); closeAccessDenied() }
   const newAssignment = () => { if (!can('assignments.manage') || !canOpenPage('assignments', 'assignments.read')) return; setCreateAssignment(true); setActiveNav('Реєстр допомог'); setNotice('') }
   const logout = async () => {
     if (logoutBusy) return
@@ -96,7 +103,7 @@ function Workspace({ auth }: { auth: Extract<ClientAuthState, { status: 'authent
           className={`nav-item ${available && activeNav === label ? 'active' : ''}${available ? '' : ' nav-item-locked'}`}
           onClick={() => navigate(label)}><Icon size={19} strokeWidth={1.8} aria-hidden="true"/><span>{label}</span>{!available && <LockKeyhole className="nav-lock" size={14} aria-hidden="true"/>}</button>
       })}</nav>
-      <div className="sidebar-bottom"><div className="nav-label">СИСТЕМА</div><button type="button" className="nav-item" aria-label="Налаштування" title="Налаштування" onClick={() => setNotice('Налаштування будуть доступні у наступному етапі.')}><Settings size={19} strokeWidth={1.8} aria-hidden="true"/><span>Налаштування</span></button><div className="help-card"><div className="help-icon"><CircleHelp size={18}/></div><div><strong>Потрібна допомога?</strong><p>Зверніться до адміністратора системи</p></div><ChevronRight size={17}/></div><div className="user-row"><div className="avatar">{user ? displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() : 'Л'}</div><div className="user-copy"><strong>{displayName}</strong><span title={roles}>{roles}</span></div>{user && <div className="user-actions"><button type="button" className="icon-button" title="Вийти" aria-label="Вийти" disabled={logoutBusy} onClick={() => void logout()}><LogOut size={16}/></button></div>}</div></div>
+      <div className="sidebar-bottom"><div className="nav-label">СИСТЕМА</div><button type="button" className={`nav-item${activeNav === 'Налаштування' ? ' active' : ''}`} aria-label="Налаштування" title="Налаштування" aria-current={activeNav === 'Налаштування' ? 'page' : undefined} onClick={navigateSettings}><Settings size={19} strokeWidth={1.8} aria-hidden="true"/><span>Налаштування</span></button><div className="help-card"><div className="help-icon"><CircleHelp size={18}/></div><div><strong>Потрібна допомога?</strong><p>Зверніться до адміністратора системи</p></div><ChevronRight size={17}/></div><div className="user-row"><div className="avatar">{user ? displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() : 'Л'}</div><button type="button" className="user-profile-link" onClick={navigateSettings} title="Мій обліковий запис"><strong>{displayName}</strong><span title={roles}>{roles}</span></button>{user && <div className="user-actions"><button type="button" className="icon-button" title="Вийти" aria-label="Вийти" disabled={logoutBusy} onClick={() => void logout()}><LogOut size={16}/></button></div>}</div></div>
     </aside>
     <main className="main-area">
       <header className="topbar"><Breadcrumbs items={[{ label: 'Робочий простір', section: 'Головна' }, { label: activeNav }]} navigate={navigate}/><div className="top-actions"><YearPicker value={year} onChange={setYear} label="Рік"/></div></header>
@@ -111,7 +118,7 @@ function Workspace({ auth }: { auth: Extract<ClientAuthState, { status: 'authent
           activeNav === 'Реєстр допомог' ? <AidRegistry createOnOpen={createAssignment}/> :
           activeNav === 'Формування відомостей' ? <StatementFormation/> :
           activeNav === 'Довідники' ? <Dictionaries allowedSections={dictionarySections} onAccessDenied={showAccessDenied} canManageCatalogs={can('catalogs.manage')} canManagePlans={can('planning.manage')} canManageDecisions={can('decisions.manage')} canManagePersonal={can('recipients.manage') || can('banks.manage')}/> :
-          activeNav === 'Огляд' ? <Dashboard/> : activeNav === 'Користувачі' && auth.mode === 'remote' ? <UsersAdmin currentUserId={auth.user.id}/> : <Reports/>}</div>
+          activeNav === 'Огляд' ? <Dashboard/> : activeNav === 'Користувачі' && auth.mode === 'remote' ? <UsersAdmin currentUserId={auth.user.id}/> : activeNav === 'Налаштування' ? <SettingsPage user={user} onChangePassword={onChangePassword}/> : <Reports/>}</div>
       </div>
     </main>
     {accessDeniedRevision > 0 && <AccessDeniedToast key={accessDeniedRevision} onClose={closeAccessDenied}/>}

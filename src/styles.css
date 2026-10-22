@@ -642,6 +642,37 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .user-actions { display: flex; margin-left: auto; gap: 2px; }
 .user-actions .icon-button { width: 30px; height: 30px; color: #687b8d; }
 
+.user-profile-link { display: grid; flex: 1; min-width: 0; gap: 3px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.user-profile-link strong { overflow: hidden; color: #37465a; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.user-profile-link span { overflow: hidden; color: #8b97a4; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.user-profile-link:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; border-radius: 3px; }
+
+.settings-page { display: grid; gap: var(--space-4); }
+.settings-heading { margin-bottom: 0; }
+.settings-section-nav { display: flex; flex-wrap: wrap; align-items: stretch; gap: 7px; padding: 5px; border: 1px solid #e3eae5; border-radius: var(--radius-card); background: var(--surface-panel); }
+.settings-section-current, .settings-section-future { display: inline-flex; min-height: 42px; align-items: center; gap: 9px; padding: 8px 13px; border: 1px solid transparent; border-radius: var(--radius-control); font-size: 13px; font-weight: 650; }
+.settings-section-current { color: var(--tab-active-text); border-color: var(--tab-active-border); background: var(--tab-active-background); }
+.settings-section-future { color: #8a9690; }
+.settings-section-future small { margin-left: 2px; color: #929d96; font-size: 10px; font-weight: 500; }
+.settings-account, .settings-security { display: grid; gap: var(--space-4); }
+.settings-card-heading { display: flex; align-items: center; gap: 12px; }
+.settings-icon { display: grid; flex: none; width: 38px; height: 38px; place-items: center; border-radius: 9px; color: #3e7551; background: #edf5ef; }
+.settings-card-heading h2 { margin: 0; color: #304b39; font-size: 17px; line-height: 1.4; }
+.settings-card-heading p { margin: 3px 0 0; color: #7b887f; font-size: 12px; line-height: 1.5; }
+.settings-profile-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 13px; margin: 0; }
+.settings-profile-grid > div { min-width: 0; padding: 13px 14px; border: 1px solid #e8eee9; border-radius: var(--radius-control); background: #fbfcfb; }
+.settings-profile-grid dt { color: #78877e; font-size: 12px; }
+.settings-profile-grid dd { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 5px 0 0; color: #304b39; font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
+.settings-profile-roles { grid-column: 1 / -1; }
+.settings-role-chip { display: inline-flex; min-height: 27px; align-items: center; padding: 4px 9px; border: 1px solid #dce8df; border-radius: 999px; background: #f1f7f2; color: #486a51; font-size: 12px; font-weight: 600; }
+.settings-profile-note { margin: 0; color: #7b887f; font-size: 12px; line-height: 1.5; }
+.account-password-form { display: grid; width: min(100%, 650px); gap: var(--space-3); }
+.account-password-form .recipient-field { min-width: 0; }
+.account-password-form .recipient-field > span { display: block; margin-bottom: 6px; color: #53665a; font-size: 13px; font-weight: 600; }
+.account-password-form .recipient-field input { min-height: var(--control-height); }
+.account-password-form .recipient-field small { display: block; margin-top: 5px; color: var(--color-text-hint); font-size: 12px; }
+.settings-form-actions { display: flex; justify-content: flex-end; padding-top: 3px; }
+
 .users-admin { display: grid; gap: var(--space-5); }
 .dictionary-table.dictionary-users { min-width: 0; }
 .user-roles { display: flex; flex-wrap: wrap; gap: 4px 6px; }
@@ -1973,6 +2004,9 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
   .overview-vpo-values { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 @media (max-width: 700px) {
+  .settings-profile-grid { grid-template-columns: minmax(0,1fr); }
+  .settings-profile-roles { grid-column: auto; }
+  .settings-section-future { flex-wrap: wrap; }
   .overview-analytics .dashboard-panel { padding: 14px; }
   .overview-analytics .overview-month-column > span { font-size: 8px; }
   .overview-analytics .overview-month-chart { gap: 2px; }

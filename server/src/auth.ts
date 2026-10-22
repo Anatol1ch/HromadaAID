@@ -90,6 +90,8 @@ function profile(database: DatabaseSync, row: UserRow): AuthenticatedUser {
     id: row.id,
     username: row.username,
     displayName: fullName(row),
+    firstName: row.first_name,
+    lastName: row.last_name,
     roles,
     permissions: effectivePermissions(roles),
     mustChangePassword: row.must_change_password === 1,
