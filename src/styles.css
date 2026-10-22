@@ -1466,6 +1466,11 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .workspace-shortcuts { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; padding-top: var(--space-4); }
 .workspace-shortcuts > button { display: flex; align-items: center; gap: var(--space-3); min-width: 0; padding: 15px var(--space-3); background: var(--surface-card); border: 1px solid #e2eae4; border-radius: 9px; text-align: left; color: #587260; transition: background-color var(--motion-duration-fast), border-color var(--motion-duration-fast); }
 .workspace-shortcuts > button:hover:not(:disabled):not([aria-busy="true"]):not([aria-disabled="true"]) { background: #f3f8f4; border-color: #b7cdbd; }
+.workspace-shortcuts > button.workspace-shortcut-locked { color: #8a9690; background: #f8faf8; cursor: not-allowed; opacity: .78; }
+.workspace-shortcuts > button.workspace-shortcut-locked .workspace-action-icon { color: #89958d; background: #f0f3f1; }
+.workspace-shortcuts > button.workspace-shortcut-locked strong { color: #78877e; }
+.workspace-shortcuts > button.workspace-shortcut-locked small { color: #929d96; }
+.workspace-shortcuts .workspace-shortcut-lock { flex: 0 0 auto; color: #8a9690; }
 .workspace-action-icon { display: inline-flex; flex: 0 0 32px; justify-content: center; align-items: center; width: 32px; height: 34px; color: #3e7551; background: #edf5ef; border-radius: 7px; }
 .workspace-shortcuts > button > span:nth-child(2) { flex: 1; min-width: 0; }
 .workspace-shortcuts strong { display: block; color: #35573f; font-size: 13px; line-height: 1.5; }
