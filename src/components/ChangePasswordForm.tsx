@@ -44,12 +44,12 @@ export default function ChangePasswordForm({ onChangePassword, onBusyChange, onC
     const id = `account-password-${name}`
     const errorId = `${id}-error`
     return <label className="recipient-field" key={name} htmlFor={id}>
-      <span>{label}</span>
+      <span id={`${id}-label`}>{label}</span>
       <div className="auth-password">
-        <input id={id} type={visible[name] ? 'text' : 'password'} autoComplete={autoComplete} value={values[name]} disabled={busy} onChange={event => { setValues(current => ({ ...current, [name]: event.target.value })); setFieldErrors(current => ({ ...current, [name]: '' })); setError('') }} aria-invalid={!!fieldErrors[name]} aria-describedby={fieldErrors[name] ? errorId : name === 'next' ? 'account-password-hint' : undefined}/>
+        <input id={id} aria-labelledby={`${id}-label`} type={visible[name] ? 'text' : 'password'} autoComplete={autoComplete} value={values[name]} disabled={busy} onChange={event => { const value = event.target.value; setValues(current => ({ ...current, [name]: value })); setFieldErrors(current => ({ ...current, [name]: '' })); setError('') }} aria-invalid={!!fieldErrors[name]} aria-describedby={fieldErrors[name] ? errorId : name === 'next' ? 'account-password-hint' : undefined}/>
         <button type="button" className="icon-button" title={visible[name] ? 'Приховати пароль' : 'Показати пароль'} aria-label={`${visible[name] ? 'Приховати' : 'Показати'}: ${label.toLocaleLowerCase('uk-UA')}`} disabled={busy} onClick={() => setVisible(current => ({ ...current, [name]: !current[name] }))}>{visible[name] ? <EyeOff size={17} aria-hidden="true"/> : <Eye size={17} aria-hidden="true"/>}</button>
       </div>
-      {name === 'next' && <small id="account-password-hint">Від {PASSWORD_MIN_LENGTH} до {PASSWORD_MAX_LENGTH} символів.</small>}
+      {name === 'next' && <small className="password-policy-hint" id="account-password-hint">Від {PASSWORD_MIN_LENGTH} до {PASSWORD_MAX_LENGTH} символів.</small>}
       {fieldErrors[name] && <small className="recipient-field-error" id={errorId} role="alert">{fieldErrors[name]}</small>}
     </label>
   }

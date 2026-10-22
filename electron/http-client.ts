@@ -51,6 +51,8 @@ export class HttpClient {
     const token = authorize ? (options?.accessToken ?? this.options.getAccessToken?.()) : undefined
     if (authorize && !token) throw new HttpClientError('Потрібна чинна сесія.', 401)
     let response: Response
+    const diagnosePasswordChange = path === '/auth/change-password' && !!process.env.HROMADA_AID_TEST_DATA_DIR
+    if (diagnosePasswordChange) console.info(`[HromadaAID test] POST ${this.baseUrl.origin}/auth/change-password: sending`)
     try {
       response = await fetch(new URL(path, this.baseUrl), {
         method,
@@ -63,9 +65,12 @@ export class HttpClient {
         signal: AbortSignal.timeout(this.timeoutMs),
       })
     } catch (error) {
+      if (diagnosePasswordChange) console.info('[HromadaAID test] password-change: transport error (no confirmed response)')
       if (error instanceof DOMException && error.name === 'TimeoutError') throw new HttpClientError('Сервер не відповів у встановлений час.')
       throw new HttpClientError('Не вдалося підключитися до сервера.')
     }
+
+    if (diagnosePasswordChange) console.info(`[HromadaAID test] password-change: HTTP ${response.status}`)
 
     if (authorize && response.status === 401) this.options.onUnauthorized?.(token)
     this.checkRequestSession(authorize, token, options)

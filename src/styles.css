@@ -669,13 +669,17 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .settings-role-chip { display: inline-flex; min-height: 27px; align-items: center; padding: 4px 9px; border: 1px solid #dce8df; border-radius: 999px; background: #f1f7f2; color: #486a51; font-size: 12px; font-weight: 600; }
 .settings-profile-note { margin: 0; color: #7b887f; font-size: 12px; line-height: 1.5; }
 .account-password-form { display: grid; width: min(100%, 650px); gap: var(--space-3); }
-.account-password-form .recipient-field { min-width: 0; }
-.account-password-form .recipient-field > span { display: block; margin-bottom: 6px; color: #53665a; font-size: 13px; font-weight: 600; }
+.account-password-form .recipient-field { min-width: 0; gap: 5px; }
+.account-password-form .recipient-field > span { display: block; color: #53665a; font-size: 13px; font-weight: 600; }
 .account-password-form .recipient-field input { min-height: var(--control-height); }
 .account-password-form .recipient-field small { display: block; margin-top: 5px; color: var(--color-text-hint); font-size: 12px; }
 .account-password-form .recipient-field .recipient-field-error { color: var(--color-text-error); }
-.settings-form-actions { display: flex; justify-content: flex-end; padding-top: 3px; }
+.settings-form-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 3px; }
 .settings-form-actions > button { min-height: var(--control-height); }
+.change-password-modal .app-modal-header > div { display: grid; grid-template-columns: 38px minmax(0,1fr); column-gap: 12px; align-items: center; }
+.change-password-modal .app-modal-header-icon { grid-column: 1; grid-row: 1 / 3; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 9px; color: #3e7551; background: #edf5ef; }
+.change-password-modal .app-modal-header h2, .change-password-modal .app-modal-header p { grid-column: 2; }
+.change-password-modal .account-password-form .password-policy-hint { margin: 0; font-size: 11px; line-height: 1.35; font-weight: 400; }
 
 .users-admin { display: grid; gap: var(--space-5); }
 .dictionary-table.dictionary-users { min-width: 0; }
