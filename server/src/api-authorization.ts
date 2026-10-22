@@ -66,7 +66,10 @@ export const API_ROUTE_POLICIES: readonly ApiRoutePolicy[] = [
   { method: 'PUT', url: '/api/program-approvals/:id', permissions: ['program_approvals.manage'] },
 
   { method: 'GET', url: '/api/dashboard', permissions: ['dashboard.read'] },
-  { method: 'GET', url: '/api/reports/source-rows', permissions: ['reports.read'] },
+  // Imported source rows preserve arbitrary workbook cell text. Keep this raw
+  // endpoint for users who already have personal-data access; the planning UI
+  // uses the aggregated /summary endpoint instead.
+  { method: 'GET', url: '/api/reports/source-rows', permissions: ['reports.read', 'personal_data.read'] },
   { method: 'GET', url: '/api/reports/summary', permissions: ['reports.read'] },
   { method: 'GET', url: '/api/reports/annual-plans', permissions: ['planning.read'] },
   { method: 'GET', url: '/api/reports/plan-entries', permissions: ['planning.read'] },

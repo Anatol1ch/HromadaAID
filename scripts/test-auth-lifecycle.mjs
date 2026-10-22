@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openInitializedDatabase } from '../dist-server/electron/database.js'
@@ -53,6 +53,14 @@ try {
   assert.equal((await session.login('admin-test','wrong-password')).ok,false)
   assert.equal((await session.login('admin-test',pass)).ok,true)
   assert.equal((await http.getJson('/auth/me')).displayName,'Legacy arbitrary full name')
+  await writeFile(join(directory,'remote-session.dat'),'synthetic-legacy-token')
+  let restartedSession
+  const restartHttp=new HttpClient(base,1500,{getAccessToken:()=>restartedSession?.accessToken})
+  restartedSession=new RemoteAuthSession(directory,restartHttp,()=>{})
+  await restartedSession.initialize()
+  assert.equal(restartedSession.accessToken,undefined)
+  assert.equal(restartedSession.currentState.status,'unauthenticated')
+  check('Electron process restart requires a new login and removes legacy persisted token')
   const create = input => http.postJson('/api/users',{input})
   for (const n of [7,257]) { await assert.rejects(create({username:`invalid-${n}`,firstName:null,lastName:null,roles:['viewer'],password:'a'.repeat(n)}),e=>e.status===400) }
   const maximumUser = await create({username:'maximum-length-test',firstName:null,lastName:null,roles:['viewer'],password:'😀'.repeat(256)})
@@ -98,6 +106,7 @@ try {
   user = (await http.postJson(`/api/users/${user.id}/reset-password`,{newPassword:'        ',expectedUpdatedAt:user.updatedAt})).user
   assert.equal((await userSession.login(user.username,'        ')).ok,true)
   assert.equal(userSession.currentState.status,'password-change-required')
+  await assert.rejects(userHttp.getJson('/api/catalogs'),e=>e.status===403)
   assert.equal((await userSession.changePassword('        ','😀'.repeat(8))).ok,true)
   assert.equal(userSession.accessToken,undefined)
   assert.equal((await userSession.login(user.username,'😀'.repeat(8))).ok,true)
