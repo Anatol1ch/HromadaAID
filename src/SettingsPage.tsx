@@ -1,9 +1,13 @@
-import { CircleUserRound, Server, Info } from 'lucide-react'
+import { CircleUserRound, Info, KeyRound, Server } from 'lucide-react'
+import { useState } from 'react'
 import type { AuthenticatedUser } from '../shared/auth-contract'
 import { USER_ROLE_LABELS } from '../shared/authorization'
 import ChangePasswordForm from './components/ChangePasswordForm'
+import Modal from './components/Modal'
 
 export default function SettingsPage({ user, onChangePassword }: { user: AuthenticatedUser | null; onChangePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; message?: string }> }) {
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false)
+  const [passwordBusy, setPasswordBusy] = useState(false)
   const structuredName = [user?.firstName?.trim(), user?.lastName?.trim()].filter(Boolean).join(' ')
   const displayName = structuredName || user?.displayName?.trim() || user?.username || 'Локальний режим'
   const roles = user?.roles.map(role => USER_ROLE_LABELS[role]).join(', ') || 'Автономна робота'
@@ -24,6 +28,12 @@ export default function SettingsPage({ user, onChangePassword }: { user: Authent
       </dl>
       {user && <p className="settings-profile-note">Ім'я, прізвище, логін і ролі змінює адміністратор у розділі «Користувачі».</p>}
     </section>
-    {user ? <ChangePasswordForm onChangePassword={onChangePassword}/> : <section className="dashboard-panel settings-security"><div className="settings-card-heading"><span className="settings-icon"><Server size={19} aria-hidden="true"/></span><div><h2>Безпека</h2><p>Зміна пароля доступна для авторизованих облікових записів у remote mode.</p></div></div></section>}
+    <section className="dashboard-panel settings-security settings-security-summary" aria-labelledby="settings-security-title">
+      <div className="settings-card-heading"><span className="settings-icon"><KeyRound size={19} aria-hidden="true"/></span><div><h2 id="settings-security-title">Безпека</h2><p>{user ? 'Керуйте паролем для входу до системи.' : 'У локальному режимі окремий обліковий запис не використовується.'}</p></div></div>
+      {user && <button type="button" className="secondary-button" onClick={() => setPasswordModalOpen(true)}>Змінити пароль</button>}
+    </section>
+    {user && passwordModalOpen && <Modal title="Зміна пароля" description="Після успішної зміни потрібно увійти повторно." headerIcon={<KeyRound size={21} aria-hidden="true"/>} onClose={() => setPasswordModalOpen(false)} busy={passwordBusy} size="compact" className="change-password-modal">
+      <ChangePasswordForm onChangePassword={onChangePassword} onBusyChange={setPasswordBusy} onCancel={() => setPasswordModalOpen(false)}/>
+    </Modal>}
   </div>
 }

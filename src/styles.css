@@ -655,6 +655,8 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .settings-section-future { color: #8a9690; }
 .settings-section-future small { margin-left: 2px; color: #929d96; font-size: 10px; font-weight: 500; }
 .settings-account, .settings-security { display: grid; gap: var(--space-4); }
+.settings-security-summary { grid-template-columns: minmax(0,1fr) auto; align-items: center; }
+.settings-security-summary > .secondary-button { min-width: 155px; justify-content: center; }
 .settings-card-heading { display: flex; align-items: center; gap: 12px; }
 .settings-icon { display: grid; flex: none; width: 38px; height: 38px; place-items: center; border-radius: 9px; color: #3e7551; background: #edf5ef; }
 .settings-card-heading h2 { margin: 0; color: #304b39; font-size: 17px; line-height: 1.4; }
@@ -671,7 +673,9 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .account-password-form .recipient-field > span { display: block; margin-bottom: 6px; color: #53665a; font-size: 13px; font-weight: 600; }
 .account-password-form .recipient-field input { min-height: var(--control-height); }
 .account-password-form .recipient-field small { display: block; margin-top: 5px; color: var(--color-text-hint); font-size: 12px; }
+.account-password-form .recipient-field .recipient-field-error { color: var(--color-text-error); }
 .settings-form-actions { display: flex; justify-content: flex-end; padding-top: 3px; }
+.settings-form-actions > button { min-height: var(--control-height); }
 
 .users-admin { display: grid; gap: var(--space-5); }
 .dictionary-table.dictionary-users { min-width: 0; }
@@ -2004,6 +2008,8 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
   .overview-vpo-values { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 @media (max-width: 700px) {
+  .settings-security-summary { grid-template-columns: minmax(0,1fr); }
+  .settings-security-summary > .secondary-button { justify-self: start; }
   .settings-profile-grid { grid-template-columns: minmax(0,1fr); }
   .settings-profile-roles { grid-column: auto; }
   .settings-section-future { flex-wrap: wrap; }

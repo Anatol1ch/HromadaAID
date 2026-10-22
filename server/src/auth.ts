@@ -169,12 +169,17 @@ export function logout(database: DatabaseSync, tokenHashValue: string): void {
 
 export async function changePassword(database: DatabaseSync, session: AuthenticatedSession, input: ChangePasswordInput): Promise<AuthResult<void>> {
   const nextPassword = validatePassword(input.newPassword)
-  if (!nextPassword || typeof input.currentPassword !== 'string' || !input.currentPassword) {
+  if (!nextPassword) {
     return { ok: false, status: 400, message: 'Новий пароль має містити від 8 до 256 символів.' }
+  }
+  if (typeof input.currentPassword !== 'string' || !input.currentPassword) {
+    return { ok: false, status: 400, message: 'Введіть поточний пароль.' }
   }
   const current = database.prepare('SELECT id,password_hash,status,updated_at FROM users WHERE id=?').get(session.user.id) as (UserRow & { updated_at: string }) | undefined
   if (!current || current.status !== 'active' || !await verifyCredentialHash(current.password_hash, input.currentPassword)) {
-    return { ok: false, status: 401, message: 'Не вдалося підтвердити чинний пароль.' }
+    // This is a failed credential check inside an already authenticated request,
+    // not an expired bearer session. Keep the caller's session valid.
+    return { ok: false, status: 400, message: 'Поточний пароль неправильний.' }
   }
   const passwordHash = await hashPassword(nextPassword)
   let open = false
