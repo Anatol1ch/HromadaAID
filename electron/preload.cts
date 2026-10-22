@@ -15,6 +15,16 @@ const api: HromadaAidApi = {
       return () => ipcRenderer.removeListener('auth:state', receive)
     },
   },
+  connection: {
+    getState: () => invoke('connection:get-state'),
+    check: (apiUrl) => invoke('connection:check', apiUrl),
+    save: (apiUrl) => invoke('connection:save', apiUrl),
+    onStateChange: (listener) => {
+      const receive = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state)
+      ipcRenderer.on('connection:state', receive)
+      return () => ipcRenderer.removeListener('connection:state', receive)
+    },
+  },
   users: {
     list: () => invoke('users:list'),
     get: (id) => invoke('users:get', id),

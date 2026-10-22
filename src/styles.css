@@ -651,7 +651,9 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .settings-heading { margin-bottom: 0; }
 .settings-section-nav { display: flex; flex-wrap: wrap; align-items: stretch; gap: 7px; padding: 5px; border: 1px solid #e3eae5; border-radius: var(--radius-card); background: var(--surface-panel); }
 .settings-section-current, .settings-section-future { display: inline-flex; min-height: 42px; align-items: center; gap: 9px; padding: 8px 13px; border: 1px solid transparent; border-radius: var(--radius-control); font-size: 13px; font-weight: 650; }
-.settings-section-current { color: var(--tab-active-text); border-color: var(--tab-active-border); background: var(--tab-active-background); }
+.settings-section-current { color: #617167; background: transparent; cursor: pointer; }
+.settings-section-current:hover { background: #f4f7f4; }
+.settings-section-current.is-selected { color: var(--tab-active-text); border-color: var(--tab-active-border); background: var(--tab-active-background); }
 .settings-section-future { color: #8a9690; }
 .settings-section-future small { margin-left: 2px; color: #929d96; font-size: 10px; font-weight: 500; }
 .settings-account, .settings-security { display: grid; gap: var(--space-4); }
@@ -676,6 +678,32 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .account-password-form .recipient-field .recipient-field-error { color: var(--color-text-error); }
 .settings-form-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 3px; }
 .settings-form-actions > button { min-height: var(--control-height); }
+.server-connection-panel { display: grid; gap: var(--space-4); }
+.server-connection-overview { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 15px 16px; border: 1px solid #e8eee9; border-radius: var(--radius-control); background: #fbfcfb; }
+.server-connection-overview > div:first-child { display: grid; min-width: 0; gap: 5px; }
+.server-connection-overview > div:first-child > span { color: #78877e; font-size: 12px; }
+.server-connection-overview strong { color: #304b39; font-size: 14px; overflow-wrap: anywhere; }
+.server-connection-overview small { color: #7b887f; font-size: 11px; }
+.server-connection-status { display: inline-flex; flex: none; align-items: center; gap: 7px; color: #748177; font-size: 12px; font-weight: 650; }
+.server-connection-status.status-available { color: #38734c; }
+.server-connection-status.status-unavailable { color: #a54e45; }
+.server-connection-panel-message { margin: -6px 0 0; color: #607267; font-size: 12px; line-height: 1.5; }
+.server-connection-panel-message.is-error { color: #a54e45; }
+.server-connection-panel-actions, .server-connection-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.server-connection-actions > div { display: flex; justify-content: flex-end; gap: 9px; }
+.server-connection-form { display: grid; gap: 13px; }
+.server-connection-form input { width: 100%; min-height: var(--control-height); padding: 0 11px; border: 1px solid #c9d5cc; border-radius: var(--radius-control); color: var(--color-text-control); font: inherit; background: var(--surface-card); }
+.server-connection-form input:focus { border-color: var(--border-focus); box-shadow: var(--shadow-focus); outline: 0; }
+.server-connection-form input:read-only { color: #68766d; background: #f5f7f5; }
+.server-connection-hint, .server-connection-current { margin: -7px 0 0; color: #78877e; font-size: 11px; line-height: 1.45; }
+.server-connection-result { display: flex; align-items: flex-start; gap: 7px; margin: 0; font-size: 12px; line-height: 1.45; }
+.server-connection-result svg { flex: none; }
+.server-connection-result.is-success { color: #38734c; }
+.server-connection-result.is-error { color: #a54e45; }
+.server-connection-spin { animation: server-connection-spin 900ms linear infinite; }
+@keyframes server-connection-spin { to { transform: rotate(360deg); } }
+.auth-connection-link { display: inline-flex; align-items: center; justify-content: center; gap: 7px; margin: 16px auto 0; padding: 7px 10px; border: 0; border-radius: var(--radius-control); color: #607267; font: inherit; font-size: 12px; background: transparent; cursor: pointer; }
+.auth-connection-link:hover { color: #365f43; background: #f2f6f2; }
 .change-password-modal .app-modal-header > div { display: grid; grid-template-columns: 38px minmax(0,1fr); column-gap: 12px; align-items: center; }
 .change-password-modal .app-modal-header-icon { grid-column: 1; grid-row: 1 / 3; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 9px; color: #3e7551; background: #edf5ef; }
 .change-password-modal .app-modal-header h2, .change-password-modal .app-modal-header p { grid-column: 2; }
@@ -2017,6 +2045,10 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
   .settings-profile-grid { grid-template-columns: minmax(0,1fr); }
   .settings-profile-roles { grid-column: auto; }
   .settings-section-future { flex-wrap: wrap; }
+  .server-connection-overview { align-items: flex-start; flex-direction: column; }
+  .server-connection-actions { align-items: stretch; flex-direction: column; }
+  .server-connection-actions > div { justify-content: flex-end; }
+  .server-connection-panel-actions { align-items: stretch; flex-direction: column; }
   .overview-analytics .dashboard-panel { padding: 14px; }
   .overview-analytics .overview-month-column > span { font-size: 8px; }
   .overview-analytics .overview-month-chart { gap: 2px; }

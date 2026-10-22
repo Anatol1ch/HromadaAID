@@ -1,8 +1,12 @@
-import { Eye, EyeOff, HeartHandshake, LogIn } from 'lucide-react'
+import { Eye, EyeOff, HeartHandshake, LogIn, Server } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import type { ClientAuthState } from '../../shared/auth-contract'
+import type { ServerConnectionCheckResult, ServerConnectionSaveResult } from '../../shared/api-contract'
+import ServerConnectionDialog from './ServerConnectionDialog'
 
-export default function LoginScreen({ state, onLogin }: { state: ClientAuthState; onLogin: (username: string, password: string) => Promise<{ ok: boolean; message?: string }> }) {
+type ConnectionActions = { getState: () => Promise<import('../../shared/api-contract').ServerConnectionState>; check: (apiUrl: string) => Promise<ServerConnectionCheckResult>; save: (apiUrl: string) => Promise<ServerConnectionSaveResult> }
+
+export default function LoginScreen({ state, onLogin, connectionActions }: { state: ClientAuthState; onLogin: (username: string, password: string) => Promise<{ ok: boolean; message?: string }>; connectionActions: ConnectionActions }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -10,6 +14,7 @@ export default function LoginScreen({ state, onLogin }: { state: ClientAuthState
   const [error, setError] = useState('')
   const [usernameError, setUsernameError] = useState('')
   const [passwordError, setPasswordError] = useState('')
+  const [connectionModalOpen, setConnectionModalOpen] = useState(false)
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (busy) return
@@ -40,6 +45,8 @@ export default function LoginScreen({ state, onLogin }: { state: ClientAuthState
         <label><span>Пароль</span><div className="auth-password"><input id="login-password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" disabled={busy || unavailable} value={password} onChange={(event) => { setPassword(event.target.value); setPasswordError('') }} onBlur={() => setPasswordError(password ? '' : 'Введіть пароль.')} aria-invalid={!!passwordError} aria-describedby={passwordError ? 'login-password-error' : undefined} required/><button type="button" className="icon-button" disabled={busy || unavailable} aria-label={showPassword ? 'Приховати пароль' : 'Показати пароль'} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={18}/> : <Eye size={18}/>}</button></div>{passwordError && <small className="recipient-field-error" id="login-password-error" role="alert">{passwordError}</small>}</label>
         <button type="submit" className="primary-button auth-submit" disabled={busy || unavailable}><LogIn size={18} aria-hidden="true"/>{busy ? 'Входимо…' : 'Увійти'}</button>
       </form>
+      <button type="button" className="auth-connection-link" onClick={() => setConnectionModalOpen(true)}><Server size={16} aria-hidden="true"/>Налаштувати підключення</button>
     </section>
+    {connectionModalOpen && <ServerConnectionDialog onClose={() => setConnectionModalOpen(false)} {...connectionActions} onSaved={() => setConnectionModalOpen(false)}/>}
   </main>
 }

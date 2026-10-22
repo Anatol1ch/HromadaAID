@@ -11,7 +11,16 @@ type HttpClientOptions = { getAccessToken?: () => string | undefined; onUnauthor
 
 /** Main-process HTTP transport. Tokens are obtained only through its private callback. */
 export class HttpClient {
-  constructor(private readonly baseUrl: URL, private readonly timeoutMs = 5_000, private readonly options: HttpClientOptions = {}) {}
+  private baseUrl: URL
+  private generation = 0
+
+  constructor(baseUrl: URL, private readonly timeoutMs = 5_000, private readonly options: HttpClientOptions = {}) { this.baseUrl = new URL(baseUrl.origin) }
+
+  /** Switches the trusted server origin and invalidates responses from the previous connection. */
+  setBaseUrl(baseUrl: URL): void {
+    this.baseUrl = new URL(baseUrl.origin)
+    this.generation += 1
+  }
 
   async getJson<T>(path: string, validator?: JsonValidator<T>, options?: RequestOptions): Promise<T> {
     return this.requestJson('GET', path, undefined, validator, options)
@@ -47,6 +56,8 @@ export class HttpClient {
 
   private async request(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body: unknown, options?: RequestOptions): Promise<{ response: Response; body: unknown }> {
     if (!path.startsWith('/')) throw new HttpClientError('Шлях HTTP API має починатися з «/».')
+    const requestGeneration = this.generation
+    const baseUrl = this.baseUrl
     const authorize = options?.authorize !== false
     const token = authorize ? (options?.accessToken ?? this.options.getAccessToken?.()) : undefined
     if (authorize && !token) throw new HttpClientError('Потрібна чинна сесія.', 401)
@@ -54,7 +65,7 @@ export class HttpClient {
     const diagnosePasswordChange = path === '/auth/change-password' && !!process.env.HROMADA_AID_TEST_DATA_DIR
     if (diagnosePasswordChange) console.info(`[HromadaAID test] POST ${this.baseUrl.origin}/auth/change-password: sending`)
     try {
-      response = await fetch(new URL(path, this.baseUrl), {
+      response = await fetch(new URL(path, baseUrl), {
         method,
         headers: {
           accept: 'application/json',
@@ -65,6 +76,7 @@ export class HttpClient {
         signal: AbortSignal.timeout(this.timeoutMs),
       })
     } catch (error) {
+      this.checkConnectionGeneration(requestGeneration)
       if (diagnosePasswordChange) console.info('[HromadaAID test] password-change: transport error (no confirmed response)')
       if (error instanceof DOMException && error.name === 'TimeoutError') throw new HttpClientError('Сервер не відповів у встановлений час.')
       throw new HttpClientError('Не вдалося підключитися до сервера.')
@@ -72,12 +84,14 @@ export class HttpClient {
 
     if (diagnosePasswordChange) console.info(`[HromadaAID test] password-change: HTTP ${response.status}`)
 
+    this.checkConnectionGeneration(requestGeneration)
     if (authorize && response.status === 401) this.options.onUnauthorized?.(token)
     this.checkRequestSession(authorize, token, options)
     if (response.status === 204) return { response, body: undefined }
     let responseBody: unknown
     try { responseBody = await response.json() }
-    catch { throw new HttpClientError('Сервер повернув некоректну JSON-відповідь.') }
+    catch { this.checkConnectionGeneration(requestGeneration); throw new HttpClientError('Сервер повернув некоректну JSON-відповідь.') }
+    this.checkConnectionGeneration(requestGeneration)
     this.checkRequestSession(authorize, token, options)
     return { response, body: responseBody }
   }
@@ -87,6 +101,10 @@ export class HttpClient {
     if (authorize && options?.accessToken === undefined && token !== this.options.getAccessToken?.()) {
       throw new HttpClientError('Запит попередньої сесії скасовано.', 401)
     }
+  }
+
+  private checkConnectionGeneration(generation: number): void {
+    if (generation !== this.generation) throw new HttpClientError('Запит до попередньої адреси сервера скасовано.')
   }
 
   private responseError(status: number, responseBody: unknown): HttpClientError {

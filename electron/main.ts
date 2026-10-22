@@ -11,8 +11,9 @@ import { registerRecordsIpc } from './records-ipc.js'
 import { registerDeletionIpc } from './deletion-ipc.js'
 import { cleanupGeneratedStatements, registerStatementsIpc } from './statements-ipc.js'
 import { configureIpcSecurity, isTrustedAppUrl, registerRemoteIpcBlockers, trustedIpcMain } from './ipc-security.js'
-import { ElectronRuntimeConfigError, readElectronRuntimeConfig, type ElectronRuntimeConfig } from './runtime-config.js'
+import { ElectronRuntimeConfigError, readElectronRuntimeConfig, readSavedConnectionConfig, validateServerBaseUrl, type ElectronRuntimeConfig } from './runtime-config.js'
 import { HttpClient, HttpClientError } from './http-client.js'
+import { checkServerAddress, saveServerAddress, switchRemoteServer, type ServerConnectionState } from './connection-config.js'
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, CatalogList, DashboardData, DecisionRecord, DecisionSummary, ProgramApproval, RecipientRecord, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from './api-contract.js'
 import { isAnnualAidPlanList, isAnnualPlanEntryList, isAssignmentChangeResult, isAssignmentListResult, isAssignmentRecordList, isAssignmentSaveResult, isBankDetailList, isBankRecordList, isBankSaveResult, isCatalogList, isCatalogOrderResult, isCatalogSaveResult, isDashboardData, isDecisionSaveResult, isDecisionSummaryList, isNullableBankRecord, isNullableDecisionRecord, isNullableRecipientRecord, isProgramApprovalList, isProgramApprovalSaveResult, isRecipientSaveResult, isRecipientSummaryList, isReportSourceRowList, isReportSummary, isStatementListResult } from '../shared/api-contract.js'
 
@@ -27,6 +28,10 @@ let closeDatabase: (() => void) | undefined
 let mainWindow: BrowserWindow | null = null
 let runtimeConfig: ElectronRuntimeConfig | undefined
 let remoteAuth: RemoteAuthSession | undefined
+let remoteHttp: HttpClient | undefined
+let connectionStatus: ServerConnectionState['status'] = 'unknown'
+let connectionMessage: string | undefined
+let savedApiUrl: string | null = null
 const appPageUrl = isDev ? devServerUrl : pathToFileURL(join(currentDirectory, '../../dist/index.html')).href
 configureIpcSecurity(() => mainWindow, appPageUrl)
 
@@ -126,10 +131,82 @@ if (!hasSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     try {
-      runtimeConfig = readElectronRuntimeConfig()
+      const userDataPath = app.getPath('userData')
+      const savedConnection = readSavedConnectionConfig(userDataPath)
+      savedApiUrl = savedConnection.config?.apiUrl ?? null
+      runtimeConfig = readElectronRuntimeConfig(process.env, savedConnection, app.isPackaged)
+      let savingConnection = false
       const publishAuthState = (state: ClientAuthState) => {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('auth:state', state)
       }
+      const connectionLocked = () => Boolean(process.env.HROMADAAID_API_URL?.trim()) || process.env.HROMADAAID_MODE?.trim() === 'local'
+      const connectionState = (): ServerConnectionState => ({
+        mode: runtimeConfig?.mode ?? 'local',
+        apiUrl: runtimeConfig?.mode === 'remote' ? (runtimeConfig.source === 'invalid' ? null : runtimeConfig.apiUrl?.origin ?? savedApiUrl) : savedApiUrl,
+        active: runtimeConfig?.mode === 'remote' && Boolean(runtimeConfig.apiUrl),
+        source: savedApiUrl && runtimeConfig?.source === 'none' ? 'saved' : runtimeConfig?.source ?? 'none',
+        editable: !connectionLocked(),
+        ...(runtimeConfig?.lockedReason ? { lockedReason: runtimeConfig.lockedReason } : {}),
+        status: connectionStatus,
+        ...(connectionMessage || runtimeConfig?.configurationError ? { message: connectionMessage ?? runtimeConfig?.configurationError } : {}),
+      })
+      const publishConnectionState = () => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('connection:state', connectionState())
+      }
+      trustedIpcMain.handle('connection:get-state', async () => connectionState())
+      trustedIpcMain.handle('connection:check', async (_event, value: unknown) => {
+        let normalized: URL
+        try { normalized = validateServerBaseUrl(value) }
+        catch (error) { return { ok: false, message: error instanceof Error ? error.message : 'Некоректна адреса сервера.' } }
+        const activeUrl = runtimeConfig?.mode === 'remote' ? runtimeConfig.apiUrl?.origin : undefined
+        if (activeUrl === normalized.origin || (runtimeConfig?.mode === 'local' && savedApiUrl === normalized.origin)) {
+          connectionStatus = 'checking'
+          connectionMessage = 'Перевірка підключення…'
+          publishConnectionState()
+        }
+        const result = await checkServerAddress(normalized.origin)
+        const currentUrl = runtimeConfig?.mode === 'remote' ? runtimeConfig.apiUrl?.origin : savedApiUrl ?? undefined
+        if (currentUrl === result.apiUrl) {
+          connectionStatus = result.ok ? 'available' : 'unavailable'
+          connectionMessage = result.message
+          publishConnectionState()
+        }
+        return result
+      })
+      trustedIpcMain.handle('connection:save', async (_event, value: unknown) => {
+        const current = connectionState()
+        if (savingConnection) return { ok: false, state: current, message: 'Зачекайте завершення поточної зміни адреси.' }
+        savingConnection = true
+        try {
+        if (!current.editable) return { ok: false, state: current, message: current.lockedReason ?? 'Адресу зафіксовано змінними середовища.' }
+        let normalized: URL
+        try { normalized = validateServerBaseUrl(value) }
+        catch (error) { return { ok: false, state: current, message: error instanceof Error ? error.message : 'Некоректна адреса сервера.' } }
+        if (runtimeConfig?.mode === 'local') {
+          const checked = await checkServerAddress(normalized.origin)
+          if (!checked.ok) return { ok: false, state: current, message: checked.message }
+          try { await saveServerAddress(userDataPath, normalized.origin) }
+          catch { return { ok: false, state: current, message: 'Не вдалося безпечно зберегти адресу сервера.' } }
+          savedApiUrl = normalized.origin
+          connectionStatus = 'available'
+          connectionMessage = 'Адресу збережено. Перезапустіть застосунок, щоб перейти до remote mode.'
+          const state = connectionState()
+          publishConnectionState()
+          return { ok: true, state, message: connectionMessage }
+        }
+
+        if (!remoteHttp || !remoteAuth) return { ok: false, state: current, message: 'Не вдалося підготувати віддалене підключення.' }
+        const switched = await switchRemoteServer(userDataPath, normalized.origin, remoteHttp, remoteAuth, (url) => {
+          runtimeConfig = { mode: 'remote', apiUrl: url, source: 'saved' }
+          savedApiUrl = url.origin
+          connectionStatus = 'available'
+          connectionMessage = 'Сервер доступний.'
+        })
+        if (!switched.ok) return { ok: false, state: connectionState(), message: switched.message }
+        publishConnectionState()
+        return { ok: true, state: connectionState(), ...(switched.message ? { message: switched.message } : {}) }
+        } finally { savingConnection = false }
+      })
       if (runtimeConfig.mode === 'local') {
         const localState = localAuthState()
         trustedIpcMain.handle('auth:get-state', async () => localState)
@@ -153,16 +230,33 @@ if (!hasSingleInstanceLock) {
         registerStatementsIpc(database)
       } else {
         let session: RemoteAuthSession | undefined
-        const http = new HttpClient(runtimeConfig.apiUrl, 5_000, {
+        const http = new HttpClient(runtimeConfig.apiUrl ?? new URL('http://127.0.0.1:1'), 5_000, {
           getAccessToken: () => session?.accessToken,
           onUnauthorized: (token) => { void session?.expired(token) },
         })
-        session = new RemoteAuthSession(app.getPath('userData'), http, publishAuthState)
+        remoteHttp = http
+        session = new RemoteAuthSession(userDataPath, http, publishAuthState)
         remoteAuth = session
         await session.initialize()
+        if (runtimeConfig.configurationError || !runtimeConfig.apiUrl) {
+          connectionStatus = 'unavailable'
+          connectionMessage = runtimeConfig.configurationError ?? 'Налаштуйте адресу сервера, щоб увійти.'
+          session.setUnavailable(connectionMessage)
+        } else {
+          void checkServerAddress(runtimeConfig.apiUrl.origin).then((result) => {
+            if (runtimeConfig?.mode !== 'remote' || runtimeConfig.apiUrl?.origin !== result.apiUrl) return
+            connectionStatus = result.ok ? 'available' : 'unavailable'
+            connectionMessage = result.message
+            publishConnectionState()
+            if (!result.ok && session?.currentState.status !== 'authenticated' && session?.currentState.status !== 'password-change-required') session?.setUnavailable(result.message)
+          })
+        }
         trustedIpcMain.handle('auth:get-state', async () => session.currentState)
-        trustedIpcMain.handle('auth:login', async (_event, username: unknown, password: unknown): Promise<AuthActionResult> =>
-          session.login(typeof username === 'string' ? username : '', typeof password === 'string' ? password : ''))
+        trustedIpcMain.handle('auth:login', async (_event, username: unknown, password: unknown): Promise<AuthActionResult> => {
+          if (savingConnection) return { ok: false, state: session.currentState, message: 'Зачекайте завершення зміни адреси сервера.' }
+          if (!runtimeConfig?.apiUrl) return { ok: false, state: session.currentState, message: runtimeConfig?.configurationError ?? 'Налаштуйте адресу сервера перед входом.' }
+          return session.login(typeof username === 'string' ? username : '', typeof password === 'string' ? password : '')
+        })
         trustedIpcMain.handle('auth:logout', async (): Promise<AuthActionResult> => session.logout())
         trustedIpcMain.handle('auth:change-password', async (_event, currentPassword: unknown, newPassword: unknown): Promise<AuthActionResult> =>
           session.changePassword(typeof currentPassword === 'string' ? currentPassword : '', typeof newPassword === 'string' ? newPassword : ''))

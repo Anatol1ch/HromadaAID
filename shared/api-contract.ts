@@ -288,6 +288,19 @@ export type ManagedUserInput = { username: string; firstName: string | null; las
 export type ManagedUserSaveResult = { ok: true; user: ManagedUser } | { ok: false; reason: 'validation' | 'conflict' | 'not-found'; message: string }
 export type ManagedUserRemoveResult = { ok: true } | { ok: false; reason: 'conflict' | 'not-found'; message: string }
 
+export type ServerConnectionState = {
+  mode: 'local' | 'remote'
+  apiUrl: string | null
+  active: boolean
+  source: 'environment' | 'saved' | 'none' | 'invalid'
+  editable: boolean
+  lockedReason?: string
+  status: 'unknown' | 'checking' | 'available' | 'unavailable'
+  message?: string
+}
+export type ServerConnectionCheckResult = { ok: true; apiUrl: string; message: string } | { ok: false; apiUrl?: string; message: string }
+export type ServerConnectionSaveResult = { ok: true; state: ServerConnectionState; message?: string } | { ok: false; state: ServerConnectionState; message: string }
+
 export type HromadaAidApi = {
   appName: string; platform: string
   auth: {
@@ -296,6 +309,12 @@ export type HromadaAidApi = {
     logout: () => Promise<AuthActionResult>
     changePassword: (currentPassword: string, newPassword: string) => Promise<AuthActionResult>
     onStateChange: (listener: (state: ClientAuthState) => void) => () => void
+  }
+  connection: {
+    getState: () => Promise<ServerConnectionState>
+    check: (apiUrl: string) => Promise<ServerConnectionCheckResult>
+    save: (apiUrl: string) => Promise<ServerConnectionSaveResult>
+    onStateChange: (listener: (state: ServerConnectionState) => void) => () => void
   }
   users: {
     list: () => Promise<ManagedUser[]>

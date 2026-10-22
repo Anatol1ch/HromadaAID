@@ -1,24 +1,53 @@
-import { CircleUserRound, Info, KeyRound, Server } from 'lucide-react'
-import { useState } from 'react'
+import { CircleCheck, CircleUserRound, Info, KeyRound, Server, Wifi } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import type { AuthenticatedUser } from '../shared/auth-contract'
+import type { ServerConnectionCheckResult, ServerConnectionSaveResult, ServerConnectionState } from '../shared/api-contract'
 import { USER_ROLE_LABELS } from '../shared/authorization'
 import ChangePasswordForm from './components/ChangePasswordForm'
 import Modal from './components/Modal'
+import ServerConnectionDialog from './components/ServerConnectionDialog'
 
-export default function SettingsPage({ user, onChangePassword }: { user: AuthenticatedUser | null; onChangePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; message?: string }> }) {
+type ConnectionActions = { getState: () => Promise<ServerConnectionState>; check: (apiUrl: string) => Promise<ServerConnectionCheckResult>; save: (apiUrl: string) => Promise<ServerConnectionSaveResult> }
+
+export default function SettingsPage({ user, onChangePassword, connectionActions }: { user: AuthenticatedUser | null; onChangePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; message?: string }>; connectionActions: ConnectionActions }) {
   const [passwordModalOpen, setPasswordModalOpen] = useState(false)
   const [passwordBusy, setPasswordBusy] = useState(false)
+  const [activeSection, setActiveSection] = useState<'account' | 'connection'>('account')
+  const [connectionModalOpen, setConnectionModalOpen] = useState(false)
+  const [connection, setConnection] = useState<ServerConnectionState | null>(null)
+  const [connectionMessage, setConnectionMessage] = useState('')
+  const [connectionBusy, setConnectionBusy] = useState(false)
   const structuredName = [user?.firstName?.trim(), user?.lastName?.trim()].filter(Boolean).join(' ')
   const displayName = structuredName || user?.displayName?.trim() || user?.username || 'Локальний режим'
   const roles = user?.roles.map(role => USER_ROLE_LABELS[role]).join(', ') || 'Автономна робота'
 
+  useEffect(() => {
+    let active = true
+    void connectionActions.getState().then(value => { if (active) setConnection(value) }).catch(() => { if (active) setConnectionMessage('Не вдалося прочитати стан підключення.') })
+    const unsubscribe = window.hromadaAid.connection.onStateChange(value => { if (active) setConnection(value) })
+    return () => { active = false; unsubscribe() }
+  }, [])
+
+  const checkCurrentConnection = async () => {
+    if (connectionBusy || !connection?.apiUrl) return
+    setConnectionBusy(true); setConnectionMessage('Перевірка підключення…')
+    try {
+      const result = await connectionActions.check(connection.apiUrl)
+      setConnectionMessage(result.message)
+      const latest = await connectionActions.getState()
+      setConnection(latest)
+    } catch { setConnectionMessage('Не вдалося підключитися до сервера.') }
+    finally { setConnectionBusy(false) }
+  }
+
   return <div className="settings-page">
     <header className="page-heading settings-heading"><div><div className="eyebrow">СИСТЕМА</div><h1>Налаштування</h1><p className="subtitle">Керування обліковим записом і параметрами застосунку.</p></div></header>
     <nav className="settings-section-nav" aria-label="Розділи налаштувань">
-      <span className="settings-section-current" aria-current="page"><CircleUserRound size={17} aria-hidden="true"/>Мій обліковий запис</span>
-      <span className="settings-section-future"><Server size={16} aria-hidden="true"/><span>Підключення до сервера</span><small>Майбутня функція</small></span>
+      <button type="button" className={`settings-section-current${activeSection === 'account' ? ' is-selected' : ''}`} aria-current={activeSection === 'account' ? 'page' : undefined} onClick={() => setActiveSection('account')}><CircleUserRound size={17} aria-hidden="true"/>Мій обліковий запис</button>
+      <button type="button" className={`settings-section-current${activeSection === 'connection' ? ' is-selected' : ''}`} aria-current={activeSection === 'connection' ? 'page' : undefined} onClick={() => setActiveSection('connection')}><Server size={16} aria-hidden="true"/><span>Підключення до сервера</span></button>
       <span className="settings-section-future"><Info size={16} aria-hidden="true"/><span>Про застосунок</span><small>Майбутня функція</small></span>
     </nav>
+    {activeSection === 'account' && <>
     <section className="dashboard-panel settings-account" aria-labelledby="settings-account-title">
       <div className="settings-card-heading"><span className="settings-icon"><CircleUserRound size={20} aria-hidden="true"/></span><div><h2 id="settings-account-title">Мій обліковий запис</h2><p>Ваші дані профілю та призначені ролі.</p></div></div>
       <dl className="settings-profile-grid">
@@ -35,5 +64,14 @@ export default function SettingsPage({ user, onChangePassword }: { user: Authent
     {user && passwordModalOpen && <Modal title="Зміна пароля" description="Після успішної зміни потрібно увійти повторно." headerIcon={<KeyRound size={21} aria-hidden="true"/>} onClose={() => setPasswordModalOpen(false)} busy={passwordBusy} size="compact" className="change-password-modal">
       <ChangePasswordForm onChangePassword={onChangePassword} onBusyChange={setPasswordBusy} onCancel={() => setPasswordModalOpen(false)}/>
     </Modal>}
+    </>}
+    {activeSection === 'connection' && <section className="dashboard-panel server-connection-panel" aria-labelledby="server-connection-title">
+      <div className="settings-card-heading"><span className="settings-icon"><Server size={19} aria-hidden="true"/></span><div><h2 id="server-connection-title">Підключення до сервера</h2><p>Адреса застосовується лише на цьому комп’ютері.</p></div></div>
+      <div className="server-connection-overview"><div><span>Поточна адреса</span><strong>{connection?.apiUrl ?? 'Не налаштовано'}</strong><small>{connection?.active ? 'Використовується в цьому запуску.' : connection?.apiUrl ? 'Збережена адреса; наразі активний local mode.' : 'Стан підключення визначається перевіркою сервера.'}</small></div><div className={`server-connection-status status-${connection?.status ?? 'unknown'}`} role="status">{connection?.status === 'available' ? <><CircleCheck size={16}/>Сервер доступний</> : connection?.status === 'checking' || connectionBusy ? <><Wifi size={16}/>Перевірка підключення…</> : connection?.status === 'unavailable' ? 'Не вдалося підключитися до сервера' : 'Підключення не перевірено'}</div></div>
+      {(connectionMessage || connection?.message) && <p className={`server-connection-panel-message${connection?.status === 'unavailable' ? ' is-error' : ''}`} role="status">{connectionMessage || connection?.message}</p>}
+      {connection?.lockedReason && <p className="server-connection-panel-message">{connection.lockedReason}</p>}
+      <div className="server-connection-panel-actions"><button type="button" className="secondary-button" disabled={connectionBusy || !connection?.apiUrl} onClick={() => void checkCurrentConnection()}><Wifi size={17} aria-hidden="true"/>Перевірити з'єднання</button><button type="button" className="primary-button" disabled={!connection?.editable} onClick={() => setConnectionModalOpen(true)}>Змінити адресу</button></div>
+    </section>}
+    {connectionModalOpen && <ServerConnectionDialog onClose={() => setConnectionModalOpen(false)} {...connectionActions} onSaved={(state, message) => { setConnection(state); setConnectionMessage(message ?? state.message ?? 'Адресу сервера збережено.') }} />}
   </div>
 }

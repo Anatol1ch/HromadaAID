@@ -33,12 +33,37 @@ const nav = [
 ]
 function App() {
   const [auth, setAuth] = useState<ClientAuthState | null>(null)
+  const connectionActions = {
+    getState: () => window.hromadaAid.connection.getState(),
+    check: (apiUrl: string) => window.hromadaAid.connection.check(apiUrl),
+    save: (apiUrl: string) => window.hromadaAid.connection.save(apiUrl),
+  }
   useEffect(() => {
     let active = true
     let receivedEvent = false
-    void window.hromadaAid.auth.getState().then((state) => { if (active && !receivedEvent) setAuth(state) }, () => { if (active && !receivedEvent) setAuth({ mode: 'remote', status: 'unavailable', user: null, message: 'Не вдалося отримати стан авторизації.' }) })
+    void window.hromadaAid.auth.getState().then(async (state) => {
+      if (!active || receivedEvent) return
+      if (state.mode === 'remote' && (state.status === 'unavailable' || state.status === 'unauthenticated')) {
+        try {
+          const connection = await window.hromadaAid.connection.getState()
+          if (!active || receivedEvent) return
+          if (connection.status === 'available') { setAuth({ mode: 'remote', status: 'unauthenticated', user: null }); return }
+          if (connection.status === 'unavailable') { setAuth({ mode: 'remote', status: 'unavailable', user: null, message: connection.message ?? state.message }); return }
+        } catch { /* Keep the auth state when no connection snapshot is available. */ }
+      }
+      if (active && !receivedEvent) setAuth(state)
+    }, () => { if (active && !receivedEvent) setAuth({ mode: 'remote', status: 'unavailable', user: null, message: 'Не вдалося отримати стан авторизації.' }) })
     const unsubscribe = window.hromadaAid.auth.onStateChange((state) => { receivedEvent = true; if (active) setAuth(state) })
-    return () => { active = false; unsubscribe() }
+    const unsubscribeConnection = window.hromadaAid.connection.onStateChange((connection) => {
+      if (!active || connection.mode !== 'remote') return
+      setAuth(current => {
+        if (!current || current.mode !== 'remote' || current.status === 'authenticated' || current.status === 'password-change-required') return current
+        if (connection.status === 'available' && current.status === 'unavailable') return { mode: 'remote', status: 'unauthenticated', user: null }
+        if (connection.status === 'unavailable') return { mode: 'remote', status: 'unavailable', user: null, message: connection.message ?? 'Не вдалося підключитися до сервера.' }
+        return current
+      })
+    })
+    return () => { active = false; unsubscribe(); unsubscribeConnection() }
   }, [])
   const login = async (username: string, password: string) => {
     const result = await window.hromadaAid.auth.login(username, password)
@@ -52,11 +77,11 @@ function App() {
   }
   if (!auth) return <StartupScreen/>
   if (auth.mode === 'remote' && auth.status === 'password-change-required') return <TemporaryPasswordScreen state={auth} onChangePassword={changePassword}/>
-  if (auth.mode === 'remote' && auth.status !== 'authenticated') return <LoginScreen state={auth} onLogin={login}/>
-  return <Workspace key={auth.mode === 'remote' ? auth.user.id : 'local'} auth={auth} onChangePassword={changePassword}/>
+  if (auth.mode === 'remote' && auth.status !== 'authenticated') return <LoginScreen state={auth} onLogin={login} connectionActions={connectionActions}/>
+  return <Workspace key={auth.mode === 'remote' ? auth.user.id : 'local'} auth={auth} onChangePassword={changePassword} connectionActions={connectionActions}/>
 }
 
-function Workspace({ auth, onChangePassword }: { auth: Extract<ClientAuthState, { status: 'authenticated' }>; onChangePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; message?: string }> }) {
+function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extract<ClientAuthState, { status: 'authenticated' }>; onChangePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; message?: string }>; connectionActions: { getState: () => Promise<import('../shared/api-contract').ServerConnectionState>; check: (apiUrl: string) => Promise<import('../shared/api-contract').ServerConnectionCheckResult>; save: (apiUrl: string) => Promise<import('../shared/api-contract').ServerConnectionSaveResult> } }) {
   const [activeNav, setActiveNav] = useState('Головна')
   const [createAssignment, setCreateAssignment] = useState(false)
   const [notice, setNotice] = useState('')
@@ -118,7 +143,7 @@ function Workspace({ auth, onChangePassword }: { auth: Extract<ClientAuthState, 
           activeNav === 'Реєстр допомог' ? <AidRegistry createOnOpen={createAssignment}/> :
           activeNav === 'Формування відомостей' ? <StatementFormation/> :
           activeNav === 'Довідники' ? <Dictionaries allowedSections={dictionarySections} onAccessDenied={showAccessDenied} canManageCatalogs={can('catalogs.manage')} canManagePlans={can('planning.manage')} canManageDecisions={can('decisions.manage')} canManagePersonal={can('recipients.manage') || can('banks.manage')}/> :
-          activeNav === 'Огляд' ? <Dashboard/> : activeNav === 'Користувачі' && auth.mode === 'remote' ? <UsersAdmin currentUserId={auth.user.id}/> : activeNav === 'Налаштування' ? <SettingsPage user={user} onChangePassword={onChangePassword}/> : <Reports/>}</div>
+          activeNav === 'Огляд' ? <Dashboard/> : activeNav === 'Користувачі' && auth.mode === 'remote' ? <UsersAdmin currentUserId={auth.user.id}/> : activeNav === 'Налаштування' ? <SettingsPage user={user} onChangePassword={onChangePassword} connectionActions={connectionActions}/> : <Reports/>}</div>
       </div>
     </main>
     {accessDeniedRevision > 0 && <AccessDeniedToast key={accessDeniedRevision} onClose={closeAccessDenied}/>}
