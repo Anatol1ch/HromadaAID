@@ -1,5 +1,8 @@
 import { cleanupGeneratedReports, registerReportExportIpc } from './report-export-ipc.js'
-import { app, BrowserWindow, dialog, screen } from 'electron'
+import { app, BrowserWindow, dialog, screen, safeStorage, shell } from 'electron'
+import { RemoteBackupClient } from './backup-client.js'
+import { BackupInstallationIdentity } from './backup-storage.js'
+import { isBackupInstallation, isBackupInstallationList } from '../shared/backup-contract.js'
 import { RemoteAuthSession, localAuthState } from './auth-session.js'
 import type { AuthActionResult, ClientAuthState } from '../shared/auth-contract.js'
 import { dirname, join, resolve } from 'node:path'
@@ -29,6 +32,7 @@ let mainWindow: BrowserWindow | null = null
 let runtimeConfig: ElectronRuntimeConfig | undefined
 let remoteAuth: RemoteAuthSession | undefined
 let remoteHttp: HttpClient | undefined
+let remoteBackup: RemoteBackupClient | undefined
 let connectionStatus: ServerConnectionState['status'] = 'unknown'
 let connectionMessage: string | undefined
 let savedApiUrl: string | null = null
@@ -138,8 +142,26 @@ if (!hasSingleInstanceLock) {
       trustedIpcMain.handle('app:get-version', async () => app.getVersion())
       let savingConnection = false
       const publishAuthState = (state: ClientAuthState) => {
+        remoteBackup?.authChanged(state)
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('auth:state', state)
       }
+      trustedIpcMain.handle('backups:get-state', async () => remoteBackup?.currentState ?? { status: 'local' })
+      trustedIpcMain.handle('backups:refresh', async () => { remoteBackup?.wake(); return remoteBackup?.currentState ?? { status: 'local' } })
+      trustedIpcMain.handle('backups:open-folder', async () => {
+        if (remoteAuth?.currentState.status !== 'authenticated' || !remoteBackup?.archiveDirectory) return { ok: false, message: 'Папка копій поки недоступна.' }
+        const error = await shell.openPath(remoteBackup.archiveDirectory)
+        return error ? { ok: false, message: 'Не вдалося відкрити папку резервних копій.' } : { ok: true }
+      })
+      const backupAdminHttp = () => {
+        const state = remoteAuth?.currentState
+        if (!remoteHttp || state?.status !== 'authenticated' || !state.user?.permissions.includes('backups.manage')) throw new Error('Керування комп’ютерами доступне лише адміністратору у віддаленому режимі.')
+        return remoteHttp
+      }
+      trustedIpcMain.handle('backups:list-computers', async () => backupAdminHttp().getJson('/api/backup-clients', isBackupInstallationList))
+      trustedIpcMain.handle('backups:set-allowed', async (_event, id: unknown, allowed: unknown, expectedUpdatedAt: unknown) => {
+        if (typeof id !== 'string' || !/^[a-f0-9-]{36}$/.test(id) || typeof allowed !== 'boolean' || typeof expectedUpdatedAt !== 'string') throw new Error('Некоректні дані дозволу.')
+        return backupAdminHttp().putJson(`/api/backup-clients/${id}`, { allowed, expectedUpdatedAt }, isBackupInstallation)
+      })
       const connectionLocked = () => Boolean(process.env.HROMADAAID_API_URL?.trim()) || process.env.HROMADAAID_MODE?.trim() === 'local'
       const connectionState = (): ServerConnectionState => ({
         mode: runtimeConfig?.mode ?? 'local',
@@ -171,6 +193,7 @@ if (!hasSingleInstanceLock) {
           connectionStatus = result.ok ? 'available' : 'unavailable'
           connectionMessage = result.message
           publishConnectionState()
+          if (result.ok) remoteBackup?.wake()
         }
         return result
       })
@@ -238,6 +261,11 @@ if (!hasSingleInstanceLock) {
         remoteHttp = http
         session = new RemoteAuthSession(userDataPath, http, publishAuthState)
         remoteAuth = session
+        remoteBackup = new RemoteBackupClient(http, new BackupInstallationIdentity(join(userDataPath, 'backup-identity'), {
+          available: () => process.platform === 'win32' && safeStorage.isEncryptionAvailable(),
+          encrypt: value => safeStorage.encryptString(value),
+          decrypt: value => safeStorage.decryptString(value),
+        }), join(userDataPath, 'client-backups'))
         await session.initialize()
         if (runtimeConfig.configurationError || !runtimeConfig.apiUrl) {
           connectionStatus = 'unavailable'
@@ -402,7 +430,7 @@ if (!hasSingleInstanceLock) {
     shutdownStarted = true
     const cleanup = runtimeConfig?.mode === 'local'
       ? cleanupGeneratedReports().then(() => cleanupGeneratedStatements())
-      : remoteAuth?.close() ?? Promise.resolve()
+      : Promise.all([remoteBackup?.stop(), remoteAuth?.close()]).then(() => undefined)
     void cleanup.catch(() => {
       console.warn('[HromadaAid] Частину тимчасових документів буде перевірено під час наступного запуску.')
     }).finally(() => {

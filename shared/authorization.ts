@@ -66,6 +66,7 @@ export const PERMISSIONS = [
   'reports.export',
   'protected_entities.delete',
   'users.manage',
+  'backups.manage',
 ] as const
 
 export type Permission = typeof PERMISSIONS[number]

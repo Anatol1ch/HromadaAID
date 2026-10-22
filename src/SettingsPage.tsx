@@ -1,4 +1,4 @@
-import { CircleCheck, CircleUserRound, Code2, Info, KeyRound, MapPin, Server, Wifi } from 'lucide-react'
+import { CircleCheck, CircleUserRound, Code2, HardDriveDownload, Info, KeyRound, MapPin, Server, Wifi } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { AuthenticatedUser } from '../shared/auth-contract'
 import type { ServerConnectionCheckResult, ServerConnectionSaveResult, ServerConnectionState } from '../shared/api-contract'
@@ -7,13 +7,14 @@ import hromadaAidLogo from '../assets/hromadaaid.svg'
 import ChangePasswordForm from './components/ChangePasswordForm'
 import Modal from './components/Modal'
 import ServerConnectionDialog from './components/ServerConnectionDialog'
+import BackupSettings from './BackupSettings'
 
 type ConnectionActions = { getState: () => Promise<ServerConnectionState>; check: (apiUrl: string) => Promise<ServerConnectionCheckResult>; save: (apiUrl: string) => Promise<ServerConnectionSaveResult> }
 
 export default function SettingsPage({ user, onChangePassword, connectionActions }: { user: AuthenticatedUser | null; onChangePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; message?: string }>; connectionActions: ConnectionActions }) {
   const [passwordModalOpen, setPasswordModalOpen] = useState(false)
   const [passwordBusy, setPasswordBusy] = useState(false)
-  const [activeSection, setActiveSection] = useState<'account' | 'connection' | 'about'>('account')
+  const [activeSection, setActiveSection] = useState<'account' | 'connection' | 'about' | 'backup'>('account')
   const [connectionModalOpen, setConnectionModalOpen] = useState(false)
   const [connection, setConnection] = useState<ServerConnectionState | null>(null)
   const [connectionMessage, setConnectionMessage] = useState('')
@@ -49,7 +50,9 @@ export default function SettingsPage({ user, onChangePassword, connectionActions
       <button type="button" className={`settings-section-current${activeSection === 'account' ? ' is-selected' : ''}`} aria-current={activeSection === 'account' ? 'page' : undefined} onClick={() => setActiveSection('account')}><CircleUserRound size={17} aria-hidden="true"/>Мій обліковий запис</button>
       <button type="button" className={`settings-section-current${activeSection === 'connection' ? ' is-selected' : ''}`} aria-current={activeSection === 'connection' ? 'page' : undefined} onClick={() => setActiveSection('connection')}><Server size={16} aria-hidden="true"/><span>Підключення до сервера</span></button>
       <button type="button" className={`settings-section-current${activeSection === 'about' ? ' is-selected' : ''}`} aria-current={activeSection === 'about' ? 'page' : undefined} onClick={() => setActiveSection('about')}><Info size={16} aria-hidden="true"/><span>Про застосунок</span></button>
+      <button type="button" className={`settings-section-current${activeSection === 'backup' ? ' is-selected' : ''}`} aria-current={activeSection === 'backup' ? 'page' : undefined} onClick={() => setActiveSection('backup')}><HardDriveDownload size={16} aria-hidden="true"/><span>Резервне копіювання</span></button>
     </nav>
+    {activeSection === 'backup' && <BackupSettings user={user}/>}
     {activeSection === 'account' && <>
     <section className="dashboard-panel settings-account" aria-labelledby="settings-account-title">
       <div className="settings-card-heading"><span className="settings-icon"><CircleUserRound size={20} aria-hidden="true"/></span><div><h2 id="settings-account-title">Мій обліковий запис</h2><p>Ваші дані профілю та призначені ролі.</p></div></div>

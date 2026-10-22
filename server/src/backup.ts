@@ -1,5 +1,5 @@
-import { execFileSync } from 'node:child_process'
-import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { securePrivateDirectory as secureBackupDirectory } from '../../electron/protected-directory.js'
+import { readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { backup, DatabaseSync } from 'node:sqlite'
@@ -7,12 +7,11 @@ import { backup, DatabaseSync } from 'node:sqlite'
 const backupFilePattern = /^hromada-aid-daily-(\d{4}-\d{2}-\d{2})-created-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3})-([a-f\d-]+)\.sqlite$/
 const backupPartialPattern = /^hromada-aid-daily-\d{4}-\d{2}-\d{2}-created-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}-[a-f\d-]+\.sqlite\.partial$/
 const retainedBackupCount = 14
-const maxPendingBackupBytes = 20 * 1024 * 1024 * 1024
 const maxBackupAttempts = 3
 const retryDelayMs = 5 * 60 * 1000
 
 export type BackupLogger = { error: (message: string) => void; warn: (message: string) => void }
-export type BackupResult = { status: 'created' | 'already-exists' | 'already-created-today' | 'busy' | 'pending-storage-limit'; path?: string }
+export type BackupResult = { status: 'created' | 'already-exists' | 'already-created-today' | 'busy'; path?: string }
 
 export function localDateKey(date: Date): string {
   const year = date.getFullYear().toString().padStart(4, '0')
@@ -52,33 +51,13 @@ export function listDailyBackups(directory: string): { name: string; slotDate: s
   })
 }
 
-export function secureBackupDirectory(directory: string): void {
-  mkdirSync(directory, { recursive: true, mode: 0o700 })
-  if (process.platform !== 'win32') {
-    chmodSync(directory, 0o700)
-    return
-  }
-
-  const whoami = execFileSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
-  const sid = whoami.match(/\bS-\d-(?:\d+-)+\d+\b/)?.[0]
-  if (!sid) throw new Error('Не вдалося визначити власника каталогу резервних копій.')
-  execFileSync('icacls.exe', [
-    directory,
-    '/inheritance:r',
-    '/grant:r',
-    `*${sid}:(OI)(CI)F`,
-    '*S-1-5-18:(OI)(CI)F',
-    '*S-1-5-32-544:(OI)(CI)F',
-    '/T',
-    '/C',
-  ], { windowsHide: true, stdio: 'ignore' })
-}
+export { securePrivateDirectory as secureBackupDirectory } from '../../electron/protected-directory.js'
 
 export class SqliteBackupService {
   private busy = false
   private preparedDirectory = false
 
-  constructor(private readonly database: DatabaseSync, readonly directory: string, private readonly logger: BackupLogger, private readonly isPendingUpload: (fileName: string) => boolean = () => false) {
+  constructor(private readonly database: DatabaseSync, readonly directory: string, private readonly logger: BackupLogger) {
     this.directory = resolve(directory)
   }
 
@@ -89,13 +68,6 @@ export class SqliteBackupService {
     try {
       this.prepareDirectory()
       const currentBackups = listDailyBackups(this.directory)
-      const pendingBytes = currentBackups.filter((file) => this.isPendingUpload(file.name)).reduce((total, file) => {
-        try { return total + statSync(file.path).size } catch { return total }
-      }, 0)
-      if (pendingBytes >= maxPendingBackupBytes) {
-        this.logger.error('Досягнуто ліміт 20 ГіБ для локальних копій, що очікують Google Drive. Копії не видалено; нове резервування призупинено до звільнення місця або відновлення синхронізації.')
-        return { status: 'pending-storage-limit' }
-      }
       if (currentBackups.some((file) => file.slotDate === slotDate)) return { status: 'already-exists' }
       if (currentBackups.some((file) => file.createdAt.slice(0, 10) === localDateKey(createdAt))) return { status: 'already-created-today' }
 
@@ -123,15 +95,6 @@ export class SqliteBackupService {
 
       renameSync(partialPath, finalPath)
       partialPath = undefined
-      if (this.isPendingUpload(fileName)) {
-        const pendingAfterCreate = listDailyBackups(this.directory).filter((file) => this.isPendingUpload(file.name))
-        const pendingBytesAfterCreate = pendingAfterCreate.reduce((total, file) => {
-          try { return total + statSync(file.path).size } catch { return total }
-        }, 0)
-        if (pendingBytesAfterCreate >= maxPendingBackupBytes) {
-          this.logger.error('Локальні копії, що очікують Google Drive, досягли ліміту 20 ГіБ. Архіви збережено; нове резервування призупиниться до звільнення місця або відновлення синхронізації.')
-        }
-      }
       try { this.pruneOldBackups() }
       catch { this.logger.warn('Не вдалося завершити очищення застарілих резервних копій.') }
       return { status: 'created', path: finalPath }
@@ -162,7 +125,7 @@ export class SqliteBackupService {
     const files = listDailyBackups(this.directory).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     const retained = new Set(files.slice(0, retainedBackupCount).map((file) => file.name))
     for (const stale of files) {
-      if (retained.has(stale.name) || this.isPendingUpload(stale.name)) continue
+      if (retained.has(stale.name)) continue
       try { rmSync(stale.path, { force: true }) }
       catch { this.logger.warn('Не вдалося видалити застарілу резервну копію.') }
     }
@@ -196,7 +159,6 @@ export function startDailyBackupScheduler(service: SqliteBackupService, logger: 
     for (let attempt = 1; attempt <= maxBackupAttempts && !stopped; attempt++) {
       try {
         const result = await service.createDailyBackup(slotDate, now())
-        if (result.status === 'pending-storage-limit') return
         if (result.status === 'created' && result.path) options.onBackupCreated?.(result.path)
         return
       } catch {

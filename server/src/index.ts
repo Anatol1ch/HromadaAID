@@ -1,63 +1,44 @@
 import { createApp } from './app.js'
 import { SqliteBackupService, startDailyBackupScheduler } from './backup.js'
-import { DriveSecretsStore, type DriveSecrets } from './backup-crypto.js'
+import { BackupKeyStore, decodeRecoveryKey } from './backup-crypto.js'
+import { BackupArchives } from './backup-archives.js'
 import { readServerConfig } from './config.js'
 import { openServerDatabase } from './database.js'
-import { createDriveClient, DriveSyncStateStore, GoogleDriveBackupSync } from './google-drive.js'
 
 async function start() {
   const config = readServerConfig()
   const database = openServerDatabase(config.databasePath)
-  const app = createApp(database)
-  let backupScheduler: ReturnType<typeof startDailyBackupScheduler> | undefined
-  let driveSync: GoogleDriveBackupSync | undefined
+  let key: Buffer | undefined
+  try { const saved = new BackupKeyStore(config.backupDirectory).load(); if (saved) key = decodeRecoveryKey(saved.encryptionKey) } catch { /* Local SQLite backups remain independent. */ }
+  const archives = new BackupArchives(config.backupDirectory, () => {
+    if (!key) throw new Error('Налаштуйте серверний ключ резервування.')
+    return key
+  })
+  const app = createApp(database, archives)
+  let scheduler: ReturnType<typeof startDailyBackupScheduler> | undefined
   let stopping = false
-
   const stop = async (signal: string) => {
     if (stopping) return
     stopping = true
     app.log.info({ signal }, 'Завершуємо HromadaAID API')
-    try { await app.close() } finally { await driveSync?.stop(); await backupScheduler?.stop(); database.close() }
+    try { await app.close() } finally { await scheduler?.stop(); await archives.stop(); database.close() }
   }
-
   process.once('SIGINT', () => { void stop('SIGINT') })
   process.once('SIGTERM', () => { void stop('SIGTERM') })
-
   try {
     await app.listen({ host: config.host, port: config.port })
-    const logger = {
-      error: (message: string) => app.log.error(message),
-      warn: (message: string) => app.log.warn(message),
-    }
-    const secretsStore = new DriveSecretsStore(config.backupDirectory)
-    let secrets: DriveSecrets | null = null
-    try { secrets = secretsStore.load() }
-    catch { app.log.error('Не вдалося відкрити захищені параметри Google Drive; локальне резервування продовжується.') }
-    let syncState: DriveSyncStateStore | undefined
-    let driveClient: ReturnType<typeof createDriveClient> = null
-    if (secrets) {
-      driveClient = createDriveClient(secrets)
-      if (!driveClient) app.log.warn('Резервні копії очікують синхронізації: не задано OAuth client ID Google Drive.')
-      else {
-        syncState = new DriveSyncStateStore(config.backupDirectory)
-        try { syncState.load() }
-        catch { app.log.warn('Стан синхронізації пошкоджений; повторні завантаження будуть звірені з Google Drive.') }
-        driveSync = new GoogleDriveBackupSync(config.backupDirectory, secrets, driveClient, syncState, logger)
-        driveSync.start()
-      }
-    }
-    const backupService = new SqliteBackupService(database, config.backupDirectory, {
-      ...logger,
-    }, (fileName) => Boolean(secretsStore.exists() && (!syncState || !syncState.isUploaded(fileName))))
-    backupScheduler = startDailyBackupScheduler(backupService, logger, { onBackupCreated: () => driveSync?.wake() })
-    app.log.info({ host: config.host, port: config.port, database: config.databasePath }, 'HromadaAID API готовий')
-  } catch (error) {
-    app.log.error(error, 'Не вдалося запустити HromadaAID API')
+    const logger = { error: (message: string) => app.log.error(message), warn: (message: string) => app.log.warn(message) }
+    if (!key) logger.warn('Ключ розподіленого резервування не налаштовано. Виконайте server:backup-key-setup; локальні копії створюються незалежно.')
+    const service = new SqliteBackupService(database, config.backupDirectory, logger)
+    scheduler = startDailyBackupScheduler(service, logger, { onBackupCreated: () => { if (key) void archives.list().catch(() => logger.error('Не вдалося підготувати зашифровані резервні архіви.')) } })
+    app.log.info({ host: config.host, port: config.port }, 'HromadaAID API готовий')
+  } catch {
+    app.log.error('Не вдалося запустити HromadaAID API')
     await app.close().catch(() => undefined)
-    await backupScheduler?.stop()
+    await scheduler?.stop()
+    await archives.stop()
     database.close()
     process.exitCode = 1
   }
 }
-
 void start()

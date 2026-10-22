@@ -25,6 +25,8 @@ import { changePassword, login, logout } from './auth.js'
 import { requireAuthenticated } from './auth-http.js'
 import { currentApiSession, installApiAuthorization } from './api-authorization.js'
 import { LoginRateLimiter } from './login-rate-limit.js'
+import { registerBackupRoutes } from './backup-http.js'
+import type { BackupArchives } from './backup-archives.js'
 import { createManagedUser, getManagedUser, listManagedUsers, removeManagedUser, resetManagedUserPassword, setManagedUserStatus, updateManagedUser } from './user-admin.js'
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -40,7 +42,7 @@ function requestsPaidStatus(value: unknown): boolean {
   return isRecord(value) && value.status === 'Виплачено'
 }
 
-export function createApp(database: DatabaseSync): FastifyInstance {
+export function createApp(database: DatabaseSync, backupArchives?: BackupArchives): FastifyInstance {
   const app = Fastify({ logger: true })
   const loginRateLimiter = new LoginRateLimiter()
 
@@ -91,6 +93,7 @@ export function createApp(database: DatabaseSync): FastifyInstance {
   })
 
   installApiAuthorization(app, database)
+  registerBackupRoutes(app, database, backupArchives)
 
   app.get('/api/users', async () => listManagedUsers(database))
   app.get<{ Params: { id: string } }>('/api/users/:id', async (request) => getManagedUser(database, request.params.id))

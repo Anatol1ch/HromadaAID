@@ -405,6 +405,20 @@ const migrations: Migration[] = [{
     ALTER TABLE users ADD COLUMN first_name TEXT CHECK(first_name IS NULL OR length(trim(first_name)) BETWEEN 1 AND 100);
     ALTER TABLE users ADD COLUMN last_name TEXT CHECK(last_name IS NULL OR length(trim(last_name)) BETWEEN 1 AND 100);
   `,
+}, {
+  version: 28,
+  sql: `
+    CREATE TABLE backup_installations (
+      id TEXT PRIMARY KEY,
+      credential_hash TEXT NOT NULL CHECK(length(credential_hash)=64),
+      computer_name TEXT NOT NULL CHECK(length(computer_name) BETWEEN 1 AND 100),
+      backup_allowed INTEGER NOT NULL DEFAULT 0 CHECK(backup_allowed IN (0,1)),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      last_backup_at TEXT
+    );
+  `,
 }]
 
 const maximumSupportedSchemaVersion = Math.max(...migrations.map(({ version }) => version))

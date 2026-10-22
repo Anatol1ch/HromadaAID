@@ -12,8 +12,9 @@
     "server:build": "tsc -p server/tsconfig.json",
     "server:start": "node dist-server/server/src/index.js",
     "server:create-admin": "pnpm server:build && node dist-server/server/src/create-admin.js",
-    "server:drive-setup": "pnpm server:build && node dist-server/server/src/drive-setup.js",
-    "server:backup-decrypt": "pnpm server:build && node dist-server/server/src/backup-decrypt.js"
+    "server:backup-decrypt": "pnpm server:build && node dist-server/server/src/backup-decrypt.js",
+    "server:backup-key-setup": "pnpm server:build && node dist-server/server/src/backup-key-setup.js",
+    "server:test-backups": "pnpm server:build && node --test dist-server/server/src/backup-distribution.test.js"
   },
   "dependencies": {
     "argon2": "^0.45.1",

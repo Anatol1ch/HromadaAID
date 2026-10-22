@@ -29,8 +29,8 @@ release/
 *.hraid
 *.hraid.partial
 *.hraid.*.partial
-.hromadaaid-drive-secrets.dpapi*
-.hromadaaid-drive-sync.json*
+*.dpapi*
+.hromadaaid-*-sync.json*
 
 # Runtime logs and process artefacts
 *.log
@@ -66,3 +66,5 @@ Thumbs.db
 
 # Isolated API development databases
 server/.data/
+backup-identity/
+client-backups/

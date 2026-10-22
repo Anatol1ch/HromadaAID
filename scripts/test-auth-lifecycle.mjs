@@ -27,14 +27,15 @@ try {
   const bootstrap = await createFirstAdministrator(database, { username: 'admin-test', password: pass, displayName: 'Legacy arbitrary full name' })
   assert.equal(bootstrap.ok, true)
   const adminId = bootstrap.value.id
+  const currentSchemaVersion = database.prepare('PRAGMA user_version').get().user_version
   // Reproduce an existing v26 database without changing historical migrations.
-  database.exec('ALTER TABLE users DROP COLUMN first_name; ALTER TABLE users DROP COLUMN last_name; DELETE FROM schema_migrations WHERE version=27; PRAGMA user_version=26;')
+  database.exec('ALTER TABLE users DROP COLUMN first_name; ALTER TABLE users DROP COLUMN last_name; DROP TABLE backup_installations; DELETE FROM schema_migrations WHERE version>=27; PRAGMA user_version=26;')
   database.close()
   database = openInitializedDatabase(databasePath)
-  assert.equal(database.prepare('PRAGMA user_version').get().user_version, 27)
+  assert.equal(database.prepare('PRAGMA user_version').get().user_version, currentSchemaVersion)
   const migrated = database.prepare('SELECT display_name,first_name,last_name FROM users WHERE id=?').get(adminId)
   assert.equal(migrated.display_name, 'Legacy arbitrary full name'); assert.equal(migrated.first_name, null); assert.equal(migrated.last_name, null)
-  check('v26 to v27 migration preserves legacy names and credentials')
+  check('v26 to current migration preserves legacy names and credentials')
   app = createApp(database); app.log.level = 'silent'
   let releaseOld, releaseData, enteredOld, enteredData
   const oldEntered = new Promise(resolve => { enteredOld = resolve })

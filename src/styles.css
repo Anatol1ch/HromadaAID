@@ -2254,3 +2254,5 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
   * { -webkit-print-color-adjust: economy !important; print-color-adjust: economy !important; }
 }
 @media print { .app-select-popup { display: none !important; } }
+.backup-settings { display: grid; gap: 18px; }
+.backup-settings-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }

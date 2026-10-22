@@ -302,6 +302,13 @@ export type ServerConnectionCheckResult = { ok: true; apiUrl: string; message: s
 export type ServerConnectionSaveResult = { ok: true; state: ServerConnectionState; message?: string } | { ok: false; state: ServerConnectionState; message: string }
 
 export type HromadaAidApi = {
+  backups: {
+    getState: () => Promise<import('./backup-contract.js').ClientBackupState>
+    refresh: () => Promise<import('./backup-contract.js').ClientBackupState>
+    openFolder: () => Promise<import('./backup-contract.js').BackupActionResult>
+    listComputers: () => Promise<import('./backup-contract.js').BackupInstallation[]>
+    setAllowed: (id: string, allowed: boolean, expectedUpdatedAt: string) => Promise<import('./backup-contract.js').BackupInstallation>
+  }
   appName: string; platform: string
   appInfo: { getVersion: () => Promise<string> }
   auth: {

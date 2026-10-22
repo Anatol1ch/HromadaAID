@@ -1,3 +1,6 @@
+import type { BackupArchive } from '../shared/backup-contract.js'
+import { saveBackupResponse } from './backup-download.js'
+
 export class HttpClientError extends Error {
   constructor(message: string, readonly status?: number) {
     super(message)
@@ -6,7 +9,7 @@ export class HttpClientError extends Error {
 }
 
 export type JsonValidator<T> = (value: unknown) => value is T
-type RequestOptions = { authorize?: boolean; accessToken?: string }
+type RequestOptions = { authorize?: boolean; accessToken?: string; headers?: Record<string, string>; signal?: AbortSignal }
 type HttpClientOptions = { getAccessToken?: () => string | undefined; onUnauthorized?: (token: string | undefined) => void }
 
 /** Main-process HTTP transport. Tokens are obtained only through its private callback. */
@@ -15,6 +18,20 @@ export class HttpClient {
   private generation = 0
 
   constructor(baseUrl: URL, private readonly timeoutMs = 5_000, private readonly options: HttpClientOptions = {}) { this.baseUrl = new URL(baseUrl.origin) }
+  get serverOrigin(): string { return this.baseUrl.origin }
+
+  async downloadBackup(path: string, target: string, archive: BackupArchive, headers: Record<string, string>, signal: AbortSignal): Promise<void> {
+    if (this.baseUrl.protocol !== 'https:' && !(this.baseUrl.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(this.baseUrl.hostname))) throw new HttpClientError('Для передавання резервних копій потрібен HTTPS.')
+    if (!path.startsWith('/api/backups/archives/')) throw new HttpClientError('Некоректний шлях резервного архіву.')
+    const generation = this.generation, token = this.options.getAccessToken?.()
+    if (!token) throw new HttpClientError('Потрібна чинна сесія.', 401)
+    const current = () => { this.checkConnectionGeneration(generation); this.checkRequestSession(true, token) }
+    const response = await fetch(new URL(path, this.baseUrl), { redirect: 'error', headers: { ...headers, authorization: `Bearer ${token}` }, signal: AbortSignal.any([signal, AbortSignal.timeout(300_000)]) })
+    current()
+    if (response.status === 401) this.options.onUnauthorized?.(token)
+    if (!response.ok) { await response.body?.cancel(); throw new HttpClientError(response.status === 403 ? 'Резервування для цього комп’ютера вимкнено.' : `Не вдалося завантажити резервну копію (HTTP ${response.status}).`, response.status) }
+    await saveBackupResponse(response, target, archive, current, signal)
+  }
 
   /** Switches the trusted server origin and invalidates responses from the previous connection. */
   setBaseUrl(baseUrl: URL): void {
@@ -67,13 +84,15 @@ export class HttpClient {
     try {
       response = await fetch(new URL(path, baseUrl), {
         method,
+        redirect: 'error',
         headers: {
+          ...options?.headers,
           accept: 'application/json',
           ...(body === undefined ? {} : { 'content-type': 'application/json' }),
           ...(token ? { authorization: `Bearer ${token}` } : {}),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: options?.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(this.timeoutMs)]) : AbortSignal.timeout(this.timeoutMs),
       })
     } catch (error) {
       this.checkConnectionGeneration(requestGeneration)
