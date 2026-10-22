@@ -7,6 +7,7 @@ import { listDailyBackups } from './backup.js'
 import { decodeRecoveryKey, decryptBackupFile, encryptBackupFile, hashFile, type DriveSecrets } from './backup-crypto.js'
 
 const driveApi = 'https://www.googleapis.com/drive/v3/files'
+const driveUploadApi = 'https://www.googleapis.com/upload/drive/v3/files'
 const tokenEndpoint = 'https://oauth2.googleapis.com/token'
 const backupMarkerKey = 'hromadaAidBackup'
 const backupIdKey = 'hromadaAidBackupId'
@@ -14,11 +15,13 @@ const retryDelayMs = 5 * 60 * 1000
 const managedBackup = /^hromada-aid-daily-(\d{4}-\d{2}-\d{2})-created-.*\.sqlite\.hraid$/
 
 export class GoogleDriveError extends Error {
-  constructor(message: string, readonly status?: number) { super(message); this.name = 'GoogleDriveError' }
+  constructor(message: string, readonly status?: number, readonly operation?: string, readonly reason?: string) { super(message); this.name = 'GoogleDriveError' }
 }
 
 type DriveFile = { id: string; name: string; size?: string; md5Checksum?: string; appProperties?: Record<string, string>; createdTime?: string }
 type DriveList = { files?: DriveFile[]; nextPageToken?: string }
+type DriveErrorResponse = { error?: { status?: unknown; errors?: { reason?: unknown }[] } }
+const safeDriveReasons = new Set(['badRequest', 'invalid', 'invalidArgument', 'required', 'failedPrecondition', 'notFound', 'insufficientPermissions', 'appNotAuthorizedToFile', 'storageQuotaExceeded', 'authError', 'rateLimitExceeded', 'backendError', 'unsupportedContentType', 'domainPolicy'])
 
 export class GoogleDriveClient {
   private accessToken: string | undefined
@@ -33,13 +36,13 @@ export class GoogleDriveClient {
     const escapedFolder = this.oauth.folderId.replaceAll("'", "\\'")
     const escapedId = backupId.replaceAll("'", "\\'")
     const q = `'${escapedFolder}' in parents and trashed = false and appProperties has { key='${backupMarkerKey}' and value='true' } and appProperties has { key='${backupIdKey}' and value='${escapedId}' }`
-    return this.list(q)
+    return this.list(q, 'пошуку резервної копії')
   }
 
   async listManagedBackups(): Promise<DriveFile[]> {
     const escapedFolder = this.oauth.folderId.replaceAll("'", "\\'")
     const q = `'${escapedFolder}' in parents and trashed = false and appProperties has { key='${backupMarkerKey}' and value='true' }`
-    return this.list(q)
+    return this.list(q, 'переліку резервних копій')
   }
 
   async uploadBackup(localEncryptedPath: string, fileName: string, backupId: string, checksum: { size: number; md5: string }): Promise<DriveFile> {
@@ -63,12 +66,12 @@ export class GoogleDriveClient {
       yield suffix
     })())
     const length = prefix.length + checksum.size + suffix.length
-    const response = await this.request(`${driveApi}?uploadType=multipart&fields=id,name,size,md5Checksum,appProperties,createdTime`, {
+    const response = await this.request(`${driveUploadApi}?uploadType=multipart&fields=id,name,size,md5Checksum,appProperties,createdTime`, {
       method: 'POST',
       headers: { 'Content-Type': `multipart/related; boundary=${boundary}`, 'Content-Length': String(length) },
       body: stream as unknown as BodyInit,
       duplex: 'half',
-    } as RequestInit & { duplex: 'half' })
+    } as RequestInit & { duplex: 'half' }, [200], 'завантаження зашифрованої копії')
     const file = await this.readJson<DriveFile>(response)
     if (!file.id || file.name !== fileName || Number(file.size) !== checksum.size || file.md5Checksum?.toLowerCase() !== checksum.md5.toLowerCase() || file.appProperties?.[backupMarkerKey] !== 'true' || file.appProperties?.[backupIdKey] !== backupId) {
       throw new GoogleDriveError('Google Drive не підтвердив цілісність завантаженої копії.')
@@ -79,7 +82,7 @@ export class GoogleDriveClient {
   async verifyBackup(fileId: string, expected: { name: string; size?: number; md5?: string; backupId: string }): Promise<DriveFile> {
     const url = new URL(`${driveApi}/${encodeURIComponent(fileId)}`)
     url.searchParams.set('fields', 'id,name,size,md5Checksum,appProperties,createdTime')
-    const response = await this.request(url.toString())
+    const response = await this.request(url.toString(), {}, [200], 'перевірки метаданих копії')
     const file = await this.readJson<DriveFile>(response)
     if (file.name !== expected.name || (expected.size !== undefined && Number(file.size) !== expected.size) || (expected.md5 !== undefined && file.md5Checksum?.toLowerCase() !== expected.md5.toLowerCase()) || !file.md5Checksum || !Number(file.size) || file.appProperties?.[backupMarkerKey] !== 'true' || file.appProperties?.[backupIdKey] !== expected.backupId) {
       throw new GoogleDriveError('Перевірка копії в Google Drive не пройдена.')
@@ -88,19 +91,19 @@ export class GoogleDriveClient {
   }
 
   async deleteManagedBackup(fileId: string): Promise<void> {
-    await this.request(`${driveApi}/${encodeURIComponent(fileId)}`, { method: 'DELETE' }, [204])
+    await this.request(`${driveApi}/${encodeURIComponent(fileId)}`, { method: 'DELETE' }, [204], 'видалення старої копії')
   }
 
   async downloadBackup(fileId: string, outputPath: string): Promise<void> {
     const url = new URL(`${driveApi}/${encodeURIComponent(fileId)}`)
     url.searchParams.set('alt', 'media')
-    const response = await this.request(url.toString())
+    const response = await this.request(url.toString(), {}, [200], 'завантаження копії для перевірки')
     if (!response.body) throw new GoogleDriveError('Google Drive не повернув файл резервної копії.')
     try { await pipeline(Readable.fromWeb(response.body as import('node:stream/web').ReadableStream), createWriteStream(outputPath, { flags: 'wx', mode: 0o600 })) }
     catch { try { unlinkSync(outputPath) } catch { /* incomplete file cleanup is best effort */ }; throw new GoogleDriveError('Не вдалося перевірити копію з Google Drive.') }
   }
 
-  private async list(query: string): Promise<DriveFile[]> {
+  private async list(query: string, operation: string): Promise<DriveFile[]> {
     const files: DriveFile[] = []
     let pageToken: string | undefined
     do {
@@ -110,7 +113,7 @@ export class GoogleDriveClient {
       url.searchParams.set('pageSize', '1000')
       url.searchParams.set('fields', 'nextPageToken,files(id,name,size,md5Checksum,appProperties,createdTime)')
       if (pageToken) url.searchParams.set('pageToken', pageToken)
-      const response = await this.request(url.toString())
+      const response = await this.request(url.toString(), {}, [200], operation)
       const page = await this.readJson<DriveList>(response)
       files.push(...(page.files ?? []))
       pageToken = page.nextPageToken
@@ -118,21 +121,22 @@ export class GoogleDriveClient {
     return files
   }
 
-  private async request(url: string, init: RequestInit = {}, allowedStatuses: number[] = [200]) : Promise<Response> {
+  private async request(url: string, init: RequestInit = {}, allowedStatuses: number[] = [200], operation = 'запиту до Google Drive') : Promise<Response> {
     const token = await this.getAccessToken()
     let response: Response
     try { response = await this.fetcher(url, { ...init, signal: init.signal ?? AbortSignal.timeout(60_000), headers: { ...Object.fromEntries(new Headers(init.headers)), Authorization: `Bearer ${token}` } }) }
     catch { throw new GoogleDriveError('Не вдалося з’єднатися з Google Drive.') }
     if (response.status === 401) {
       this.accessToken = undefined
-      if (init.body !== undefined) throw new GoogleDriveError('Сесію Google Drive потрібно оновити; завантаження буде повторено пізніше.', 401)
+      if (init.body !== undefined) throw new GoogleDriveError(`HTTP 401 під час операції «${operation}»; запит із тілом не повторювався.`, 401, operation, 'authError')
       const refreshed = await this.getAccessToken(true)
       try { response = await this.fetcher(url, { ...init, signal: init.signal ?? AbortSignal.timeout(60_000), headers: { ...Object.fromEntries(new Headers(init.headers)), Authorization: `Bearer ${refreshed}` } }) }
       catch { throw new GoogleDriveError('Не вдалося з’єднатися з Google Drive.') }
     }
     if (!allowedStatuses.includes(response.status)) {
-      if (response.status === 403) throw new GoogleDriveError('Google Drive відхилив доступ. Перевірте підключений обліковий запис і його доступ до папки резервних копій.', response.status)
-      throw new GoogleDriveError(`Google Drive повернув помилку HTTP ${response.status}.`, response.status)
+      const reason = await safeDriveErrorReason(response)
+      if (response.status === 403) throw new GoogleDriveError(`Google Drive відхилив доступ під час операції «${operation}»${reason ? ` (${reason})` : ''}. Перевірте підключений обліковий запис і доступ до папки резервних копій.`, response.status, operation, reason)
+      throw new GoogleDriveError(`Google Drive повернув HTTP ${response.status} під час операції «${operation}»${reason ? ` (${reason})` : ''}.`, response.status, operation, reason)
     }
     return response
   }
@@ -156,6 +160,14 @@ export class GoogleDriveClient {
   private async readJson<T>(response: Response): Promise<T> {
     try { return await response.json() as T } catch { throw new GoogleDriveError('Google Drive повернув некоректну відповідь.') }
   }
+}
+
+async function safeDriveErrorReason(response: Response): Promise<string | undefined> {
+  try {
+    const data = await response.clone().json() as DriveErrorResponse
+    const candidate = data.error?.errors?.find((item) => typeof item.reason === 'string')?.reason ?? data.error?.status
+    return typeof candidate === 'string' && safeDriveReasons.has(candidate) ? candidate : undefined
+  } catch { return undefined }
 }
 
 type SyncState = { version: 1; uploaded: Record<string, { driveFileId: string; uploadedAt: string }> }

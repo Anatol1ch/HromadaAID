@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
 import { SqliteBackupService, listDailyBackups } from './backup.js'
 import { createRecoveryKey, decryptBackupFile, DriveSecretsStore, encryptBackupFile } from './backup-crypto.js'
-import { DriveSyncStateStore, GoogleDriveBackupSync, GoogleDriveClient } from './google-drive.js'
+import { DriveSyncStateStore, GoogleDriveBackupSync, GoogleDriveClient, GoogleDriveError } from './google-drive.js'
 
 const syntheticMarker = Buffer.from('SYNTHETIC DATA WITHOUT PERSONAL INFORMATION')
 
@@ -82,7 +82,9 @@ test('Drive retries after lost upload response without duplicate and uploads enc
       const exactId = queryValues.length > 1 ? queryValues.at(-1) : undefined
       return jsonResponse({ files: exactId ? files.filter((file) => file.appProperties.hromadaAidBackupId === exactId) : files })
     }
-    if (url.pathname === '/drive/v3/files' && init.method === 'POST') {
+    if (url.pathname === '/upload/drive/v3/files' && init.method === 'POST') {
+      assert.equal(url.searchParams.get('uploadType'), 'multipart')
+      assert.equal(url.searchParams.get('fields'), 'id,name,size,md5Checksum,appProperties,createdTime')
       const chunks: Buffer[] = []
       for await (const chunk of init.body as AsyncIterable<Uint8Array>) chunks.push(Buffer.from(chunk))
       uploadedBody = Buffer.concat(chunks)
@@ -153,7 +155,7 @@ test('cloud retention deletes only managed files after a successful new upload',
       if (exactId) files = files.filter((file) => file.appProperties.hromadaAidBackupId === exactId)
       return jsonResponse({ files })
     }
-    if (url.pathname === '/drive/v3/files' && init.method === 'POST') {
+    if (url.pathname === '/upload/drive/v3/files' && init.method === 'POST') {
       const chunks: Buffer[] = []
       for await (const chunk of init.body as AsyncIterable<Uint8Array>) chunks.push(Buffer.from(chunk))
       const data = Buffer.concat(chunks)
@@ -233,4 +235,64 @@ test('local SQLite backup succeeds independently when Google Drive is unavailabl
     assert.equal(listDailyBackups(backupDirectory).length, 1)
     assert.equal(state.isUploaded(listDailyBackups(backupDirectory)[0]!.name), false)
   } finally { database.close(); await removeTemporaryDirectory(directory) }
+})
+
+test('WAL backup publishes a standalone database and leaves no temporary SQLite sidecars', async () => {
+  const directory = await temporaryDirectory()
+  const database = new DatabaseSync(join(directory, 'synthetic-test.sqlite'))
+  database.exec("PRAGMA journal_mode=WAL; CREATE TABLE synthetic(value TEXT); INSERT INTO synthetic VALUES ('synthetic');")
+  try {
+    const backupDirectory = join(directory, 'backups')
+    const service = new SqliteBackupService(database, backupDirectory, { error: () => undefined, warn: () => undefined })
+    const result = await service.createDailyBackup('2026-10-22', new Date(2026, 9, 22, 12, 1))
+    assert.equal(result.status, 'created')
+    assert.ok(result.path)
+    const entries = await readdir(backupDirectory)
+    assert.equal(entries.some((name) => name.endsWith('.partial-wal') || name.endsWith('.partial-shm')), false)
+    const copy = new DatabaseSync(result.path, { readOnly: true })
+    try {
+      assert.equal((copy.prepare('PRAGMA integrity_check').get() as { integrity_check: string }).integrity_check, 'ok')
+      assert.equal((copy.prepare('SELECT value FROM synthetic').get() as { value: string }).value, 'synthetic')
+    } finally { copy.close() }
+  } finally { database.close(); await removeTemporaryDirectory(directory) }
+})
+
+test('Drive API errors identify the operation and safe Google reason without response text', async () => {
+  const client = new GoogleDriveClient({ clientId: 'synthetic-client', refreshToken: 'synthetic-refresh-token', folderId: 'synthetic-folder' }, async (input) => {
+    const url = new URL(String(input))
+    if (url.hostname === 'oauth2.googleapis.com') return jsonResponse({ access_token: 'synthetic-access-token', expires_in: 3600 })
+    return jsonResponse({ error: { code: 400, status: 'INVALID_ARGUMENT', errors: [{ reason: 'invalid', message: 'synthetic private response text' }] } }, 400)
+  })
+  await assert.rejects(client.findBackup('synthetic-backup-id'), (error: unknown) => {
+    assert.ok(error instanceof GoogleDriveError)
+    assert.equal(error.status, 400)
+    assert.equal(error.operation, 'пошуку резервної копії')
+    assert.equal(error.reason, 'invalid')
+    assert.doesNotMatch(error.message, /synthetic private response text|synthetic-refresh-token/)
+    return true
+  })
+})
+
+test('Drive multipart upload uses the upload endpoint and reports a safe upload diagnostic', async () => {
+  const directory = await temporaryDirectory()
+  try {
+    const encryptedPath = join(directory, 'synthetic.sqlite.hraid')
+    const bytes = Buffer.from('synthetic ciphertext only')
+    await writeFile(encryptedPath, bytes)
+    const client = new GoogleDriveClient({ clientId: 'synthetic-client', refreshToken: 'synthetic-refresh-token', folderId: 'synthetic-folder' }, async (input) => {
+      const url = new URL(String(input))
+      if (url.hostname === 'oauth2.googleapis.com') return jsonResponse({ access_token: 'synthetic-access-token', expires_in: 3600 })
+      assert.equal(url.pathname, '/upload/drive/v3/files')
+      assert.equal(url.searchParams.get('uploadType'), 'multipart')
+      return jsonResponse({ error: { code: 400, errors: [{ reason: 'invalid', message: 'synthetic private response text' }] } }, 400)
+    })
+    await assert.rejects(client.uploadBackup(encryptedPath, 'synthetic.sqlite.hraid', 'synthetic-backup-id', { size: bytes.length, md5: createHash('md5').update(bytes).digest('hex') }), (error: unknown) => {
+      assert.ok(error instanceof GoogleDriveError)
+      assert.equal(error.status, 400)
+      assert.equal(error.operation, 'завантаження зашифрованої копії')
+      assert.equal(error.reason, 'invalid')
+      assert.doesNotMatch(error.message, /synthetic private response text|synthetic-access-token/)
+      return true
+    })
+  } finally { await removeTemporaryDirectory(directory) }
 })

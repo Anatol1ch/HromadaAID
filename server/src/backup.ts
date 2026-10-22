@@ -25,6 +25,12 @@ function localTimeKey(date: Date): string {
   return `${localDateKey(date)}T${date.getHours().toString().padStart(2, '0')}-${date.getMinutes().toString().padStart(2, '0')}-${date.getSeconds().toString().padStart(2, '0')}-${date.getMilliseconds().toString().padStart(3, '0')}`
 }
 
+function removeClosedBackupSidecars(path: string): void {
+  // The unpublished, uniquely named backup has no open handles here. Remove only
+  // its own SQLite WAL artifacts; never touch the source database sidecars.
+  for (const suffix of ['-wal', '-shm']) rmSync(`${path}${suffix}`, { force: true })
+}
+
 export function dueBackupDate(now: Date): string {
   const due = new Date(now)
   if (due.getHours() < 12) due.setDate(due.getDate() - 1)
@@ -100,8 +106,12 @@ export class SqliteBackupService {
       partialPath = `${finalPath}.partial`
 
       await backup(this.database, partialPath)
-      const copy = new DatabaseSync(partialPath, { readOnly: true })
+      const copy = new DatabaseSync(partialPath)
       try {
+        const checkpoint = copy.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get() as { busy?: number; log?: number; checkpointed?: number }
+        if (checkpoint.busy !== 0 || (checkpoint.log !== undefined && checkpoint.log >= 0 && (checkpoint.checkpointed ?? -1) < checkpoint.log)) {
+          throw new Error('Не вдалося завершити WAL-контрольну точку резервної копії.')
+        }
         const result = copy.prepare('PRAGMA integrity_check').all() as { integrity_check?: string }[]
         if (result.length !== 1 || result[0]?.integrity_check !== 'ok') {
           throw new Error('Перевірка цілісності резервної копії не пройдена.')
@@ -109,6 +119,7 @@ export class SqliteBackupService {
       } finally {
         copy.close()
       }
+      removeClosedBackupSidecars(partialPath)
 
       renameSync(partialPath, finalPath)
       partialPath = undefined
@@ -126,6 +137,7 @@ export class SqliteBackupService {
       return { status: 'created', path: finalPath }
     } finally {
       if (partialPath) {
+        try { removeClosedBackupSidecars(partialPath) } catch { this.logger.warn('Не вдалося прибрати тимчасові WAL-файли резервної копії.') }
         try { rmSync(partialPath, { force: true }) } catch { this.logger.warn('Не вдалося прибрати незавершений тимчасовий файл резервної копії.') }
       }
       this.busy = false
