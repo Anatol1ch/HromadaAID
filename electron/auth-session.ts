@@ -41,13 +41,15 @@ export class RemoteAuthSession {
   }
 
   async logout(): Promise<AuthActionResult> {
+    const token = this.token
+    const state = await this.clear()
     let message: string | undefined
     try {
-      if (this.token) await this.http.postNoContent('/auth/logout')
+      if (token) await this.http.postNoContent('/auth/logout', undefined, { accessToken: token })
     } catch {
       message = 'Не вдалося відкликати сесію на сервері. Локальну сесію видалено.'
     }
-    const state = await this.clear(message)
+    if (message && !this.token && this.state.status === 'unauthenticated') this.publish(signedOut(message))
     return message ? { ok: false, state, message } : { ok: true, state }
   }
 
@@ -62,7 +64,7 @@ export class RemoteAuthSession {
     }
   }
 
-  async expired(): Promise<void> { await this.clear('Сесію завершено. Увійдіть повторно.') }
+  async expired(requestToken?: string): Promise<void> { if (requestToken && requestToken !== this.token) return; await this.clear('Сесію завершено. Увійдіть повторно.') }
 
   /** Best-effort server revocation during process shutdown; never blocks exit indefinitely. */
   async close(): Promise<void> {
@@ -85,4 +87,3 @@ export class RemoteAuthSession {
 export function localAuthState(): ClientAuthState {
   return { mode: 'local', status: 'authenticated', user: null }
 }
-

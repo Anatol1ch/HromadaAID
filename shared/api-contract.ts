@@ -283,8 +283,8 @@ export type StatementKind = 'personal' | 'summary'
 export type StatementParameters = { aidTypeId: string; partIndex: number; documentNumber: string; documentDate: string; periodStart: string; periodEnd: string }
 export type GeneratedStatement = { id: string; fileName: string; aidTypeName: string; recordCount: number; totalMinor: number; pdfBase64: string; documentNumber: string; documentDate: string }
 export type GeneratedBankStatement = { id: string; fileName: string; recordCount: number; totalMinor: number }
-export type ManagedUser = { id: string; username: string; displayName: string | null; roles: UserRole[]; status: 'active' | 'inactive' | 'blocked'; mustChangePassword: boolean; createdAt: string; updatedAt: string }
-export type ManagedUserInput = { username: string; displayName: string | null; roles: UserRole[]; password?: string }
+export type ManagedUser = { id: string; username: string; displayName: string | null; firstName: string | null; lastName: string | null; roles: UserRole[]; status: 'active' | 'inactive' | 'blocked'; mustChangePassword: boolean; createdAt: string; updatedAt: string }
+export type ManagedUserInput = { username: string; firstName: string | null; lastName: string | null; roles: UserRole[]; password?: string }
 export type ManagedUserSaveResult = { ok: true; user: ManagedUser } | { ok: false; reason: 'validation' | 'conflict' | 'not-found'; message: string }
 export type ManagedUserRemoveResult = { ok: true } | { ok: false; reason: 'conflict' | 'not-found'; message: string }
 

@@ -399,6 +399,12 @@ const migrations: Migration[] = [{
   sql: `
     ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0 CHECK(must_change_password IN (0,1));
   `,
+}, {
+  version: 27,
+  sql: `
+    ALTER TABLE users ADD COLUMN first_name TEXT CHECK(first_name IS NULL OR length(trim(first_name)) BETWEEN 1 AND 100);
+    ALTER TABLE users ADD COLUMN last_name TEXT CHECK(last_name IS NULL OR length(trim(last_name)) BETWEEN 1 AND 100);
+  `,
 }]
 
 const maximumSupportedSchemaVersion = Math.max(...migrations.map(({ version }) => version))
@@ -579,4 +585,3 @@ function seedReferenceData(database: DatabaseSync) {
   for (const program of programs) database.prepare('INSERT OR IGNORE INTO catalog_order_revisions(scope,revision) VALUES (?,?)').run(`aid-types:${program.id}`, now)
 
 }
-

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Eye, EyeOff, KeyRound } from 'lucide-react'
 import type { ClientAuthState } from '../../shared/auth-contract'
+import { passwordValidationMessage } from '../../shared/password-policy'
 
 export default function TemporaryPasswordScreen({ state, onChangePassword }: { state: Extract<ClientAuthState, { status: 'password-change-required' }>; onChangePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; message?: string }> }) {
   const [currentPassword, setCurrentPassword] = useState('')
@@ -12,7 +13,7 @@ export default function TemporaryPasswordScreen({ state, onChangePassword }: { s
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const submit = async (event: FormEvent) => {
-    event.preventDefault(); setError('')
+    event.preventDefault(); if (busy) return; setError(''); const passwordError = passwordValidationMessage(newPassword); if (passwordError) { setError(passwordError); return }
     if (newPassword !== repeatPassword) { setError('Нові паролі не збігаються.'); return }
     setBusy(true)
     try { const result = await onChangePassword(currentPassword, newPassword); if (!result.ok) setError(result.message ?? 'Не вдалося змінити пароль.') }

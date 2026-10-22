@@ -155,7 +155,7 @@ if (!hasSingleInstanceLock) {
         let session: RemoteAuthSession | undefined
         const http = new HttpClient(runtimeConfig.apiUrl, 5_000, {
           getAccessToken: () => session?.accessToken,
-          onUnauthorized: () => { void session?.expired() },
+          onUnauthorized: (token) => { void session?.expired(token) },
         })
         session = new RemoteAuthSession(app.getPath('userData'), http, publishAuthState)
         remoteAuth = session

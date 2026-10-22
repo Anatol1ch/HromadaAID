@@ -88,7 +88,9 @@ const api: HromadaAidApi = {
 
 contextBridge.exposeInMainWorld('hromadaAid', api)
 
-function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
+async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   // ipcRenderer stays inside the preload; the renderer receives only these fixed operations.
-  return ipcRenderer.invoke(channel, ...args) as Promise<T>
+  const result = await ipcRenderer.invoke(channel, ...args)
+  if (result?.__hromadaAuthError === true) throw new Error(result.message)
+  return result as T
 }

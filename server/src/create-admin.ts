@@ -44,7 +44,7 @@ async function readHiddenPassword(prompt: string): Promise<string> {
           return
         }
         if (character === '\u007f' || character === '\b') {
-          password = password.slice(0, -1)
+          password = Array.from(password).slice(0, -1).join('')
           continue
         }
         password += character
@@ -60,7 +60,7 @@ async function main(): Promise<void> {
   try {
     const username = await readline.question('Логін першого адміністратора: ')
     readline.close()
-    const password = await readHiddenPassword('Пароль (щонайменше 12 символів): ')
+    const password = await readHiddenPassword('Пароль (щонайменше 8 символів): ')
     const repeatPassword = await readHiddenPassword('Повторіть пароль: ')
     if (password !== repeatPassword) throw new Error('Паролі не збігаються.')
     const database = openServerDatabase(databasePath)

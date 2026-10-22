@@ -1,4 +1,5 @@
 import { ipcMain, type BrowserWindow, type IpcMain } from 'electron'
+import { HttpClientError } from './http-client.js'
 
 let getMainWindow: () => BrowserWindow | null = () => null
 let expectedPageUrl = ''
@@ -36,7 +37,7 @@ export function isTrustedAppUrl(value: string): boolean {
 
 export const trustedIpcMain = {
   handle(channel: string, listener: Parameters<IpcMain['handle']>[1]) {
-    ipcMain.handle(channel, (event, ...args) => {
+    ipcMain.handle(channel, async (event, ...args) => {
       const window = getMainWindow()
       if (!window || window.isDestroyed() || window.webContents.isDestroyed() ||
         event.sender !== window.webContents || !event.senderFrame ||
@@ -44,7 +45,15 @@ export const trustedIpcMain = {
         !isTrustedAppUrl(event.senderFrame.url)) {
         throw new Error('Виклик недоступний із цього вікна застосунку.')
       }
-      return listener(event, ...args)
+      try { return await listener(event, ...args) }
+      catch (error) {
+        // Expected session expiry/cancellation is delivered as a normal IPC
+        // envelope. Preload still rejects the operation for its caller.
+        if (error instanceof HttpClientError && error.status === 401) {
+          return { __hromadaAuthError: true, message: error.message }
+        }
+        throw error
+      }
     })
   },
 }

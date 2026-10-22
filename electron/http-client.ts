@@ -6,8 +6,8 @@ export class HttpClientError extends Error {
 }
 
 export type JsonValidator<T> = (value: unknown) => value is T
-type RequestOptions = { authorize?: boolean }
-type HttpClientOptions = { getAccessToken?: () => string | undefined; onUnauthorized?: () => void }
+type RequestOptions = { authorize?: boolean; accessToken?: string }
+type HttpClientOptions = { getAccessToken?: () => string | undefined; onUnauthorized?: (token: string | undefined) => void }
 
 /** Main-process HTTP transport. Tokens are obtained only through its private callback. */
 export class HttpClient {
@@ -31,7 +31,7 @@ export class HttpClient {
 
   async postNoContent(path: string, body?: unknown, options?: RequestOptions): Promise<void> {
     const { response, body: responseBody } = await this.request('POST', path, body, options)
-    if (!response.ok) throw this.responseError(response.status, responseBody, options)
+    if (!response.ok) throw this.responseError(response.status, responseBody)
   }
 
   private async requestJson<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body: unknown, validator?: JsonValidator<T>, options?: RequestOptions): Promise<T> {
@@ -39,7 +39,7 @@ export class HttpClient {
     if (!response.ok) {
       // Write endpoints deliberately return their typed validation/conflict result with 4xx status.
       if (validator && validator(responseBody)) return responseBody
-      throw this.responseError(response.status, responseBody, options)
+      throw this.responseError(response.status, responseBody)
     }
     if (validator && !validator(responseBody)) throw new HttpClientError('Сервер повернув відповідь у непідтримуваному форматі.')
     return responseBody as T
@@ -48,7 +48,8 @@ export class HttpClient {
   private async request(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body: unknown, options?: RequestOptions): Promise<{ response: Response; body: unknown }> {
     if (!path.startsWith('/')) throw new HttpClientError('Шлях HTTP API має починатися з «/».')
     const authorize = options?.authorize !== false
-    const token = authorize ? this.options.getAccessToken?.() : undefined
+    const token = authorize ? (options?.accessToken ?? this.options.getAccessToken?.()) : undefined
+    if (authorize && !token) throw new HttpClientError('Потрібна чинна сесія.', 401)
     let response: Response
     try {
       response = await fetch(new URL(path, this.baseUrl), {
@@ -66,15 +67,24 @@ export class HttpClient {
       throw new HttpClientError('Не вдалося підключитися до сервера.')
     }
 
+    if (authorize && response.status === 401) this.options.onUnauthorized?.(token)
+    this.checkRequestSession(authorize, token, options)
     if (response.status === 204) return { response, body: undefined }
     let responseBody: unknown
     try { responseBody = await response.json() }
     catch { throw new HttpClientError('Сервер повернув некоректну JSON-відповідь.') }
+    this.checkRequestSession(authorize, token, options)
     return { response, body: responseBody }
   }
 
-  private responseError(status: number, responseBody: unknown, options?: RequestOptions): HttpClientError {
-    if (status === 401 && options?.authorize !== false) this.options.onUnauthorized?.()
+  private checkRequestSession(authorize: boolean, token: string | undefined, options?: RequestOptions): void {
+    // A response belongs to the session that issued it, never to a later login.
+    if (authorize && options?.accessToken === undefined && token !== this.options.getAccessToken?.()) {
+      throw new HttpClientError('Запит попередньої сесії скасовано.', 401)
+    }
+  }
+
+  private responseError(status: number, responseBody: unknown): HttpClientError {
     const message = responseBody && typeof responseBody === 'object' && 'message' in responseBody && typeof responseBody.message === 'string'
       ? responseBody.message
       : `Сервер повернув помилку HTTP ${status}.`

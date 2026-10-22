@@ -35,8 +35,10 @@ function App() {
   const [auth, setAuth] = useState<ClientAuthState | null>(null)
   useEffect(() => {
     let active = true
-    void window.hromadaAid.auth.getState().then((state) => { if (active) setAuth(state) }, () => { if (active) setAuth({ mode: 'remote', status: 'unavailable', user: null, message: 'Не вдалося отримати стан авторизації.' }) })
-    return window.hromadaAid.auth.onStateChange((state) => { if (active) setAuth(state) })
+    let receivedEvent = false
+    void window.hromadaAid.auth.getState().then((state) => { if (active && !receivedEvent) setAuth(state) }, () => { if (active && !receivedEvent) setAuth({ mode: 'remote', status: 'unavailable', user: null, message: 'Не вдалося отримати стан авторизації.' }) })
+    const unsubscribe = window.hromadaAid.auth.onStateChange((state) => { receivedEvent = true; if (active) setAuth(state) })
+    return () => { active = false; unsubscribe() }
   }, [])
   const login = async (username: string, password: string) => {
     const result = await window.hromadaAid.auth.login(username, password)
@@ -46,7 +48,7 @@ function App() {
   if (!auth) return <StartupScreen/>
   if (auth.mode === 'remote' && auth.status === 'password-change-required') return <TemporaryPasswordScreen state={auth} onChangePassword={async (currentPassword, newPassword) => { const result = await window.hromadaAid.auth.changePassword(currentPassword, newPassword); setAuth(result.state); return { ok: result.ok, message: 'message' in result ? result.message : undefined } }}/>
   if (auth.mode === 'remote' && auth.status !== 'authenticated') return <LoginScreen state={auth} onLogin={login}/>
-  return <Workspace auth={auth}/>
+  return <Workspace key={auth.mode === 'remote' ? auth.user.id : 'local'} auth={auth}/>
 }
 
 function Workspace({ auth }: { auth: Extract<ClientAuthState, { status: 'authenticated' }> }) {

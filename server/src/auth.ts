@@ -4,6 +4,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { effectivePermissions, isUserRole, type Permission, type UserRole } from '../../shared/authorization.js'
 import type { AuthenticatedUser, ChangePasswordInput, LoginInput, LoginResult } from '../../shared/auth-contract.js'
 import { nextRecordRevision } from '../../shared/record-revision.js'
+import { isValidPassword } from '../../shared/password-policy.js'
 
 export const SESSION_DURATION_MS = 8 * 60 * 60 * 1000
 const MAX_ACTIVE_SESSIONS_PER_USER = 5
@@ -13,6 +14,8 @@ type UserRow = {
   id: string
   username: string
   display_name: string | null
+  first_name: string | null
+  last_name: string | null
   password_hash: string
   status: string
   must_change_password: number
@@ -51,7 +54,7 @@ function displayUsername(value: unknown): string | null {
 }
 
 export function validatePassword(value: unknown): string | null {
-  return typeof value === 'string' && value.length >= 12 && value.length <= 256 ? value : null
+  return isValidPassword(value) ? value : null
 }
 
 async function dummyPasswordHash(): Promise<string> {
@@ -76,12 +79,17 @@ function readRoles(database: DatabaseSync, userId: string): UserRole[] {
   return rows.map(({ role }) => role).filter(isUserRole)
 }
 
+function fullName(row: Pick<UserRow, 'display_name' | 'first_name' | 'last_name'>): string | null {
+  const value = [row.first_name, row.last_name].filter((part): part is string => !!part).join(' ')
+  return value || row.display_name
+}
+
 function profile(database: DatabaseSync, row: UserRow): AuthenticatedUser {
   const roles = readRoles(database, row.id)
   return {
     id: row.id,
     username: row.username,
-    displayName: row.display_name,
+    displayName: fullName(row),
     roles,
     permissions: effectivePermissions(roles),
     mustChangePassword: row.must_change_password === 1,
@@ -89,7 +97,7 @@ function profile(database: DatabaseSync, row: UserRow): AuthenticatedUser {
 }
 
 function activeUser(database: DatabaseSync, usernameKey: string): UserRow | undefined {
-  return database.prepare('SELECT id,username,display_name,password_hash,status,must_change_password FROM users WHERE username_key=?').get(usernameKey) as UserRow | undefined
+  return database.prepare('SELECT id,username,display_name,first_name,last_name,password_hash,status,must_change_password FROM users WHERE username_key=?').get(usernameKey) as UserRow | undefined
 }
 
 function cleanExpiredSessions(database: DatabaseSync, current: string): void {
@@ -146,7 +154,7 @@ export function authenticateSession(database: DatabaseSync, token: string | unde
   if (!token || token.length > 1024) return { ok: false, status: 401, message: 'Потрібна чинна сесія.' }
   const current = nowRevision(now)
   cleanExpiredSessions(database, current)
-  const row = database.prepare(`SELECT s.token_hash,s.expires_at,u.id,u.username,u.display_name,u.password_hash,u.status,u.must_change_password
+  const row = database.prepare(`SELECT s.token_hash,s.expires_at,u.id,u.username,u.display_name,u.first_name,u.last_name,u.password_hash,u.status,u.must_change_password
     FROM user_sessions s JOIN users u ON u.id=s.user_id
     WHERE s.token_hash=? AND s.expires_at>?`).get(tokenHash(token), current) as (UserRow & { token_hash: string; expires_at: string }) | undefined
   if (!row || row.status !== 'active') return { ok: false, status: 401, message: 'Потрібна чинна сесія.' }
@@ -160,7 +168,7 @@ export function logout(database: DatabaseSync, tokenHashValue: string): void {
 export async function changePassword(database: DatabaseSync, session: AuthenticatedSession, input: ChangePasswordInput): Promise<AuthResult<void>> {
   const nextPassword = validatePassword(input.newPassword)
   if (!nextPassword || typeof input.currentPassword !== 'string' || !input.currentPassword) {
-    return { ok: false, status: 400, message: 'Новий пароль має містити від 12 до 256 символів.' }
+    return { ok: false, status: 400, message: 'Новий пароль має містити від 8 до 256 символів.' }
   }
   const current = database.prepare('SELECT id,password_hash,status,updated_at FROM users WHERE id=?').get(session.user.id) as (UserRow & { updated_at: string }) | undefined
   if (!current || current.status !== 'active' || !await verifyCredentialHash(current.password_hash, input.currentPassword)) {
@@ -214,7 +222,7 @@ export async function createFirstAdministrator(database: DatabaseSync, input: { 
     database.prepare('INSERT INTO users(id,username,username_key,display_name,password_hash,status,password_changed_at,created_at,updated_at,must_change_password) VALUES(?,?,?,?,?,?,?,?,?,0)')
       .run(id, username, usernameKey, displayName, passwordHash, 'active', createdAt, createdAt, createdAt)
     database.prepare('INSERT INTO user_roles(user_id,role) VALUES(?,?)').run(id, 'administrator')
-    const user = profile(database, { id, username, display_name: displayName, password_hash: passwordHash, status: 'active', must_change_password: 0 })
+    const user = profile(database, { id, username, display_name: displayName, first_name: null, last_name: null, password_hash: passwordHash, status: 'active', must_change_password: 0 })
     database.exec('COMMIT')
     return { ok: true, value: user }
   } catch {
