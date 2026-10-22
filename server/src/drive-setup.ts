@@ -1,11 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { createServer } from 'node:http'
+import { createServer, type ServerResponse } from 'node:http'
 import { resolve } from 'node:path'
 import { DriveSecretsStore, createRecoveryKey } from './backup-crypto.js'
+import { exchangeGoogleAuthorizationCode, GoogleOAuthExchangeError } from './google-oauth.js'
 
 const scope = 'https://www.googleapis.com/auth/drive.file'
-const tokenEndpoint = 'https://oauth2.googleapis.com/token'
 const folderEndpoint = 'https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType,appProperties'
 const driveFilesEndpoint = 'https://www.googleapis.com/drive/v3/files'
 
@@ -18,7 +18,15 @@ function openBrowser(url: string): void {
   execFile('rundll32.exe', ['url.dll,FileProtocolHandler', url], { windowsHide: true }, () => undefined)
 }
 
-async function readOAuthCode(clientId: string): Promise<{ code: string; verifier: string; redirectUri: string }> {
+type PendingOAuthCallback = {
+  code: string
+  verifier: string
+  redirectUri: string
+  finish(success: boolean): void
+  close(): Promise<void>
+}
+
+async function readOAuthCode(clientId: string): Promise<PendingOAuthCallback> {
   const verifier = randomBytes(32).toString('base64url')
   const challenge = createHash('sha256').update(verifier).digest('base64url')
   const state = randomBytes(24).toString('base64url')
@@ -45,24 +53,51 @@ async function readOAuthCode(clientId: string): Promise<{ code: string; verifier
   openBrowser(authorization.toString())
   console.log('Завершіть авторизацію Google у браузері. Якщо браузер не відкрився, відкрийте посилання вручну:')
   console.log(authorization.toString())
-  try {
-    const code = await new Promise<string>((resolveCode, rejectCode) => {
-      const timeout = setTimeout(() => rejectCode(new Error('Час очікування авторизації Google вичерпано.')), 5 * 60_000)
-      server.on('request', (request, response) => {
-        const requestUrl = new URL(request.url ?? '/', `http://127.0.0.1:${address.port}`)
-        if (requestUrl.pathname !== '/oauth2/callback') { response.writeHead(404).end(); return }
-        if (requestUrl.searchParams.get('state') !== state) { response.writeHead(400).end('Некоректний стан авторизації.'); clearTimeout(timeout); rejectCode(new Error('Перевірка стану OAuth не пройдена.')); return }
-        const error = requestUrl.searchParams.get('error')
-        const authorizationCode = requestUrl.searchParams.get('code')
-        if (error || !authorizationCode) { response.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Не вдалося підключити Google Drive. Поверніться до вікна налаштування.'); clearTimeout(timeout); rejectCode(new Error('Google відхилив авторизацію.')); return }
-        response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Google Drive підключено. Можна закрити це вікно та повернутися до HromadaAID.')
+  let callbackResponse: ServerResponse | undefined
+  let finished = false
+  const code = await new Promise<string>((resolveCode, rejectCode) => {
+    const timeout = setTimeout(() => rejectCode(new Error('Час очікування авторизації Google вичерпано.')), 5 * 60_000)
+    server.on('request', (request, response) => {
+      const requestUrl = new URL(request.url ?? '/', `http://127.0.0.1:${address.port}`)
+      if (requestUrl.pathname !== '/oauth2/callback') { response.writeHead(404).end(); return }
+      if (requestUrl.searchParams.get('state') !== state) {
+        response.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Не вдалося перевірити запит. Поверніться до вікна налаштування.')
         clearTimeout(timeout)
-        resolveCode(authorizationCode)
-      })
+        rejectCode(new Error('Перевірка стану OAuth не пройдена.'))
+        return
+      }
+      const error = requestUrl.searchParams.get('error')
+      const authorizationCode = requestUrl.searchParams.get('code')
+      if (error || !authorizationCode) {
+        response.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Google не завершив авторизацію. Поверніться до вікна налаштування та спробуйте ще раз.')
+        clearTimeout(timeout)
+        rejectCode(new Error('Google відхилив авторизацію.'))
+        return
+      }
+      if (callbackResponse || finished) { response.writeHead(409).end(); return }
+      callbackResponse = response
+      clearTimeout(timeout)
+      resolveCode(authorizationCode)
     })
-    return { code, verifier, redirectUri }
-  } finally {
+  }).catch(async (error: unknown) => {
     await new Promise<void>((resolveClose) => server.close(() => resolveClose()))
+    throw error
+  })
+  return {
+    code,
+    verifier,
+    redirectUri,
+    finish(success) {
+      if (finished) return
+      finished = true
+      if (!callbackResponse) return
+      const message = success
+        ? 'Google Drive підключено. Можна закрити це вікно та повернутися до HromadaAID.'
+        : 'Не вдалося завершити підключення Google Drive. Поверніться до вікна налаштування та перегляньте повідомлення про помилку.'
+      callbackResponse.writeHead(success ? 200 : 500, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }).end(message)
+      callbackResponse = undefined
+    },
+    close: () => new Promise<void>((resolveClose) => server.close(() => resolveClose())),
   }
 }
 
@@ -82,13 +117,9 @@ async function main(): Promise<void> {
   const clientSecret = process.env.HROMADA_AID_GOOGLE_CLIENT_SECRET
   if (!clientId) throw new Error('Задайте HROMADA_AID_GOOGLE_CLIENT_ID для OAuth Desktop-клієнта Google.')
 
-  const { code, verifier, redirectUri } = await readOAuthCode(clientId)
-  const tokenBody = new URLSearchParams({ client_id: clientId, code, code_verifier: verifier, grant_type: 'authorization_code', redirect_uri: redirectUri })
-  if (clientSecret) tokenBody.set('client_secret', clientSecret)
-  const tokenResponse = await fetch(tokenEndpoint, { method: 'POST', signal: AbortSignal.timeout(60_000), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: tokenBody })
-  if (!tokenResponse.ok) throw new Error('Не вдалося обміняти код авторизації Google. Перевірте OAuth-клієнт і спробуйте ще раз.')
-  const tokens = await tokenResponse.json() as { refresh_token?: string; access_token?: string }
-  if (!tokens.refresh_token || !tokens.access_token) throw new Error('Google не надав потрібні дані авторизації. Повторіть підключення з доступом до Google Drive.')
+  const oauth = await readOAuthCode(clientId)
+  try {
+  const tokens = await exchangeGoogleAuthorizationCode({ clientId, clientSecret, code: oauth.code, codeVerifier: oauth.verifier, redirectUri: oauth.redirectUri })
 
   let folderId = existingSecrets?.google.folderId
   if (folderId) {
@@ -123,10 +154,18 @@ async function main(): Promise<void> {
     console.log(recoveryKey.encoded)
     console.log('Каталог локального стану захищено ACL Windows. Не надсилайте ключ разом із файлами резервних копій.')
   } else console.log('Google Drive повторно підключено; локальний ключ шифрування збережено без змін.')
+  oauth.finish(true)
+  } catch (error) {
+    oauth.finish(false)
+    throw error
+  } finally {
+    await oauth.close()
+  }
 }
 
 void main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : 'Не вдалося налаштувати Google Drive.')
+  if (error instanceof GoogleOAuthExchangeError) console.error(`Помилка обміну коду Google (${error.googleErrorCode}): ${error.message}`)
+  else console.error(error instanceof Error ? error.message : 'Не вдалося налаштувати Google Drive.')
   process.exitCode = 1
 })
 
