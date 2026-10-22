@@ -51,8 +51,7 @@ async function readOAuthCode(clientId: string): Promise<PendingOAuthCallback> {
     code_challenge_method: 'S256',
   }).toString()
   openBrowser(authorization.toString())
-  console.log('Завершіть авторизацію Google у браузері. Якщо браузер не відкрився, відкрийте посилання вручну:')
-  console.log(authorization.toString())
+  console.log('Завершіть авторизацію Google у відкритому браузері. Якщо браузер не відкрився, перевірте налаштування браузера за замовчуванням і повторіть команду.')
   let callbackResponse: ServerResponse | undefined
   let finished = false
   const code = await new Promise<string>((resolveCode, rejectCode) => {
@@ -164,7 +163,7 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error: unknown) => {
-  if (error instanceof GoogleOAuthExchangeError) console.error(`Помилка обміну коду Google (${error.googleErrorCode}): ${error.message}`)
+  if (error instanceof GoogleOAuthExchangeError) console.error(`Помилка обміну коду Google (${error.googleErrorCode}, HTTP ${error.httpStatus}; ${error.diagnostic}): ${error.message}`)
   else console.error(error instanceof Error ? error.message : 'Не вдалося налаштувати Google Drive.')
   process.exitCode = 1
 })

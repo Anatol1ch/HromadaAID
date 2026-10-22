@@ -12,11 +12,20 @@ const request = {
 
 test('Google OAuth code exchange sends the matching PKCE verifier and redirect URI', async () => {
   let submitted: URLSearchParams | undefined
+  let requestUrl = ''
+  let requestMethod = ''
+  let contentType = ''
   const tokens = await exchangeGoogleAuthorizationCode(request, async (_url, init) => {
+    requestUrl = String(_url)
+    requestMethod = String(init?.method)
+    contentType = new Headers(init?.headers).get('Content-Type') ?? ''
     submitted = new URLSearchParams(String(init?.body))
     return Response.json({ access_token: 'synthetic-access-token', refresh_token: 'synthetic-refresh-token' })
   })
 
+  assert.equal(requestUrl, 'https://oauth2.googleapis.com/token')
+  assert.equal(requestMethod, 'POST')
+  assert.equal(contentType, 'application/x-www-form-urlencoded')
   assert.equal(submitted?.get('client_id'), request.clientId)
   assert.equal(submitted?.get('client_secret'), request.clientSecret)
   assert.equal(submitted?.get('code'), request.code)
@@ -26,14 +35,36 @@ test('Google OAuth code exchange sends the matching PKCE verifier and redirect U
   assert.deepEqual(tokens, { access_token: 'synthetic-access-token', refresh_token: 'synthetic-refresh-token' })
 })
 
+test('Google OAuth code exchange omits the optional client secret when not configured', async () => {
+  let submitted: URLSearchParams | undefined
+  await exchangeGoogleAuthorizationCode({ ...request, clientSecret: undefined }, async (_url, init) => {
+    submitted = new URLSearchParams(String(init?.body))
+    return Response.json({ access_token: 'synthetic-access-token', refresh_token: 'synthetic-refresh-token' })
+  })
+  assert.equal(submitted?.has('client_secret'), false)
+})
+
 test('Google OAuth code exchange reports a safe diagnostic for rejected authorization codes', async () => {
   await assert.rejects(
     exchangeGoogleAuthorizationCode(request, async () => Response.json({ error: 'invalid_grant', error_description: 'sensitive response detail' }, { status: 400 })),
     (error: unknown) => {
       assert.ok(error instanceof GoogleOAuthExchangeError)
       assert.equal(error.googleErrorCode, 'invalid_grant')
+      assert.equal(error.httpStatus, 400)
       assert.match(error.message, /PKCE та redirect URI/)
       assert.doesNotMatch(error.message, /sensitive response detail|synthetic-authorization-code|synthetic-client-secret/)
+      return true
+    },
+  )
+})
+
+test('Google OAuth code exchange safely identifies an invalid_request parameter without exposing descriptions', async () => {
+  await assert.rejects(
+    exchangeGoogleAuthorizationCode(request, async () => Response.json({ error: 'invalid_request', error_description: 'Missing required parameter: code_verifier; synthetic secret value' }, { status: 400 })),
+    (error: unknown) => {
+      assert.ok(error instanceof GoogleOAuthExchangeError)
+      assert.equal(error.diagnostic, 'Параметр запиту: code_verifier')
+      assert.doesNotMatch(`${error.message} ${error.diagnostic}`, /synthetic secret value|synthetic-client-secret/)
       return true
     },
   )

@@ -7,6 +7,7 @@ type TokenEndpointResponse = {
   access_token?: unknown
   refresh_token?: unknown
   error?: unknown
+  error_description?: unknown
 }
 
 const safeGoogleErrorCodes = new Set([
@@ -15,10 +16,29 @@ const safeGoogleErrorCodes = new Set([
 ])
 
 export class GoogleOAuthExchangeError extends Error {
-  constructor(readonly googleErrorCode: string, message: string) {
+  constructor(readonly googleErrorCode: string, readonly httpStatus: number, readonly diagnostic: string, message: string) {
     super(message)
     this.name = 'GoogleOAuthExchangeError'
   }
+}
+
+const knownParameterNames = new Set(['client_id', 'client_secret', 'code', 'code_verifier', 'grant_type', 'redirect_uri'])
+
+function classifyGoogleError(code: string, description: unknown): string {
+  const text = typeof description === 'string' ? description : ''
+  const parameterMatch = text.match(/(?:missing|required|invalid)\s+(?:required\s+)?parameter\s*:?\s*["']?([a-z_]+)/i)
+  if (parameterMatch && knownParameterNames.has(parameterMatch[1].toLowerCase())) {
+    return `Параметр запиту: ${parameterMatch[1].toLowerCase()}`
+  }
+  if (/policy|organization|restricted|admin.?enforced|blocked/i.test(text) || code === 'access_denied') {
+    return 'Політика Google або обмеження облікового запису'
+  }
+  if (code === 'invalid_client' || code === 'unauthorized_client' || code === 'redirect_uri_mismatch') {
+    return 'Конфігурація OAuth-клієнта або redirect URI'
+  }
+  if (code === 'invalid_grant') return 'Authorization code, PKCE або redirect URI'
+  if (code === 'invalid_request') return 'Формат/параметри запиту або конфігурація OAuth'
+  return 'Невизначена категорія відповіді Google'
 }
 
 function messageForGoogleError(code: string): string {
@@ -73,7 +93,7 @@ export async function exchangeGoogleAuthorizationCode(
 
   if (!response.ok) {
     const code = typeof result.error === 'string' && safeGoogleErrorCodes.has(result.error) ? result.error : 'unknown_error'
-    throw new GoogleOAuthExchangeError(code, messageForGoogleError(code))
+    throw new GoogleOAuthExchangeError(code, response.status, classifyGoogleError(code, result.error_description), messageForGoogleError(code))
   }
   if (typeof result.access_token !== 'string' || result.access_token.length === 0 || typeof result.refresh_token !== 'string' || result.refresh_token.length === 0) {
     throw new Error('Google не надав потрібні дані авторизації. Повторіть підключення з доступом до Google Drive.')
