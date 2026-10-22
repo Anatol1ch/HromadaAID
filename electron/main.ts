@@ -2,7 +2,7 @@ import { cleanupGeneratedReports, registerReportExportIpc } from './report-expor
 import { app, BrowserWindow, dialog, screen, safeStorage, shell } from 'electron'
 import { RemoteBackupClient } from './backup-client.js'
 import { BackupInstallationIdentity } from './backup-storage.js'
-import { isBackupInstallation, isBackupInstallationList } from '../shared/backup-contract.js'
+import { isBackupInstallation, isBackupInstallationList, isRestorePreview, isServerBackupList } from '../shared/backup-contract.js'
 import { RemoteAuthSession, localAuthState } from './auth-session.js'
 import type { AuthActionResult, ClientAuthState } from '../shared/auth-contract.js'
 import { dirname, join, resolve } from 'node:path'
@@ -158,6 +158,32 @@ if (!hasSingleInstanceLock) {
         return remoteHttp
       }
       trustedIpcMain.handle('backups:list-computers', async () => backupAdminHttp().getJson('/api/backup-clients', isBackupInstallationList))
+      const archiveId = (id: unknown) => { if (typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) throw new Error('Некоректний ідентифікатор архіву.'); return id }
+      const longRequest = { timeoutMs: 300_000 }
+      trustedIpcMain.handle('backups:list-server', async () => backupAdminHttp().getJson('/api/backups/server', isServerBackupList, longRequest))
+      trustedIpcMain.handle('backups:create-server', async () => backupAdminHttp().postJson('/api/backups/server', {}, isServerBackupList, longRequest))
+      trustedIpcMain.handle('backups:prepare-server-restore', async (_event, id: unknown) => backupAdminHttp().postJson(`/api/backups/server/${archiveId(id)}/prepare`, {}, isRestorePreview, longRequest))
+      trustedIpcMain.handle('backups:prepare-file-restore', async () => {
+        const http = backupAdminHttp()
+        const result = await dialog.showOpenDialog({ title: 'Виберіть резервний архів HromadaAID', filters: [{ name: 'Резервний архів', extensions: ['hraid'] }], properties: ['openFile'] })
+        if (result.canceled || !result.filePaths[0]) return null
+        return http.uploadBackup(result.filePaths[0], isRestorePreview)
+      })
+      trustedIpcMain.handle('backups:confirm-restore', async (_event, id: unknown, confirmationToken: unknown) => {
+        if (typeof id !== 'string' || !/^[a-f0-9-]{36}$/.test(id) || typeof confirmationToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(confirmationToken)) throw new Error('Некоректне підтвердження.')
+        return backupAdminHttp().postJson('/api/backups/restore/confirm', { id, confirmationToken }, undefined, longRequest)
+      })
+      trustedIpcMain.handle('backups:download-server', async (_event, id: unknown) => {
+        const http = backupAdminHttp()
+        const list = await http.getJson('/api/backups/server', isServerBackupList, longRequest)
+        const item = list.archives.find(item => item.id === archiveId(id))
+        if (!item) throw new Error('Архів не знайдено.')
+        const result = await dialog.showSaveDialog({ title: 'Зберегти резервний архів', defaultPath: item.fileName, filters: [{ name: 'Резервний архів', extensions: ['hraid'] }] })
+        if (result.canceled || !result.filePath) return { ok: false, message: 'Збереження скасовано.' }
+        if (!result.filePath.toLowerCase().endsWith('.hraid')) throw new Error('Оберіть окремий файл із розширенням .hraid.')
+        await http.downloadBackup(`/api/backups/server/${item.id}/download`, result.filePath, item, {}, new AbortController().signal)
+        return { ok: true }
+      })
       trustedIpcMain.handle('backups:set-allowed', async (_event, id: unknown, allowed: unknown, expectedUpdatedAt: unknown) => {
         if (typeof id !== 'string' || !/^[a-f0-9-]{36}$/.test(id) || typeof allowed !== 'boolean' || typeof expectedUpdatedAt !== 'string') throw new Error('Некоректні дані дозволу.')
         return backupAdminHttp().putJson(`/api/backup-clients/${id}`, { allowed, expectedUpdatedAt }, isBackupInstallation)

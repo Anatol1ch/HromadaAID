@@ -27,6 +27,8 @@ import { currentApiSession, installApiAuthorization } from './api-authorization.
 import { LoginRateLimiter } from './login-rate-limit.js'
 import { registerBackupRoutes } from './backup-http.js'
 import type { BackupArchives } from './backup-archives.js'
+import type { BackupAdministration } from './backup-admin.js'
+import { registerBackupAdministration } from './backup-admin-http.js'
 import { createManagedUser, getManagedUser, listManagedUsers, removeManagedUser, resetManagedUserPassword, setManagedUserStatus, updateManagedUser } from './user-admin.js'
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -42,8 +44,9 @@ function requestsPaidStatus(value: unknown): boolean {
   return isRecord(value) && value.status === 'Виплачено'
 }
 
-export function createApp(database: DatabaseSync, backupArchives?: BackupArchives): FastifyInstance {
+export function createApp(database: DatabaseSync, backupArchives?: BackupArchives, administration?: BackupAdministration): FastifyInstance {
   const app = Fastify({ logger: true })
+  administration?.install(app)
   const loginRateLimiter = new LoginRateLimiter()
 
   app.post<{ Body: unknown }>('/auth/login', async (request, reply) => {
@@ -94,6 +97,7 @@ export function createApp(database: DatabaseSync, backupArchives?: BackupArchive
 
   installApiAuthorization(app, database)
   registerBackupRoutes(app, database, backupArchives)
+  if (administration) registerBackupAdministration(app, administration)
 
   app.get('/api/users', async () => listManagedUsers(database))
   app.get<{ Params: { id: string } }>('/api/users/:id', async (request) => getManagedUser(database, request.params.id))

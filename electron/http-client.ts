@@ -1,5 +1,6 @@
 import type { BackupArchive } from '../shared/backup-contract.js'
 import { saveBackupResponse } from './backup-download.js'
+import { closeSync, createReadStream, openSync, readSync, statSync } from 'node:fs'
 
 export class HttpClientError extends Error {
   constructor(message: string, readonly status?: number) {
@@ -9,7 +10,7 @@ export class HttpClientError extends Error {
 }
 
 export type JsonValidator<T> = (value: unknown) => value is T
-type RequestOptions = { authorize?: boolean; accessToken?: string; headers?: Record<string, string>; signal?: AbortSignal }
+type RequestOptions = { authorize?: boolean; accessToken?: string; headers?: Record<string, string>; signal?: AbortSignal; timeoutMs?: number }
 type HttpClientOptions = { getAccessToken?: () => string | undefined; onUnauthorized?: (token: string | undefined) => void }
 
 /** Main-process HTTP transport. Tokens are obtained only through its private callback. */
@@ -22,7 +23,7 @@ export class HttpClient {
 
   async downloadBackup(path: string, target: string, archive: BackupArchive, headers: Record<string, string>, signal: AbortSignal): Promise<void> {
     if (this.baseUrl.protocol !== 'https:' && !(this.baseUrl.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(this.baseUrl.hostname))) throw new HttpClientError('Для передавання резервних копій потрібен HTTPS.')
-    if (!path.startsWith('/api/backups/archives/')) throw new HttpClientError('Некоректний шлях резервного архіву.')
+    if (!/^\/api\/backups\/(?:archives\/[a-f0-9]{64}|server\/[a-f0-9]{64}\/download)$/.test(path)) throw new HttpClientError('Некоректний шлях резервного архіву.')
     const generation = this.generation, token = this.options.getAccessToken?.()
     if (!token) throw new HttpClientError('Потрібна чинна сесія.', 401)
     const current = () => { this.checkConnectionGeneration(generation); this.checkRequestSession(true, token) }
@@ -31,6 +32,30 @@ export class HttpClient {
     if (response.status === 401) this.options.onUnauthorized?.(token)
     if (!response.ok) { await response.body?.cancel(); throw new HttpClientError(response.status === 403 ? 'Резервування для цього комп’ютера вимкнено.' : `Не вдалося завантажити резервну копію (HTTP ${response.status}).`, response.status) }
     await saveBackupResponse(response, target, archive, current, signal)
+  }
+
+  async uploadBackup<T>(file: string, validator: JsonValidator<T>): Promise<T> {
+    if (!file.toLowerCase().endsWith('.hraid')) throw new HttpClientError('Оберіть зашифрований архів .hraid.')
+    if (this.baseUrl.protocol !== 'https:' && !(this.baseUrl.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(this.baseUrl.hostname))) throw new HttpClientError('Для передавання резервних копій потрібен HTTPS.')
+    const size = statSync(file).size
+    if (size > 2 * 1024 * 1024 * 1024 || size < 29) throw new HttpClientError('Розмір архіву має бути не більше 2 ГіБ.')
+    const fd = openSync(file, 'r'), prefix = Buffer.alloc(9)
+    try { if (readSync(fd, prefix, 0, 9, 0) !== 9 || prefix.subarray(0, 8).toString('ascii') !== 'HRAIDBKP' || ![1, 2].includes(prefix[8])) throw new HttpClientError('Файл не є підтримуваним зашифрованим архівом.') } finally { closeSync(fd) }
+    const generation = this.generation, token = this.options.getAccessToken?.()
+    if (!token) throw new HttpClientError('Потрібна чинна сесія.', 401)
+    const stream = createReadStream(file)
+    try {
+      const init = { method: 'POST', redirect: 'error' as const, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream', 'content-length': String(size) }, body: stream, duplex: 'half', signal: AbortSignal.timeout(300_000) }
+      const response = await fetch(new URL('/api/backups/restore/upload', this.baseUrl), init as unknown as RequestInit)
+      this.checkConnectionGeneration(generation)
+      if (response.status === 401) this.options.onUnauthorized?.(token)
+      this.checkRequestSession(true, token)
+      const value: unknown = await response.json()
+      this.checkConnectionGeneration(generation); this.checkRequestSession(true, token)
+      if (!response.ok) throw this.responseError(response.status, value)
+      if (!validator(value)) throw new HttpClientError('Некоректна відповідь перевірки архіву.')
+      return value
+    } finally { stream.destroy() }
   }
 
   /** Switches the trusted server origin and invalidates responses from the previous connection. */
@@ -92,7 +117,7 @@ export class HttpClient {
           ...(token ? { authorization: `Bearer ${token}` } : {}),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        signal: options?.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(this.timeoutMs)]) : AbortSignal.timeout(this.timeoutMs),
+        signal: options?.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(options.timeoutMs ?? this.timeoutMs)]) : AbortSignal.timeout(options?.timeoutMs ?? this.timeoutMs),
       })
     } catch (error) {
       this.checkConnectionGeneration(requestGeneration)

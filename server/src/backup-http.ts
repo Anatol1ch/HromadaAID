@@ -60,7 +60,7 @@ export function registerBackupRoutes(app: FastifyInstance, database: DatabaseSyn
     } catch { database.exec('ROLLBACK'); return reply.status(500).send({ message: 'Не вдалося змінити дозвіл комп’ютера.' }) }
   })
   const available = async (reply: FastifyReply) => {
-    try { if (archives) return await archives.list() } catch { /* No paths or key material in HTTP errors. */ }
+    try { if (archives) return archives.dailyOnly(await archives.list()) } catch { /* No paths or key material in HTTP errors. */ }
     void reply.status(503).send({ message: 'Зашифровані резервні копії поки недоступні. Перевірте серверний ключ резервування.' })
     return undefined
   }

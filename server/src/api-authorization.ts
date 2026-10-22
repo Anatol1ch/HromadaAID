@@ -18,6 +18,12 @@ export type ApiRoutePolicy = {
  * public by omission.
  */
 export const API_ROUTE_POLICIES: readonly ApiRoutePolicy[] = [
+  { method: 'GET', url: '/api/backups/server', permissions: ['backups.manage'] },
+  { method: 'POST', url: '/api/backups/server', permissions: ['backups.manage'] },
+  { method: 'GET', url: '/api/backups/server/:id/download', permissions: ['backups.manage'] },
+  { method: 'POST', url: '/api/backups/server/:id/prepare', permissions: ['backups.manage'] },
+  { method: 'POST', url: '/api/backups/restore/upload', permissions: ['backups.manage'] },
+  { method: 'POST', url: '/api/backups/restore/confirm', permissions: ['backups.manage'] },
   { method: 'POST', url: '/api/backups/installations/register', permissions: [] },
   { method: 'GET', url: '/api/backups/archives', permissions: [] },
   { method: 'GET', url: '/api/backups/archives/:id', permissions: [] },

@@ -68,3 +68,8 @@ Thumbs.db
 server/.data/
 backup-identity/
 client-backups/
+restore-staging/
+*.sqlite.before-restore-*
+*.sqlite.restore-stage-*
+*.sqlite.restore-journal.json*
+*.sqlite.maintenance.json*

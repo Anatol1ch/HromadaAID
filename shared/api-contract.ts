@@ -303,6 +303,12 @@ export type ServerConnectionSaveResult = { ok: true; state: ServerConnectionStat
 
 export type HromadaAidApi = {
   backups: {
+    listServer: () => Promise<import('./backup-contract.js').ServerBackupList>
+    createServer: () => Promise<import('./backup-contract.js').ServerBackupList>
+    downloadServer: (id: string) => Promise<import('./backup-contract.js').BackupActionResult>
+    prepareServerRestore: (id: string) => Promise<import('./backup-contract.js').RestorePreview>
+    prepareFileRestore: () => Promise<import('./backup-contract.js').RestorePreview | null>
+    confirmRestore: (id: string, confirmationToken: string) => Promise<{ message: string }>
     getState: () => Promise<import('./backup-contract.js').ClientBackupState>
     refresh: () => Promise<import('./backup-contract.js').ClientBackupState>
     openFolder: () => Promise<import('./backup-contract.js').BackupActionResult>

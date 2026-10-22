@@ -14,7 +14,8 @@
     "server:create-admin": "pnpm server:build && node dist-server/server/src/create-admin.js",
     "server:backup-decrypt": "pnpm server:build && node dist-server/server/src/backup-decrypt.js",
     "server:backup-key-setup": "pnpm server:build && node dist-server/server/src/backup-key-setup.js",
-    "server:test-backups": "pnpm server:build && node --test dist-server/server/src/backup-distribution.test.js"
+    "server:test-backups": "pnpm server:build && node --test dist-server/server/src/backup-distribution.test.js dist-server/server/src/backup-restore.test.js",
+    "server:backup-restore": "pnpm server:build && node dist-server/server/src/backup-restore-cli.js"
   },
   "dependencies": {
     "argon2": "^0.45.1",

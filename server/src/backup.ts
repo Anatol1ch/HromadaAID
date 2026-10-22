@@ -51,6 +51,13 @@ export function listDailyBackups(directory: string): { name: string; slotDate: s
   })
 }
 
+export function listManualBackups(directory: string): ReturnType<typeof listDailyBackups> {
+  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const match = /^hromada-aid-manual-(\d{4}-\d{2}-\d{2})-created-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3})-([a-f\d-]+)\.sqlite$/.exec(entry.name)
+    return entry.isFile() && match ? [{ name: entry.name, slotDate: match[1], createdAt: match[2], path: join(directory, entry.name) }] : []
+  })
+}
+
 export { securePrivateDirectory as secureBackupDirectory } from '../../electron/protected-directory.js'
 
 export class SqliteBackupService {
@@ -61,19 +68,23 @@ export class SqliteBackupService {
     this.directory = resolve(directory)
   }
 
-  async createDailyBackup(slotDate: string, createdAt: Date): Promise<BackupResult> {
+  createManualBackup(createdAt = new Date()): Promise<BackupResult> {
+    return this.createDailyBackup(localDateKey(createdAt), createdAt, true)
+  }
+
+  async createDailyBackup(slotDate: string, createdAt: Date, manual = false): Promise<BackupResult> {
     if (this.busy) return { status: 'busy' }
     this.busy = true
     let partialPath: string | undefined
     try {
       this.prepareDirectory()
       const currentBackups = listDailyBackups(this.directory)
-      if (currentBackups.some((file) => file.slotDate === slotDate)) return { status: 'already-exists' }
-      if (currentBackups.some((file) => file.createdAt.slice(0, 10) === localDateKey(createdAt))) return { status: 'already-created-today' }
+      if (!manual && currentBackups.some((file) => file.slotDate === slotDate)) return { status: 'already-exists' }
+      if (!manual && currentBackups.some((file) => file.createdAt.slice(0, 10) === localDateKey(createdAt))) return { status: 'already-created-today' }
 
       const id = randomUUID()
       const created = localTimeKey(createdAt)
-      const fileName = `hromada-aid-daily-${slotDate}-created-${created}-${id}.sqlite`
+      const fileName = `hromada-aid-${manual ? 'manual' : 'daily'}-${slotDate}-created-${created}-${id}.sqlite`
       const finalPath = join(this.directory, fileName)
       partialPath = `${finalPath}.partial`
 
@@ -159,6 +170,7 @@ export function startDailyBackupScheduler(service: SqliteBackupService, logger: 
     for (let attempt = 1; attempt <= maxBackupAttempts && !stopped; attempt++) {
       try {
         const result = await service.createDailyBackup(slotDate, now())
+        if (result.status === 'busy') throw new Error('Резервування вже триває.')
         if (result.status === 'created' && result.path) options.onBackupCreated?.(result.path)
         return
       } catch {
