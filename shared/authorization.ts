@@ -8,6 +8,36 @@ export const USER_ROLES = [
 
 export type UserRole = typeof USER_ROLES[number]
 
+export const WORKSPACE_PAGES = ['home', 'overview', 'assignments', 'statements', 'reports', 'dictionaries', 'users'] as const
+export type WorkspacePage = typeof WORKSPACE_PAGES[number]
+export const DICTIONARY_SECTIONS = ['people', 'programs', 'decisions', 'banks', 'plans'] as const
+export type AuthorizedDictionarySection = typeof DICTIONARY_SECTIONS[number]
+
+const ROLE_WORKSPACE_PAGES: Record<UserRole, readonly WorkspacePage[]> = {
+  administrator: WORKSPACE_PAGES,
+  assignment_specialist: ['home', 'assignments', 'dictionaries'],
+  payment_specialist: ['home', 'statements'],
+  planning_specialist: ['home', 'overview', 'reports', 'dictionaries'],
+  viewer: ['home', 'overview'],
+}
+
+const ROLE_DICTIONARY_SECTIONS: Record<UserRole, readonly AuthorizedDictionarySection[]> = {
+  administrator: DICTIONARY_SECTIONS,
+  assignment_specialist: ['people', 'decisions', 'banks'],
+  payment_specialist: [],
+  planning_specialist: ['programs', 'plans'],
+  viewer: [],
+}
+
+export function hasWorkspacePage(roles: readonly UserRole[], page: WorkspacePage): boolean {
+  return roles.some((role) => ROLE_WORKSPACE_PAGES[role].includes(page))
+}
+
+export function allowedDictionarySections(roles: readonly UserRole[]): AuthorizedDictionarySection[] {
+  const allowed = new Set(roles.flatMap((role) => ROLE_DICTIONARY_SECTIONS[role]))
+  return DICTIONARY_SECTIONS.filter((section) => allowed.has(section))
+}
+
 export const USER_ROLE_LABELS: Record<UserRole, string> = {
   administrator: 'Адміністратор',
   assignment_specialist: 'Фахівець з призначень',
@@ -47,18 +77,19 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   assignment_specialist: [
     'catalogs.read', 'personal_data.read', 'recipients.manage', 'banks.manage',
     'decisions.read', 'decisions.manage', 'assignments.read', 'assignments.manage',
-    'dashboard.read', 'reports.read', 'statements.generate', 'reports.export',
+    'dashboard.read',
   ],
   payment_specialist: [
-    'catalogs.read', 'personal_data.read', 'decisions.read', 'assignments.read',
-    'assignments.change_financial_status', 'dashboard.read', 'reports.read',
-    'statements.generate', 'reports.export',
+    'personal_data.read', 'dashboard.read', 'statements.generate',
+    'assignments.change_financial_status',
   ],
   planning_specialist: [
     'catalogs.read', 'catalogs.manage', 'program_approvals.manage', 'dashboard.read',
     'reports.read', 'planning.read', 'planning.manage', 'reports.export',
   ],
-  viewer: ['catalogs.read', 'dashboard.read', 'reports.read', 'planning.read', 'reports.export'],
+  // Overview uses catalog labels to render aggregate program/type summaries.
+  // The workspace page gate still keeps the Dictionaries section unavailable.
+  viewer: ['catalogs.read', 'dashboard.read'],
 }
 
 export function isUserRole(value: unknown): value is UserRole {
