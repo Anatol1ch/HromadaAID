@@ -64,7 +64,7 @@ export class SqliteBackupService {
   private busy = false
   private preparedDirectory = false
 
-  constructor(private readonly database: DatabaseSync, readonly directory: string, private readonly logger: BackupLogger) {
+  constructor(private readonly database: DatabaseSync, readonly directory: string, private readonly logger: BackupLogger, private readonly secureDirectory = true) {
     this.directory = resolve(directory)
   }
 
@@ -120,7 +120,7 @@ export class SqliteBackupService {
 
   private prepareDirectory(): void {
     if (this.preparedDirectory) return
-    secureBackupDirectory(this.directory)
+    if (this.secureDirectory) secureBackupDirectory(this.directory)
     this.preparedDirectory = true
     // A process crash may leave only an unpublished partial file. Never treat it as a backup.
     for (const entry of readdirSync(this.directory, { withFileTypes: true })) {

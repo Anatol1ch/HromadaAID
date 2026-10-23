@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
-import { existsSync, readFileSync, statSync, unlinkSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, statSync, unlinkSync } from 'node:fs'
 import { mkdir, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { FastifyInstance } from 'fastify'
@@ -21,7 +21,7 @@ export class BackupAdministration {
   maintenance = false
   private active = new Set<string>()
   private preparing = false
-  constructor(readonly databasePath: string, readonly archives: BackupArchives, readonly service: SqliteBackupService, private readonly stopScheduler: () => Promise<void>) {}
+  constructor(readonly databasePath: string, readonly archives: BackupArchives, readonly service: SqliteBackupService, private readonly stopScheduler: () => Promise<void>, private readonly secureStagingDirectory = true) {}
 
   install(app: FastifyInstance): void {
     app.addHook('onRequest', async (request, reply) => {
@@ -37,7 +37,9 @@ export class BackupAdministration {
     const id = randomUUID(), directory = restoreDirectory(this.archives.directory)
     const target = restoreCandidatePath(this.archives.directory, id)
     try {
-      await mkdir(directory, { recursive: true }); secureBackupDirectory(directory)
+      await mkdir(directory, { recursive: true })
+      if (this.secureStagingDirectory) secureBackupDirectory(directory)
+      else if (lstatSync(directory).isSymbolicLink()) throw new Error('Каталог підготовки відновлення не може бути символічним посиланням.')
       for (const file of await readdir(directory)) {
         const match = /^([a-f0-9-]{36})\.json$/.exec(file)
         if (!match) continue

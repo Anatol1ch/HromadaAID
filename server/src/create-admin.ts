@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import { stdin, stdout } from 'node:process'
 import { createInterface } from 'node:readline/promises'
 import { createFirstAdministrator } from './auth.js'
-import { openServerDatabase } from './database.js'
+import { openInstalledServerDatabase } from './database.js'
 
 function readDatabasePath(argumentsList: string[]): string {
   if (argumentsList[0] === '--') argumentsList = argumentsList.slice(1)
@@ -63,7 +63,7 @@ async function main(): Promise<void> {
     const password = await readHiddenPassword('Пароль (щонайменше 8 символів): ')
     const repeatPassword = await readHiddenPassword('Повторіть пароль: ')
     if (password !== repeatPassword) throw new Error('Паролі не збігаються.')
-    const database = openServerDatabase(databasePath)
+    const database = openInstalledServerDatabase(databasePath)
     try {
       const result = await createFirstAdministrator(database, { username, password })
       if (!result.ok) throw new Error(result.message)

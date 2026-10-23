@@ -11,6 +11,8 @@
     "server:dev": "pnpm server:build && concurrently -k \"pnpm exec tsc -p server/tsconfig.json --watch\" \"node --watch dist-server/server/src/index.js\"",
     "server:build": "tsc -p server/tsconfig.json",
     "server:start": "node dist-server/server/src/index.js",
+    "server:start:installed": "node dist-server/server/src/installed.js",
+    "server:initialize": "pnpm server:build && node dist-server/server/src/initialize.js",
     "server:create-admin": "pnpm server:build && node dist-server/server/src/create-admin.js",
     "server:backup-decrypt": "pnpm server:build && node dist-server/server/src/backup-decrypt.js",
     "server:backup-key-setup": "pnpm server:build && node dist-server/server/src/backup-key-setup.js",

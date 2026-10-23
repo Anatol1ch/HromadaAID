@@ -1,0 +1,8 @@
+{
+  "configVersion": 1,
+  "programDirectory": "C:\\Program Files\\HromadaAID",
+  "host": "127.0.0.1",
+  "port": 4310,
+  "databasePath": "C:\\ProgramData\\HromadaAID\\hromada-aid.sqlite",
+  "backupDirectory": "C:\\ProgramData\\HromadaAID\\Backups"
+}

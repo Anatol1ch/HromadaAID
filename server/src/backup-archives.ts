@@ -11,7 +11,7 @@ export class BackupArchives {
   private running: Promise<BackupArchive[]> | undefined
   private verified = new Map<string, BackupArchive>()
   private prepared = false
-  constructor(readonly directory: string, private readonly key: () => Buffer) {}
+  constructor(readonly directory: string, private readonly key: () => Buffer, private readonly secureDirectory = true) {}
 
   list(): Promise<BackupArchive[]> {
     if (this.running) return this.running
@@ -28,7 +28,7 @@ export class BackupArchives {
   get encryptionKey(): Buffer { return this.key() }
 
   private async prepare(): Promise<BackupArchive[]> {
-    if (!this.prepared) { secureBackupDirectory(this.directory); this.prepared = true }
+    if (!this.prepared) { if (this.secureDirectory) secureBackupDirectory(this.directory); this.prepared = true }
     const key = this.key()
     const daily = listDailyBackups(this.directory).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 14)
     const sources = [...daily, ...listManualBackups(this.directory)].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
