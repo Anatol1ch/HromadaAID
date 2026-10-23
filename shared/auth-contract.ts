@@ -25,7 +25,7 @@ export type ClientAuthState =
   | { mode: 'remote'; status: 'password-change-required'; user: AuthenticatedUser }
   | { mode: 'remote'; status: 'unauthenticated' | 'unavailable'; user: null; message?: string }
 
-export type AuthActionResult = { ok: true; state: ClientAuthState } | { ok: false; state: ClientAuthState; message: string }
+export type AuthActionResult = { ok: true; state: ClientAuthState } | { ok: false; state: ClientAuthState; message: string; failureKind?: 'session-expired' | 'connection' | 'permission' | 'server' }
 
 export function isUserStatus(value: unknown): value is UserStatus {
   return typeof value === 'string' && (USER_STATUSES as readonly string[]).includes(value)

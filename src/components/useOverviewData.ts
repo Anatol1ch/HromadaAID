@@ -2,6 +2,7 @@ import { overviewDataEvent } from '../services/overviewUpdates'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DashboardData } from '../../electron/api-contract'
 import { catalogRepository, useCatalogUpdates } from '../services/catalogRepository'
+import { connectionRestoredEvent } from '../services/connectionRefresh'
 
 export function useOverviewData(year: number, includeCatalogs = true) {
   const [data, setData] = useState<DashboardData | null>(null)
@@ -31,7 +32,8 @@ export function useOverviewData(year: number, includeCatalogs = true) {
   useEffect(() => {
     const update = () => { void refresh() }
     window.addEventListener(overviewDataEvent, update)
-    return () => window.removeEventListener(overviewDataEvent, update)
+    window.addEventListener(connectionRestoredEvent, update)
+    return () => { window.removeEventListener(overviewDataEvent, update); window.removeEventListener(connectionRestoredEvent, update) }
   }, [refresh])
   // Never display a previous year's data while a new request is in flight.
   return { data: data?.year === year ? data : null, catalogs, error, loading, refresh }

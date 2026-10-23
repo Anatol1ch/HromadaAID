@@ -8,6 +8,7 @@ import Alert from './components/Alert'
 import ConfirmDialog from './components/ConfirmDialog'
 import DictionaryTable, { DictionaryToolbar } from './components/DictionaryTable'
 import Modal from './components/Modal'
+import { connectionRestoredEvent } from './services/connectionRefresh'
 
 type Draft = ManagedUserInput & { id?: string; expectedUpdatedAt?: string }
 type Confirmation = { kind: 'block' | 'deactivate' | 'delete'; user: ManagedUser }
@@ -55,8 +56,9 @@ export default function UsersAdmin({ currentUserId }: { currentUserId: string })
   const [draft, setDraft] = useState<Draft | null>(null), [passwordUser, setPasswordUser] = useState<ManagedUser | null>(null), [newPassword, setNewPassword] = useState('')
   const [usernameError, setUsernameError] = useState(''), [passwordFieldError, setPasswordFieldError] = useState('')
   const [showCreatePassword, setShowCreatePassword] = useState(false), [showResetPassword, setShowResetPassword] = useState(false), [confirmation, setConfirmation] = useState<Confirmation | null>(null), [busy, setBusy] = useState(false)
-  const refresh = async () => { setLoading(true); try { setUsers(await window.hromadaAid.users.list()); setLoadError('') } catch { setLoadError('Не вдалося завантажити користувачів.') } finally { setLoading(false) } }
-  useEffect(() => { void refresh() }, [])
+  const refreshSequence = useRef(0)
+  const refresh = async () => { const sequence = ++refreshSequence.current; setLoading(true); try { const next = await window.hromadaAid.users.list(); if (sequence === refreshSequence.current) { setUsers(next); setLoadError('') } } catch { if (sequence === refreshSequence.current) setLoadError('Не вдалося завантажити користувачів.') } finally { if (sequence === refreshSequence.current) setLoading(false) } }
+  useEffect(() => { const reload = () => { void refresh() }; void refresh(); window.addEventListener(connectionRestoredEvent, reload); return () => window.removeEventListener(connectionRestoredEvent, reload) }, [])
   const edit = (user: ManagedUser) => { setError(''); setUsernameError(''); setPasswordFieldError(''); setShowCreatePassword(false); setDraft({ id: user.id, expectedUpdatedAt: user.updatedAt, username: user.username, firstName: user.firstName ?? '', lastName: user.lastName ?? '', roles: user.roles }) }
   const toggleRole = (role: UserRole) => setDraft(value => value ? { ...value, roles: value.roles.includes(role) ? value.roles.filter(item => item !== role) : [...value.roles, role] } : value)
   const save = async (event: FormEvent) => { event.preventDefault(); if (!draft || busy) return; const loginError = draft.username ? '' : 'Введіть логін.'; const passwordError = !draft.id ? passwordValidationMessage(draft.password) ?? '' : ''; setUsernameError(loginError); setPasswordFieldError(passwordError); if (loginError || passwordError) return; setBusy(true); setError(''); try { const result = draft.id ? await window.hromadaAid.users.update(draft.id, draft, draft.expectedUpdatedAt ?? '') : await window.hromadaAid.users.create(draft); if (!result.ok) { setError(result.message); return }; setDraft(null); await refresh() } catch { setError('Не вдалося зберегти обліковий запис.') } finally { setBusy(false) } }

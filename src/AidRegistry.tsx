@@ -23,6 +23,7 @@ import { useReportingYear } from './context/YearContext'
 import DeleteConfirmation from './components/DeleteConfirmation'
 import BatchAssignmentStatusModal from './components/BatchAssignmentStatusModal'
 import { eligibleAssignmentIds, keepEligibleSelection, selectionForYear, selectionState, toggleEligibleSelection } from './lib/assignmentSelection'
+import { useConnectionRefresh } from './services/connectionRefresh'
 
 type Catalogs = Awaited<ReturnType<typeof assignmentRepository.catalogs>>
 type Draft = { recipientId: string; recipientSearch: string; decisionId: string; decisionNumber: string; decisionDate: string; programId: string; aidTypeId: string; amount: string; status: AssignmentStatus; paidOn: string }
@@ -94,6 +95,7 @@ export default function AidRegistry({ createOnOpen = false }: { createOnOpen?: b
     } catch { if (sequence === refreshSequence.current) setLoadError('Не вдалося завантажити реєстр допомог із локального сховища.') }
     finally { if (sequence === refreshSequence.current) setLoading(false) }
   }
+  useConnectionRefresh(() => { void refresh(year) })
   useEffect(() => { void refresh(year) }, [year])
 
   useCatalogUpdates(() => {

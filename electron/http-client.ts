@@ -1,6 +1,7 @@
 import type { BackupArchive } from '../shared/backup-contract.js'
 import { saveBackupResponse } from './backup-download.js'
 import { closeSync, createReadStream, openSync, readSync, statSync } from 'node:fs'
+import { classifyHttpReachability, isMaintenanceResponse, type ConnectionFailureReason, type ConnectionStatus } from '../shared/system-state.js'
 
 export class HttpClientError extends Error {
   constructor(message: string, readonly status?: number) {
@@ -11,7 +12,7 @@ export class HttpClientError extends Error {
 
 export type JsonValidator<T> = (value: unknown) => value is T
 type RequestOptions = { authorize?: boolean; accessToken?: string; headers?: Record<string, string>; signal?: AbortSignal; timeoutMs?: number }
-type HttpClientOptions = { getAccessToken?: () => string | undefined; onUnauthorized?: (token: string | undefined) => void }
+type HttpClientOptions = { getAccessToken?: () => string | undefined; onUnauthorized?: (token: string | undefined) => void; onConnectionStatus?: (status: Exclude<ConnectionStatus, 'unknown' | 'checking'>, failureReason?: ConnectionFailureReason) => void }
 
 /** Main-process HTTP transport. Tokens are obtained only through its private callback. */
 export class HttpClient {
@@ -27,8 +28,12 @@ export class HttpClient {
     const generation = this.generation, token = this.options.getAccessToken?.()
     if (!token) throw new HttpClientError('Потрібна чинна сесія.', 401)
     const current = () => { this.checkConnectionGeneration(generation); this.checkRequestSession(true, token) }
-    const response = await fetch(new URL(path, this.baseUrl), { redirect: 'error', headers: { ...headers, authorization: `Bearer ${token}` }, signal: AbortSignal.any([signal, AbortSignal.timeout(300_000)]) })
+    let response: Response
+    try { response = await fetch(new URL(path, this.baseUrl), { redirect: 'error', headers: { ...headers, authorization: `Bearer ${token}` }, signal: AbortSignal.any([signal, AbortSignal.timeout(300_000)]) }) }
+    catch (error) { const timedOut = error instanceof DOMException && error.name === 'TimeoutError'; this.options.onConnectionStatus?.('unavailable', timedOut ? 'timeout' : 'network'); throw new HttpClientError(timedOut ? 'Сервер не відповів у встановлений час.' : 'Не вдалося підключитися до сервера.') }
     current()
+    const responseBody = await response.clone().json().catch(() => undefined)
+    this.options.onConnectionStatus?.(classifyHttpReachability(response.status, responseBody))
     if (response.status === 401) this.options.onUnauthorized?.(token)
     if (!response.ok) { await response.body?.cancel(); throw new HttpClientError(response.status === 403 ? 'Резервування для цього комп’ютера вимкнено.' : `Не вдалося завантажити резервну копію (HTTP ${response.status}).`, response.status) }
     await saveBackupResponse(response, target, archive, current, signal)
@@ -46,13 +51,17 @@ export class HttpClient {
     const stream = createReadStream(file)
     try {
       const init = { method: 'POST', redirect: 'error' as const, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream', 'content-length': String(size) }, body: stream, duplex: 'half', signal: AbortSignal.timeout(300_000) }
-      const response = await fetch(new URL('/api/backups/restore/upload', this.baseUrl), init as unknown as RequestInit)
+      let response: Response
+      try { response = await fetch(new URL('/api/backups/restore/upload', this.baseUrl), init as unknown as RequestInit) }
+      catch (error) { const timedOut = error instanceof DOMException && error.name === 'TimeoutError'; this.options.onConnectionStatus?.('unavailable', timedOut ? 'timeout' : 'network'); throw new HttpClientError(timedOut ? 'Сервер не відповів у встановлений час.' : 'Не вдалося підключитися до сервера.') }
       this.checkConnectionGeneration(generation)
+      const responseBody = await response.clone().json().catch(() => undefined)
+      this.options.onConnectionStatus?.(classifyHttpReachability(response.status, responseBody))
       if (response.status === 401) this.options.onUnauthorized?.(token)
       this.checkRequestSession(true, token)
       const value: unknown = await response.json()
       this.checkConnectionGeneration(generation); this.checkRequestSession(true, token)
-      if (!response.ok) throw this.responseError(response.status, value)
+      if (!response.ok) throw this.responseError(response.status, value, '/api/backups/restore/upload')
       if (!validator(value)) throw new HttpClientError('Некоректна відповідь перевірки архіву.')
       return value
     } finally { stream.destroy() }
@@ -82,7 +91,7 @@ export class HttpClient {
 
   async postNoContent(path: string, body?: unknown, options?: RequestOptions): Promise<void> {
     const { response, body: responseBody } = await this.request('POST', path, body, options)
-    if (!response.ok) throw this.responseError(response.status, responseBody)
+    if (!response.ok) throw this.responseError(response.status, responseBody, path)
   }
 
   private async requestJson<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body: unknown, validator?: JsonValidator<T>, options?: RequestOptions): Promise<T> {
@@ -90,7 +99,7 @@ export class HttpClient {
     if (!response.ok) {
       // Write endpoints deliberately return their typed validation/conflict result with 4xx status.
       if (validator && validator(responseBody)) return responseBody
-      throw this.responseError(response.status, responseBody)
+      throw this.responseError(response.status, responseBody, path)
     }
     if (validator && !validator(responseBody)) throw new HttpClientError('Сервер повернув відповідь у непідтримуваному форматі.')
     return responseBody as T
@@ -121,8 +130,10 @@ export class HttpClient {
       })
     } catch (error) {
       this.checkConnectionGeneration(requestGeneration)
+      const timedOut = error instanceof DOMException && error.name === 'TimeoutError'
+      this.options.onConnectionStatus?.('unavailable', timedOut ? 'timeout' : 'network')
       if (diagnosePasswordChange) console.info('[HromadaAID test] password-change: transport error (no confirmed response)')
-      if (error instanceof DOMException && error.name === 'TimeoutError') throw new HttpClientError('Сервер не відповів у встановлений час.')
+      if (timedOut) throw new HttpClientError('Сервер не відповів у встановлений час.')
       throw new HttpClientError('Не вдалося підключитися до сервера.')
     }
 
@@ -131,12 +142,13 @@ export class HttpClient {
     this.checkConnectionGeneration(requestGeneration)
     if (authorize && response.status === 401) this.options.onUnauthorized?.(token)
     this.checkRequestSession(authorize, token, options)
-    if (response.status === 204) return { response, body: undefined }
+    if (response.status === 204) { this.options.onConnectionStatus?.('available'); return { response, body: undefined } }
     let responseBody: unknown
     try { responseBody = await response.json() }
-    catch { this.checkConnectionGeneration(requestGeneration); throw new HttpClientError('Сервер повернув некоректну JSON-відповідь.') }
+    catch { this.checkConnectionGeneration(requestGeneration); this.options.onConnectionStatus?.(classifyHttpReachability(response.status, undefined)); throw new HttpClientError('Сервер повернув некоректну відповідь.') }
     this.checkConnectionGeneration(requestGeneration)
     this.checkRequestSession(authorize, token, options)
+    this.options.onConnectionStatus?.(classifyHttpReachability(response.status, responseBody))
     return { response, body: responseBody }
   }
 
@@ -151,7 +163,14 @@ export class HttpClient {
     if (generation !== this.generation) throw new HttpClientError('Запит до попередньої адреси сервера скасовано.')
   }
 
-  private responseError(status: number, responseBody: unknown): HttpClientError {
+  private responseError(status: number, responseBody: unknown, path?: string): HttpClientError {
+    if (status === 401) {
+      const message = path === '/auth/login' ? 'Неправильний логін або пароль.' : 'Час сеансу минув. Увійдіть повторно.'
+      return new HttpClientError(message, status)
+    }
+    if (status === 403) return new HttpClientError('У вашого облікового запису немає дозволу на виконання цієї дії.', status)
+    if (status === 503) return new HttpClientError(isMaintenanceResponse(status, responseBody) ? 'Сервер тимчасово виконує технічне обслуговування.' : 'Сервер тимчасово недоступний. Спробуйте пізніше.', status)
+    if (status >= 500) return new HttpClientError('Не вдалося виконати запит через помилку сервера.', status)
     const message = responseBody && typeof responseBody === 'object' && 'message' in responseBody && typeof responseBody.message === 'string'
       ? responseBody.message
       : `Сервер повернув помилку HTTP ${status}.`

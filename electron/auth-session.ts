@@ -1,7 +1,7 @@
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AuthActionResult, ClientAuthState } from '../shared/auth-contract.js'
-import { isLoginResult } from '../shared/auth-contract.js'
+import { isAuthenticatedUser, isLoginResult } from '../shared/auth-contract.js'
 import { HttpClient, HttpClientError } from './http-client.js'
 
 const sessionFileName = 'remote-session.dat'
@@ -83,7 +83,29 @@ export class RemoteAuthSession {
     }
   }
 
-  async expired(requestToken?: string): Promise<void> { if (requestToken && requestToken !== this.token) return; await this.clear('Сесію завершено. Увійдіть повторно.') }
+  async expired(requestToken?: string): Promise<void> { if (requestToken && requestToken !== this.token) return; if (!this.token) return; await this.clear('Час вашого сеансу минув. Увійдіть повторно, щоб продовжити роботу.') }
+
+  async validateSession(): Promise<AuthActionResult> {
+    const token = this.token
+    if (!token || (this.state.status !== 'authenticated' && this.state.status !== 'password-change-required')) {
+      return { ok: false, state: this.state, message: 'Потрібно увійти до системи.' }
+    }
+    try {
+      const user = await this.http.getJson('/auth/me', isAuthenticatedUser)
+      if (token !== this.token) return { ok: false, state: this.state, message: 'Стан сеансу змінився.' }
+      const state = this.publish({ mode: 'remote', status: user.mustChangePassword ? 'password-change-required' : 'authenticated', user })
+      return { ok: true, state }
+    } catch (error) {
+      if (error instanceof HttpClientError && error.status === 401) {
+        await this.expired(token)
+        const state = this.currentState as ClientAuthState
+        const message = state.mode === 'remote' && (state.status === 'unauthenticated' || state.status === 'unavailable') ? state.message : undefined
+        return { ok: false, state, message: message ?? 'Час вашого сеансу минув.', failureKind: 'session-expired' }
+      }
+      const failureKind = error instanceof HttpClientError && error.status === 403 ? 'permission' : error instanceof HttpClientError && error.status !== undefined ? 'server' : 'connection'
+      return { ok: false, state: this.state, message: failureKind === 'permission' ? 'У вашого облікового запису немає дозволу на цю дію.' : 'Не вдалося перевірити сеанс.', failureKind }
+    }
+  }
 
   async beginServerChange(): Promise<void> {
     this.switchingServer = true

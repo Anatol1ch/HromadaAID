@@ -12,6 +12,7 @@ import DatePicker from './components/DatePicker'
 import ConfirmDialog from './components/ConfirmDialog'
 import { useReportingYear } from './context/YearContext'
 import { useCatalogUpdates } from './services/catalogRepository'
+import { useConnectionRefresh } from './services/connectionRefresh'
 import { isIsoCalendarDate, parseDateInput } from './lib/dates'
 import { reportBudgetCode, reportTitle, reportCount, reportGroups, reportInstitution, reportPeriodText, reportMoney, reportNumbers, reportTotals } from './lib/reporting'
 
@@ -64,6 +65,7 @@ export default function Reports() {
     finally { if(request===sequence.current) setLoading(false) }
   },[year,period,mode,validDate])
   useEffect(()=>{void refresh();return()=>{++sequence.current}},[refresh])
+  useConnectionRefresh(() => { void refresh() })
   useCatalogUpdates(()=>void refresh())
   const [printSnapshot, setPrintSnapshot] = useState<FrozenReport | null>(null)
   const [preview, setPreview] = useState<PreparedReport | null>(null)

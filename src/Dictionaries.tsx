@@ -11,6 +11,7 @@ import type { AidTypeOption, CatalogEditInput, DecisionInput, DecisionSummary, D
 import RecipientRegistry from './RecipientRegistry'
 import DictionaryTable, { DictionaryToolbar } from './components/DictionaryTable'
 import ProgramsCatalog from './components/ProgramsCatalog'
+import { useConnectionRefresh } from './services/connectionRefresh'
 import BankRegistry from './BankRegistry'
 import Modal from './components/Modal'
 import { confirmModalClose } from './components/Modal'
@@ -99,6 +100,7 @@ export default function Dictionaries({
     } catch { if (sequence === refreshSequence.current) setLoadError('Не вдалося завантажити довідники з локального сховища.') }
     finally { if (sequence === refreshSequence.current) setLoading(false) }
   }, [year, allowedSections])
+  useConnectionRefresh(() => { void refresh() })
   useEffect(() => { void refresh() }, [refresh])
   useEffect(() => { if (!allowedSections.includes(section)) setSection(allowedSections[0] ?? 'programs') }, [allowedSections, section])
   useCatalogUpdates(() => { void refresh() })

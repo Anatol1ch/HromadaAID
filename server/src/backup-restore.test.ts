@@ -139,7 +139,9 @@ test('real HTTP admin operations, authorization, streaming upload/download, dama
     assert.equal(f.admin.maintenance, false)
     unblock(); await activeRequest; holdHealth = false
     await http.postJson('/api/backups/restore/confirm', { id: preview.id, confirmationToken: preview.confirmationToken })
-    assert.equal((await fetch(origin + '/health')).status, 503)
+    const maintenanceResponse = await fetch(origin + '/health')
+    assert.equal(maintenanceResponse.status, 503)
+    assert.equal((await maintenanceResponse.json() as { code?: string }).code, 'RESTORE_MAINTENANCE')
     assert.throws(() => assertNoPendingRestore(f.path))
     token = undefined
   } finally { unblock(); await app.close(); await f.archives.stop(); f.db.close(); release(); await cleanup(f.root) }

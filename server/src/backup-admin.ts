@@ -25,7 +25,7 @@ export class BackupAdministration {
 
   install(app: FastifyInstance): void {
     app.addHook('onRequest', async (request, reply) => {
-      if (this.maintenance) return reply.status(503).header('Retry-After', '60').send({ message: 'Сервер у режимі відновлення. Після завершення увійдіть повторно.' })
+      if (this.maintenance) return reply.status(503).header('Retry-After', '60').send({ code: 'RESTORE_MAINTENANCE', message: 'Сервер у режимі відновлення. Після завершення увійдіть повторно.' })
       this.active.add(request.id)
     })
     app.addHook('onResponse', async request => { this.active.delete(request.id) })

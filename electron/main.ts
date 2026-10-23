@@ -35,6 +35,7 @@ let remoteHttp: HttpClient | undefined
 let remoteBackup: RemoteBackupClient | undefined
 let connectionStatus: ServerConnectionState['status'] = 'unknown'
 let connectionMessage: string | undefined
+let connectionFailureReason: ServerConnectionState['failureReason']
 let savedApiUrl: string | null = null
 const appPageUrl = isDev ? devServerUrl : pathToFileURL(join(currentDirectory, '../../dist/index.html')).href
 configureIpcSecurity(() => mainWindow, appPageUrl)
@@ -197,26 +198,35 @@ if (!hasSingleInstanceLock) {
         editable: !connectionLocked(),
         ...(runtimeConfig?.lockedReason ? { lockedReason: runtimeConfig.lockedReason } : {}),
         status: connectionStatus,
+        ...(connectionFailureReason ? { failureReason: connectionFailureReason } : {}),
         ...(connectionMessage || runtimeConfig?.configurationError ? { message: connectionMessage ?? runtimeConfig?.configurationError } : {}),
       })
       const publishConnectionState = () => {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('connection:state', connectionState())
       }
+      const publishReachability = (status: ServerConnectionState['status'], failureReason?: ServerConnectionState['failureReason']) => {
+        connectionStatus = status
+        connectionFailureReason = failureReason ?? (status === 'maintenance' ? 'maintenance' : undefined)
+        connectionMessage = status === 'maintenance' ? 'Сервер тимчасово виконує технічне обслуговування.' : status === 'unavailable' ? failureReason === 'timeout' ? 'Сервер не відповів у встановлений час.' : failureReason === 'http' ? 'Сервер відповів помилкою під час перевірки доступності.' : 'Не вдалося зв’язатися із сервером.' : undefined
+        publishConnectionState()
+      }
       trustedIpcMain.handle('connection:get-state', async () => connectionState())
       trustedIpcMain.handle('connection:check', async (_event, value: unknown) => {
         let normalized: URL
         try { normalized = validateServerBaseUrl(value) }
-        catch (error) { return { ok: false, message: error instanceof Error ? error.message : 'Некоректна адреса сервера.' } }
+        catch (error) { return { ok: false, status: 'unavailable', failureReason: 'incompatible', message: error instanceof Error ? error.message : 'Некоректна адреса сервера.' } }
         const activeUrl = runtimeConfig?.mode === 'remote' ? runtimeConfig.apiUrl?.origin : undefined
         if (activeUrl === normalized.origin || (runtimeConfig?.mode === 'local' && savedApiUrl === normalized.origin)) {
           connectionStatus = 'checking'
+          connectionFailureReason = undefined
           connectionMessage = 'Перевірка підключення…'
           publishConnectionState()
         }
         const result = await checkServerAddress(normalized.origin)
         const currentUrl = runtimeConfig?.mode === 'remote' ? runtimeConfig.apiUrl?.origin : savedApiUrl ?? undefined
         if (currentUrl === result.apiUrl) {
-          connectionStatus = result.ok ? 'available' : 'unavailable'
+          connectionStatus = result.status
+          connectionFailureReason = result.ok ? undefined : result.failureReason
           connectionMessage = result.message
           publishConnectionState()
           if (result.ok) remoteBackup?.wake()
@@ -239,6 +249,7 @@ if (!hasSingleInstanceLock) {
           catch { return { ok: false, state: current, message: 'Не вдалося безпечно зберегти адресу сервера.' } }
           savedApiUrl = normalized.origin
           connectionStatus = 'available'
+          connectionFailureReason = undefined
           connectionMessage = 'Адресу збережено. Перезапустіть застосунок, щоб перейти до remote mode.'
           const state = connectionState()
           publishConnectionState()
@@ -250,6 +261,7 @@ if (!hasSingleInstanceLock) {
           runtimeConfig = { mode: 'remote', apiUrl: url, source: 'saved' }
           savedApiUrl = url.origin
           connectionStatus = 'available'
+          connectionFailureReason = undefined
           connectionMessage = 'Сервер доступний.'
         })
         if (!switched.ok) return { ok: false, state: connectionState(), message: switched.message }
@@ -283,6 +295,7 @@ if (!hasSingleInstanceLock) {
         const http = new HttpClient(runtimeConfig.apiUrl ?? new URL('http://127.0.0.1:1'), 5_000, {
           getAccessToken: () => session?.accessToken,
           onUnauthorized: (token) => { void session?.expired(token) },
+          onConnectionStatus: publishReachability,
         })
         remoteHttp = http
         session = new RemoteAuthSession(userDataPath, http, publishAuthState)
@@ -295,18 +308,21 @@ if (!hasSingleInstanceLock) {
         await session.initialize()
         if (runtimeConfig.configurationError || !runtimeConfig.apiUrl) {
           connectionStatus = 'unavailable'
+          connectionFailureReason = runtimeConfig.configurationError ? 'incompatible' : 'network'
           connectionMessage = runtimeConfig.configurationError ?? 'Налаштуйте адресу сервера, щоб увійти.'
           session.setUnavailable(connectionMessage)
         } else {
           void checkServerAddress(runtimeConfig.apiUrl.origin).then((result) => {
             if (runtimeConfig?.mode !== 'remote' || runtimeConfig.apiUrl?.origin !== result.apiUrl) return
-            connectionStatus = result.ok ? 'available' : 'unavailable'
+            connectionStatus = result.status
+            connectionFailureReason = result.ok ? undefined : result.failureReason
             connectionMessage = result.message
             publishConnectionState()
             if (!result.ok && session?.currentState.status !== 'authenticated' && session?.currentState.status !== 'password-change-required') session?.setUnavailable(result.message)
           })
         }
         trustedIpcMain.handle('auth:get-state', async () => session.currentState)
+        trustedIpcMain.handle('auth:validate-session', async (): Promise<AuthActionResult> => session.validateSession())
         trustedIpcMain.handle('auth:login', async (_event, username: unknown, password: unknown): Promise<AuthActionResult> => {
           if (savingConnection) return { ok: false, state: session.currentState, message: 'Зачекайте завершення зміни адреси сервера.' }
           if (!runtimeConfig?.apiUrl) return { ok: false, state: session.currentState, message: runtimeConfig?.configurationError ?? 'Налаштуйте адресу сервера перед входом.' }

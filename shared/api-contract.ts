@@ -295,10 +295,11 @@ export type ServerConnectionState = {
   source: 'environment' | 'saved' | 'none' | 'invalid'
   editable: boolean
   lockedReason?: string
-  status: 'unknown' | 'checking' | 'available' | 'unavailable'
+  status: import('./system-state.js').ConnectionStatus
+  failureReason?: import('./system-state.js').ConnectionFailureReason
   message?: string
 }
-export type ServerConnectionCheckResult = { ok: true; apiUrl: string; message: string } | { ok: false; apiUrl?: string; message: string }
+export type ServerConnectionCheckResult = { ok: true; apiUrl: string; message: string; status: 'available' } | { ok: false; apiUrl?: string; message: string; status: 'unavailable' | 'maintenance'; failureReason: import('./system-state.js').ConnectionFailureReason }
 export type ServerConnectionSaveResult = { ok: true; state: ServerConnectionState; message?: string } | { ok: false; state: ServerConnectionState; message: string }
 
 export type HromadaAidApi = {
@@ -319,6 +320,7 @@ export type HromadaAidApi = {
   appInfo: { getVersion: () => Promise<string> }
   auth: {
     getState: () => Promise<ClientAuthState>
+    validateSession: () => Promise<AuthActionResult>
     login: (username: string, password: string) => Promise<AuthActionResult>
     logout: () => Promise<AuthActionResult>
     changePassword: (currentPassword: string, newPassword: string) => Promise<AuthActionResult>

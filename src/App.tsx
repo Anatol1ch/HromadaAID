@@ -1,7 +1,7 @@
 import Alert from './components/Alert'
 import DataState from './components/DataState'
 import LoginScreen from './components/LoginScreen'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { initialAccountingYear, rememberAccountingYear } from './lib/accountingYear'
 import { Activity, ChevronRight, CircleHelp, Code2, Plus, ArrowUpRight, CalendarDays, FileText, HandCoins, HeartHandshake, Home, LogOut, Settings, BookOpen, ChartNoAxesCombined, UsersRound, Lock, LockKeyhole } from 'lucide-react'
 import type { ClientAuthState } from '../shared/auth-contract'
@@ -14,6 +14,7 @@ import Reports from './Reports'
 import UsersAdmin from './UsersAdmin'
 import TemporaryPasswordScreen from './components/TemporaryPasswordScreen'
 import AccessDeniedToast from './components/AccessDeniedToast'
+import ConnectionStateOverlay from './components/ConnectionStateOverlay'
 import SettingsPage from './SettingsPage'
 import communityCoat from '../reference/ГЕРБ.png'
 import YearPicker from './components/YearPicker'
@@ -21,6 +22,7 @@ import { UnsavedChangesConfirmation } from './components/ConfirmDialog'
 import { useOverviewData } from './components/useOverviewData'
 import { useReportingYear } from './context/YearContext'
 import { YearContext } from './context/YearContext'
+import { notifyConnectionRestored } from './services/connectionRefresh'
 
 const nav = [
   { label: 'Головна', page: 'home' as WorkspacePage, icon: Home, permission: 'dashboard.read' as Permission },
@@ -33,11 +35,17 @@ const nav = [
 ]
 function App() {
   const [auth, setAuth] = useState<ClientAuthState | null>(null)
-  const connectionActions = {
+  const [connection, setConnection] = useState<import('../shared/api-contract').ServerConnectionState | null>(null)
+  const [connectionOverlayStatus, setConnectionOverlayStatus] = useState<'unavailable' | 'maintenance' | null>(null)
+  const wasDisconnected = useRef(false)
+  const recoveryInFlight = useRef(false)
+  const authRef = useRef(auth)
+  authRef.current = auth
+  const connectionActions = useMemo(() => ({
     getState: () => window.hromadaAid.connection.getState(),
     check: (apiUrl: string) => window.hromadaAid.connection.check(apiUrl),
     save: (apiUrl: string) => window.hromadaAid.connection.save(apiUrl),
-  }
+  }), [])
   useEffect(() => {
     let active = true
     let receivedEvent = false
@@ -48,23 +56,51 @@ function App() {
           const connection = await window.hromadaAid.connection.getState()
           if (!active || receivedEvent) return
           if (connection.status === 'available') { setAuth({ mode: 'remote', status: 'unauthenticated', user: null }); return }
-          if (connection.status === 'unavailable') { setAuth({ mode: 'remote', status: 'unavailable', user: null, message: connection.message ?? state.message }); return }
+          if (connection.status === 'unavailable' || connection.status === 'maintenance') { setAuth({ mode: 'remote', status: 'unavailable', user: null, message: connection.message ?? state.message }); return }
         } catch { /* Keep the auth state when no connection snapshot is available. */ }
       }
       if (active && !receivedEvent) setAuth(state)
     }, () => { if (active && !receivedEvent) setAuth({ mode: 'remote', status: 'unavailable', user: null, message: 'Не вдалося отримати стан авторизації.' }) })
     const unsubscribe = window.hromadaAid.auth.onStateChange((state) => { receivedEvent = true; if (active) setAuth(state) })
+    void window.hromadaAid.connection.getState().then(value => { if (active) setConnection(value) }).catch(() => undefined)
     const unsubscribeConnection = window.hromadaAid.connection.onStateChange((connection) => {
       if (!active || connection.mode !== 'remote') return
+      setConnection(connection)
       setAuth(current => {
         if (!current || current.mode !== 'remote' || current.status === 'authenticated' || current.status === 'password-change-required') return current
         if (connection.status === 'available' && current.status === 'unavailable') return { mode: 'remote', status: 'unauthenticated', user: null }
-        if (connection.status === 'unavailable') return { mode: 'remote', status: 'unavailable', user: null, message: connection.message ?? 'Не вдалося підключитися до сервера.' }
+        if (connection.status === 'unavailable' || connection.status === 'maintenance') return { mode: 'remote', status: 'unavailable', user: null, message: connection.message ?? 'Сервер тимчасово недоступний.' }
         return current
       })
     })
     return () => { active = false; unsubscribe(); unsubscribeConnection() }
   }, [])
+  const onConnectionRestored = useCallback(async () => {
+    if (recoveryInFlight.current || !wasDisconnected.current) return
+    recoveryInFlight.current = true
+    try {
+      const current = authRef.current
+      if (current?.mode !== 'remote' || current.status === 'unauthenticated' || current.status === 'unavailable') {
+        setAuth({ mode: 'remote', status: 'unauthenticated', user: null })
+        setConnectionOverlayStatus(null)
+        return
+      }
+      const result = await window.hromadaAid.auth.validateSession()
+      setAuth(result.state)
+      if (result.ok || result.failureKind !== 'connection') {
+        if (result.ok || result.failureKind === 'permission' || result.failureKind === 'server') notifyConnectionRestored()
+        setConnectionOverlayStatus(null)
+      }
+    } finally { recoveryInFlight.current = false; wasDisconnected.current = false }
+  }, [])
+  useEffect(() => {
+    const hasRemoteState = auth?.mode === 'remote'
+    if (hasRemoteState && connection?.active && (connection.status === 'unavailable' || connection.status === 'maintenance')) {
+      wasDisconnected.current = true
+      setConnectionOverlayStatus(connection.status)
+    }
+    if (hasRemoteState && connection?.status === 'available' && wasDisconnected.current) void onConnectionRestored()
+  }, [auth, connection?.status, onConnectionRestored])
   const login = async (username: string, password: string) => {
     const result = await window.hromadaAid.auth.login(username, password)
     setAuth(result.state)
@@ -76,9 +112,9 @@ function App() {
     return { ok: result.ok, message: 'message' in result ? result.message : undefined }
   }
   if (!auth) return <StartupScreen/>
-  if (auth.mode === 'remote' && auth.status === 'password-change-required') return <TemporaryPasswordScreen state={auth} onChangePassword={changePassword}/>
-  if (auth.mode === 'remote' && auth.status !== 'authenticated') return <LoginScreen state={auth} onLogin={login} connectionActions={connectionActions}/>
-  return <Workspace key={auth.mode === 'remote' ? auth.user.id : 'local'} auth={auth} onChangePassword={changePassword} connectionActions={connectionActions}/>
+  if (auth.mode === 'remote' && auth.status === 'password-change-required') return <><TemporaryPasswordScreen state={auth} onChangePassword={changePassword}/>{connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
+  if (auth.mode === 'remote' && auth.status !== 'authenticated') return <><LoginScreen state={auth} onLogin={login} connectionActions={connectionActions}/>{connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
+  return <><Workspace key={auth.mode === 'remote' ? auth.user.id : 'local'} auth={auth} onChangePassword={changePassword} connectionActions={connectionActions}/>{auth.mode === 'remote' && connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay key="server-connection-overlay" status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
 }
 
 function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extract<ClientAuthState, { status: 'authenticated' }>; onChangePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; message?: string }>; connectionActions: { getState: () => Promise<import('../shared/api-contract').ServerConnectionState>; check: (apiUrl: string) => Promise<import('../shared/api-contract').ServerConnectionCheckResult>; save: (apiUrl: string) => Promise<import('../shared/api-contract').ServerConnectionSaveResult> } }) {

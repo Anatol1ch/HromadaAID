@@ -34,7 +34,7 @@ export default function ServerConnectionDialog({ onClose, getState, check, save,
     if (busy) return
     setChecking(true); setResult(null); setError('')
     try { setResult(await check(address)) }
-    catch { setResult({ ok: false, message: 'Не вдалося виконати перевірку підключення.' }) }
+    catch { setResult({ ok: false, status: 'unavailable', failureReason: 'network', message: 'Не вдалося виконати перевірку підключення.' }) }
     finally { setChecking(false) }
   }
   const submit = async (event: FormEvent) => {

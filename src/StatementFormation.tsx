@@ -11,6 +11,7 @@ import { statementPlan, type StatementPlan } from '../electron/statement-paramet
 import { assignmentStatusColor } from '../electron/assignment-model'
 import { useReportingYear } from './context/YearContext'
 import { formatDate } from './lib/dates'
+import { connectionRestoredEvent } from './services/connectionRefresh'
 
 const money = (minor: number) => `${new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(minor / 100)} ₴`
 function pdfUrl(base64: string) {
@@ -62,7 +63,8 @@ export default function StatementFormation() {
     }
     load()
     window.addEventListener('focus', load)
-    return () => { mounted = false; window.removeEventListener('focus', load) }
+    window.addEventListener(connectionRestoredEvent, load)
+    return () => { mounted = false; window.removeEventListener('focus', load); window.removeEventListener(connectionRestoredEvent, load) }
   }, [year, loadRevision])
 
   useEffect(() => { setSelectedIds(new Set()) }, [year])
