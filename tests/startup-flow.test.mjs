@@ -43,6 +43,13 @@ test('startup and welcome use a five second minimum', async () => {
 
 test('welcome uses only the structured first name and has a neutral fallback', () => {
   const user = { id: 'u', username: 'login-only', displayName: 'Full Display Name', firstName: '  Анатолій  ', lastName: 'Прізвище', roles: ['viewer'], permissions: ['dashboard.read'], mustChangePassword: false }
-  assert.equal(welcomeHeading(user), 'Вітаємо в системі, Анатолій!')
-  assert.equal(welcomeHeading({ ...user, firstName: null }), 'Вітаємо в системі!')
+  assert.equal(welcomeHeading(user), 'ВІТАЄМО В СИСТЕМІ, АНАТОЛІЙ!')
+  assert.equal(welcomeHeading({ ...user, firstName: null }), 'ВІТАЄМО В СИСТЕМІ!')
+})
+
+test('welcome heading wraps long names and uses a wider animated preparation indicator', async () => {
+  const styles = await (await import('node:fs/promises')).readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
+  assert.match(styles, /\.app-welcome-content h1 \{[^}]*overflow-wrap: anywhere/)
+  assert.match(styles, /\.app-welcome-content \.app-startup-loader \{ width: 130px/)
+  assert.match(styles, /\.app-startup-loader::after \{[^}]*animation: startup-loader 1100ms ease-in-out infinite/)
 })

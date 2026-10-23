@@ -16,10 +16,10 @@ test('login connection action is an accessible icon-only button', () => {
 })
 
 test('home year remains horizontal while analytics stay behind the overview permission gate', () => {
-  assert.match(app, /workspace-year-label"><CalendarDays[^>]*\/><strong><span>\{year\}<\/span> рік<\/strong>/)
+  assert.match(app, /workspace-year-label"><CalendarDays[^>]*\/><strong>\{year\}<\/strong>/)
   assert.match(app, /canViewOverview \? <>\s*<OverviewHomeSummary year=\{year\}\/>/)
   assert.match(styles, /\.workspace-year-label \{ display: flex; flex: none; align-items: center/)
-  assert.match(styles, /\.workspace-year-label > strong span \{[^}]*color: #2f7546/)
+  assert.match(styles, /\.workspace-year-label > strong \{ color: #2f7546; font-size: 22px;/)
   assert.match(app, /workspace-year-neutral"><span>Робочий простір громади<\/span>/)
   assert.match(app, /data \? <strong>\{`Призначено допомог:/)
   assert.doesNotMatch(app, /Показники та стан виконання доступні в огляді/)

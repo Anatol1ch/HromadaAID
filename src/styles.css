@@ -1600,8 +1600,7 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .workspace-shortcuts > button > svg { flex-shrink: 0; }
 .workspace-year { display: flex; align-items: center; flex-wrap: nowrap; gap: var(--space-4); min-height: 68px; padding: 12px 18px; background: #f7faf8; }
 .workspace-year-label { display: flex; flex: none; align-items: center; gap: var(--space-3); color: #497454; white-space: nowrap; }
-.workspace-year-label > strong { color: #355b41; font-size: 16px; font-weight: 650; }
-.workspace-year-label > strong span { color: #2f7546; font-size: 22px; font-weight: 750; }
+.workspace-year-label > strong { color: #2f7546; font-size: 22px; font-weight: 750; }
 .workspace-year-summary { flex: 1 1 auto; display: flex; align-items: center; min-width: 0; padding-left: var(--space-4); border-left: 1px solid #dce7df; color: #4b6553; font-size: 13px; line-height: 1.45; white-space: nowrap; }
 .workspace-year-summary strong { color: #4b6553; font-weight: 650; }
 .workspace-year-summary.workspace-year-neutral { color: var(--color-text-secondary); }
@@ -2211,9 +2210,10 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
   .app-start-error span { margin-top: var(--space-2); color: var(--color-text-secondary); line-height: 1.5; }
   .app-welcome { display: grid; min-height: 100dvh; place-items: center; padding: var(--space-6); background: var(--surface-app); }
   .app-welcome-content { display: grid; justify-items: center; width: min(100%, 520px); text-align: center; animation: startup-enter var(--motion-duration-modal) ease-out both; }
-  .app-welcome-content h1 { margin: var(--space-5) 0 0; color: #263d30; font-size: clamp(22px, 3vw, 30px); line-height: 1.25; }
-  .app-welcome-content p { margin: var(--space-3) 0 var(--space-5); color: var(--color-text-secondary); font-size: 14px; line-height: 1.55; }
-  .app-welcome-content .app-startup-loader { margin-top: var(--space-1); }
+  .app-welcome-content .app-startup-mark { margin-bottom: var(--space-3); }
+  .app-welcome-content h1 { max-width: 100%; margin: var(--space-4) 0 0; color: #263d30; font-size: clamp(20px, 2.7vw, 27px); line-height: 1.25; overflow-wrap: anywhere; }
+  .app-welcome-content p { margin: var(--space-2) 0 var(--space-3); color: var(--color-text-secondary); font-size: 14px; line-height: 1.55; }
+  .app-welcome-content .app-startup-loader { width: 130px; margin-top: 0; }
   .app-welcome-error { color: var(--color-text-error) !important; }
   .app-welcome-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-3); }
 }
