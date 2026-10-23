@@ -1,0 +1,1 @@
+These PEM files are synthetic, self-signed test fixtures generated for the transport tests. The private keys are public test data and must never be used in an installation or trusted as production credentials.

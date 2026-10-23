@@ -1,0 +1,14 @@
+{
+  "configVersion": 2,
+  "mode": "network",
+  "programDirectory": "C:\\Program Files\\HromadaAID",
+  "host": "192.0.2.10",
+  "port": 4310,
+  "databasePath": "C:\\ProgramData\\HromadaAID\\hromada-aid.sqlite",
+  "backupDirectory": "C:\\ProgramData\\HromadaAID\\Backups",
+  "tls": {
+    "certificatePath": "C:\\ProgramData\\HromadaAID\\TLS\\server-certificate.pem",
+    "privateKeyPath": "C:\\ProgramData\\HromadaAID\\TLS\\server-private-key.pem",
+    "certificateChainPath": "C:\\ProgramData\\HromadaAID\\TLS\\intermediate-chain.pem"
+  }
+}

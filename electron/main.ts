@@ -10,7 +10,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { cleanupGeneratedStatements, registerStatementsIpc } from './statements-ipc.js'
 import { configureIpcSecurity, isTrustedAppUrl, trustedIpcMain } from './ipc-security.js'
-import { ElectronRuntimeConfigError, readElectronRuntimeConfig, readSavedConnectionConfig, validateServerBaseUrl, type ElectronRuntimeConfig } from './runtime-config.js'
+import { ElectronRuntimeConfigError, enforceTlsCertificateValidation, readElectronRuntimeConfig, readSavedConnectionConfig, validateServerBaseUrl, type ElectronRuntimeConfig } from './runtime-config.js'
 import { HttpClient, HttpClientError } from './http-client.js'
 import { checkServerAddress, switchRemoteServer, type ServerConnectionState } from './connection-config.js'
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, CatalogList, DashboardData, DecisionRecord, DecisionSummary, ProgramApproval, RecipientRecord, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from './api-contract.js'
@@ -20,6 +20,7 @@ import { isAnnualAidPlanList, isAnnualPlanEntryList, isAssignmentChangeResult, i
 if (process.platform === 'win32') app.setAppUserModelId('local.hromadaaid')
 
 const isDev = !app.isPackaged
+enforceTlsCertificateValidation()
 const devServerUrl = 'http://127.0.0.1:5175/'
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const iconDirectory = app.isPackaged ? join(process.resourcesPath, 'assets') : join(currentDirectory, 'assets')

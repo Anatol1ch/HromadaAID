@@ -5,10 +5,11 @@ import { BackupArchives } from './backup-archives.js'
 import { openInstalledServerDatabase, openServerDatabase } from './database.js'
 import { acquireDatabaseOwnership } from './restore-safety.js'
 import { BackupAdministration, assertNoPendingRestore } from './backup-admin.js'
-import type { ServerConfig } from './config.js'
+import { readInstalledTlsOptions, type InstalledServerConfig, type ServerConfig } from './config.js'
 import { lstatSync } from 'node:fs'
 
-export async function startServer(config: ServerConfig, installed: boolean): Promise<void> {
+export async function startServer(config: ServerConfig | InstalledServerConfig, installed: boolean): Promise<void> {
+  const https = installed ? readInstalledTlsOptions(config as InstalledServerConfig) : undefined
   assertNoPendingRestore(config.databasePath)
   const key = loadBackupKey(config.backupDirectory, installed)
   const releaseOwnership = acquireDatabaseOwnership(config.databasePath)
@@ -26,7 +27,7 @@ export async function startServer(config: ServerConfig, installed: boolean): Pro
     const logger = { error: (message: string) => app?.log.error(message), warn: (message: string) => app?.log.warn(message) }
     const service = new SqliteBackupService(database, config.backupDirectory, logger, !installed)
     const administration = new BackupAdministration(config.databasePath, archives, service, async () => { await scheduler?.stop() }, !installed)
-    app = createApp(database, archives, administration)
+    app = createApp(database, archives, administration, https)
     const stop = async (signal: string) => {
       if (stopping) return
       stopping = true

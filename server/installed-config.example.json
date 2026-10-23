@@ -1,5 +1,6 @@
 {
-  "configVersion": 1,
+  "configVersion": 2,
+  "mode": "local",
   "programDirectory": "C:\\Program Files\\HromadaAID",
   "host": "127.0.0.1",
   "port": 4310,

@@ -13,6 +13,28 @@ export class ElectronRuntimeConfigError extends Error {
   }
 }
 
+/** Prevent an inherited environment setting from disabling Node's normal TLS verification. */
+export function enforceTlsCertificateValidation(): void {
+  if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') process.env.NODE_TLS_REJECT_UNAUTHORIZED = '1'
+}
+
+/** Converts Node's nested fetch/TLS errors to safe, actionable user text. */
+export function safeTransportErrorMessage(error: unknown, timedOut = false): string | undefined {
+  if (timedOut) return 'Сервер не відповів у встановлений час.'
+  let current: unknown = error
+  for (let depth = 0; depth < 6 && current && typeof current === 'object'; depth += 1) {
+    const value = current as { code?: unknown; message?: unknown; cause?: unknown }
+    if (typeof value.code === 'string' && /^(CERT_HAS_EXPIRED|ERR_TLS_CERT_ALTNAME_INVALID|UNABLE_TO_VERIFY_LEAF_SIGNATURE|DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN|ERR_CERT_AUTHORITY_INVALID|ERR_TLS_CERT_SIGNATURE_ALGORITHM_UNSUPPORTED)$/.test(value.code)) {
+      return 'Не вдалося встановити захищене з’єднання: сертифікат сервера недовірений, прострочений або не відповідає адресі.'
+    }
+    if (typeof value.message === 'string' && value.message.toLowerCase() === 'unexpected redirect') {
+      return 'Сервер перенаправив запит. Для безпеки перехід не виконано.'
+    }
+    current = value.cause
+  }
+  return undefined
+}
+
 export function validateServerBaseUrl(value: unknown): URL {
   if (typeof value !== 'string' || !value.trim()) throw new ElectronRuntimeConfigError('Укажіть адресу сервера.')
   let url: URL

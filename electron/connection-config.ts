@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, open, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ServerConnectionCheckResult, ServerConnectionState } from '../shared/api-contract.js'
-import { validateServerBaseUrl } from './runtime-config.js'
+import { safeTransportErrorMessage, validateServerBaseUrl } from './runtime-config.js'
 import type { RemoteAuthSession } from './auth-session.js'
 import type { HttpClient } from './http-client.js'
 import { classifyHealthFailure, classifyHealthResponse } from '../shared/system-state.js'
@@ -20,7 +20,8 @@ export async function checkServerAddress(value: unknown, timeoutMs = 3_500): Pro
     response = await fetch(new URL('/health', base), { headers: { accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(timeoutMs) })
   } catch (error) {
     const timedOut = error instanceof DOMException && error.name === 'TimeoutError'
-    return { ok: false, apiUrl: base.origin, status: 'unavailable', failureReason: timedOut ? 'timeout' : 'network', message: timedOut ? 'Сервер не відповів у встановлений час.' : 'Не вдалося підключитися до сервера.' }
+    const transportMessage = safeTransportErrorMessage(error, timedOut)
+    return { ok: false, apiUrl: base.origin, status: 'unavailable', failureReason: transportMessage && !timedOut ? 'incompatible' : timedOut ? 'timeout' : 'network', message: transportMessage ?? 'Не вдалося підключитися до сервера.' }
   }
   let body: unknown
   try { body = await response.json() }

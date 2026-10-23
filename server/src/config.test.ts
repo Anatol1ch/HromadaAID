@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
-import { initializationConfigArgument, installedConfigArgument, readInstalledServerConfig, readServerConfig, type InstalledServerConfig } from './config.js'
+import { initializationConfigArgument, installedConfigArgument, readInstalledServerConfig, readInstalledTlsOptions, readServerConfig, type InstalledServerConfig } from './config.js'
 import { validateInstalledPaths } from './installed-paths.js'
 import { initializeInstalledServerDatabase, openInstalledServerDatabase } from './database.js'
 
@@ -16,7 +16,8 @@ async function fixture() {
   const backupDirectory = join(root, 'Архів резервних копій')
   await Promise.all([mkdir(programDirectory), mkdir(dataDirectory), mkdir(backupDirectory)])
   const config: InstalledServerConfig = {
-    configVersion: 1,
+    configVersion: 2,
+    mode: 'local',
     programDirectory,
     host: '127.0.0.1',
     port: 4310,
@@ -32,7 +33,7 @@ test('installed config accepts explicit absolute Unicode paths and rejects unkno
   const f = await fixture()
   try {
     assert.deepEqual(readInstalledServerConfig(f.configPath), f.config)
-    await writeFile(f.configPath, JSON.stringify({ ...f.config, configVersion: 2 }))
+    await writeFile(f.configPath, JSON.stringify({ ...f.config, configVersion: 3 }))
     assert.throws(() => readInstalledServerConfig(f.configPath), /Несумісна версія конфігурації/)
     await writeFile(f.configPath, JSON.stringify({ ...f.config, secret: 'forbidden' }))
     assert.throws(() => readInstalledServerConfig(f.configPath), /невідомий параметр/)
@@ -56,7 +57,44 @@ test('installed config rejects relative paths and non-loopback bind before TLS s
     await writeFile(f.configPath, JSON.stringify({ ...f.config, databasePath: 'relative.sqlite' }))
     assert.throws(() => readInstalledServerConfig(f.configPath), /databasePath має містити абсолютний шлях/)
     await writeFile(f.configPath, JSON.stringify({ ...f.config, host: '0.0.0.0' }))
-    assert.throws(() => readInstalledServerConfig(f.configPath), /лише loopback/)
+    assert.throws(() => readInstalledServerConfig(f.configPath), /лише HTTP на loopback/)
+  } finally { await rm(f.root, { recursive: true, force: true }) }
+})
+
+test('network mode requires valid matching TLS files; legacy 8.2.1 configs stay local HTTP', async () => {
+  const f = await fixture()
+  const fixtureDirectory = resolve(process.cwd(), 'server', 'test-fixtures')
+  const certificatePath = join(f.root, 'сертифікат.pem')
+  const privateKeyPath = join(f.root, 'приватний ключ.pem')
+  const otherKeyPath = join(f.root, 'інший ключ.pem')
+  try {
+    await writeFile(certificatePath, await readFile(join(fixtureDirectory, 'tls-test-cert.pem')))
+    await writeFile(privateKeyPath, await readFile(join(fixtureDirectory, 'tls-test-key.pem')))
+    await writeFile(otherKeyPath, await readFile(join(fixtureDirectory, 'tls-other-test-key.pem')))
+    const network = { ...f.config, configVersion: 2 as const, mode: 'network' as const, host: '192.0.2.10', tls: { certificatePath, privateKeyPath } }
+    await writeFile(f.configPath, JSON.stringify(network))
+    const parsed = readInstalledServerConfig(f.configPath)
+    assert.ok(readInstalledTlsOptions(parsed)?.cert)
+    await writeFile(f.configPath, JSON.stringify({ ...network, host: '127.0.0.2' }))
+    assert.throws(() => readInstalledServerConfig(f.configPath), /loopback заборонені/)
+    await writeFile(f.configPath, JSON.stringify({ ...network, host: '0.0.0.0' }))
+    assert.throws(() => readInstalledServerConfig(f.configPath), /wildcard і loopback заборонені/)
+    await writeFile(f.configPath, JSON.stringify({ ...network, tls: undefined }))
+    assert.throws(() => readInstalledServerConfig(f.configPath), /TLS-сертифікат і приватний ключ/)
+    await writeFile(f.configPath, JSON.stringify({ ...network, tls: { ...network.tls, certificatePath: join(f.root, 'відсутній сертифікат.pem') } }))
+    assert.throws(() => readInstalledTlsOptions(readInstalledServerConfig(f.configPath)), /TLS-файл certificatePath не знайдено/)
+    await writeFile(f.configPath, JSON.stringify({ ...network, tls: { certificatePath, privateKeyPath: join(f.root, 'missing.pem') } }))
+    assert.throws(() => readInstalledTlsOptions(readInstalledServerConfig(f.configPath)), /TLS-файл privateKeyPath не знайдено/)
+    await writeFile(f.configPath, JSON.stringify({ ...network, tls: { certificatePath, privateKeyPath: otherKeyPath } }))
+    assert.throws(() => readInstalledTlsOptions(readInstalledServerConfig(f.configPath)), /не відповідає парі/)
+    await writeFile(certificatePath, 'not a certificate')
+    await writeFile(f.configPath, JSON.stringify(network))
+    assert.throws(() => readInstalledTlsOptions(readInstalledServerConfig(f.configPath)), /TLS-сертифікат або приватний ключ некоректний/)
+    const { mode: _mode, ...legacyConfig } = f.config
+    await writeFile(f.configPath, JSON.stringify({ ...legacyConfig, configVersion: 1 }))
+    const legacy = readInstalledServerConfig(f.configPath)
+    assert.equal(legacy.mode, 'local')
+    assert.equal(readInstalledTlsOptions(legacy), undefined)
   } finally { await rm(f.root, { recursive: true, force: true }) }
 })
 

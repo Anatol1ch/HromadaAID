@@ -2,6 +2,7 @@ import type { BackupArchive } from '../shared/backup-contract.js'
 import { saveBackupResponse } from './backup-download.js'
 import { closeSync, createReadStream, openSync, readSync, statSync } from 'node:fs'
 import { classifyHttpReachability, isMaintenanceResponse, type ConnectionFailureReason, type ConnectionStatus } from '../shared/system-state.js'
+import { safeTransportErrorMessage } from './runtime-config.js'
 
 export class HttpClientError extends Error {
   constructor(message: string, readonly status?: number) {
@@ -36,7 +37,7 @@ export class HttpClient {
     const current = () => { this.checkConnectionGeneration(generation); this.checkRequestSession(true, token) }
     let response: Response
     try { response = await fetch(new URL(path, baseUrl), { redirect: 'error', headers: { ...headers, authorization: `Bearer ${token}` }, signal: AbortSignal.any([signal, AbortSignal.timeout(300_000)]) }) }
-    catch (error) { const timedOut = error instanceof DOMException && error.name === 'TimeoutError'; this.options.onConnectionStatus?.('unavailable', timedOut ? 'timeout' : 'network'); throw new HttpClientError(timedOut ? 'Сервер не відповів у встановлений час.' : 'Не вдалося підключитися до сервера.') }
+    catch (error) { const timedOut = error instanceof DOMException && error.name === 'TimeoutError'; const message = safeTransportErrorMessage(error, timedOut) ?? 'Не вдалося підключитися до сервера.'; this.options.onConnectionStatus?.('unavailable', timedOut ? 'timeout' : message !== 'Не вдалося підключитися до сервера.' ? 'incompatible' : 'network'); throw new HttpClientError(message) }
     current()
     const responseBody = await response.clone().json().catch(() => undefined)
     this.options.onConnectionStatus?.(classifyHttpReachability(response.status, responseBody))
@@ -138,10 +139,11 @@ export class HttpClient {
     } catch (error) {
       this.checkConnectionGeneration(requestGeneration)
       const timedOut = error instanceof DOMException && error.name === 'TimeoutError'
-      this.options.onConnectionStatus?.('unavailable', timedOut ? 'timeout' : 'network')
+      const message = safeTransportErrorMessage(error, timedOut) ?? 'Не вдалося підключитися до сервера.'
+      const failureReason = timedOut ? 'timeout' : message !== 'Не вдалося підключитися до сервера.' ? 'incompatible' : 'network'
+      this.options.onConnectionStatus?.('unavailable', failureReason)
       if (diagnosePasswordChange) console.info('[HromadaAID test] password-change: transport error (no confirmed response)')
-      if (timedOut) throw new HttpClientError('Сервер не відповів у встановлений час.')
-      throw new HttpClientError('Не вдалося підключитися до сервера.')
+      throw new HttpClientError(message)
     }
 
     if (diagnosePasswordChange) console.info(`[HromadaAID test] password-change: HTTP ${response.status}`)

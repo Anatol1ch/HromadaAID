@@ -1,5 +1,8 @@
 import { basename, dirname, isAbsolute, resolve } from 'node:path'
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
+import { isIP } from 'node:net'
+import { createPrivateKey, X509Certificate } from 'node:crypto'
+import { createSecureContext, type SecureContextOptions } from 'node:tls'
 
 export type ServerConfig = {
   host: string
@@ -9,8 +12,10 @@ export type ServerConfig = {
 }
 
 export type InstalledServerConfig = ServerConfig & {
-  configVersion: 1
+  configVersion: 1 | 2
   programDirectory: string
+  mode: 'local' | 'network'
+  tls?: { certificatePath: string; privateKeyPath: string; certificateChainPath?: string }
 }
 
 /** Development/test only. Keep its isolated test-path guard and legacy environment inputs. */
@@ -57,17 +62,69 @@ export function readInstalledServerConfig(configPath: string): InstalledServerCo
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Конфігурація сервера має бути JSON-об’єктом.')
   const record = value as Record<string, unknown>
-  assertOnlyKeys(record, ['configVersion', 'programDirectory', 'host', 'port', 'databasePath', 'backupDirectory'])
-  if (record.configVersion !== 1) throw new Error(`Несумісна версія конфігурації сервера (${String(record.configVersion ?? 'не вказана')}). Потрібна configVersion: 1.`)
-  if (record.host !== '127.0.0.1' && record.host !== 'localhost' && record.host !== '::1') throw new Error('Поки не налаштовано захищений транспорт, встановлений сервер може слухати лише loopback: 127.0.0.1, localhost або ::1.')
+  if (record.configVersion !== 1 && record.configVersion !== 2) throw new Error(`Несумісна версія конфігурації сервера (${String(record.configVersion ?? 'не вказана')}). Підтримуються configVersion: 1 та 2.`)
+  assertOnlyKeys(record, record.configVersion === 1
+    ? ['configVersion', 'programDirectory', 'host', 'port', 'databasePath', 'backupDirectory']
+    : ['configVersion', 'programDirectory', 'mode', 'host', 'port', 'databasePath', 'backupDirectory', 'tls'])
+  if (typeof record.host !== 'string' || !record.host) throw new Error('Параметр host має містити адресу прослуховування.')
   if (!Number.isInteger(record.port) || (record.port as number) < 1024 || (record.port as number) > 65535) throw new Error('Параметр port має бути цілим числом від 1024 до 65535.')
+  const mode = record.configVersion === 1 ? 'local' : record.mode
+  if (mode !== 'local' && mode !== 'network') throw new Error('Параметр mode має бути local або network.')
+  const isLoopback = record.host === 'localhost' || record.host === '127.0.0.1' || record.host === '::1' || /^127\./.test(record.host) || record.host.toLowerCase().startsWith('::ffff:')
+  if (mode === 'local' && (!isLoopback || record.tls !== undefined)) throw new Error('У режимі local дозволено лише HTTP на loopback (127.0.0.1, ::1 або localhost); параметри TLS не використовуються.')
+  if (mode === 'network' && (isIP(record.host) === 0 || isLoopback || record.host === '0.0.0.0' || record.host === '::')) throw new Error('У режимі network вкажіть конкретну нелокальну IPv4 або IPv6 адресу; wildcard і loopback заборонені.')
+  let tls: InstalledServerConfig['tls']
+  if (mode === 'network') {
+    if (!record.tls || typeof record.tls !== 'object' || Array.isArray(record.tls)) throw new Error('Для режиму network обов’язково задайте TLS-сертифікат і приватний ключ.')
+    const tlsRecord = record.tls as Record<string, unknown>
+    assertOnlyKeys(tlsRecord, ['certificatePath', 'privateKeyPath', 'certificateChainPath'])
+    tls = {
+      certificatePath: absolutePath(tlsRecord.certificatePath, 'tls.certificatePath'),
+      privateKeyPath: absolutePath(tlsRecord.privateKeyPath, 'tls.privateKeyPath'),
+      ...(tlsRecord.certificateChainPath === undefined ? {} : { certificateChainPath: absolutePath(tlsRecord.certificateChainPath, 'tls.certificateChainPath') }),
+    }
+  }
   return {
-    configVersion: 1,
+    configVersion: record.configVersion,
+    mode,
     programDirectory: absolutePath(record.programDirectory, 'programDirectory'),
     host: record.host,
     port: record.port as number,
     databasePath: absolutePath(record.databasePath, 'databasePath'),
     backupDirectory: absolutePath(record.backupDirectory, 'backupDirectory'),
+    ...(tls ? { tls } : {}),
+  }
+}
+
+/** Read and validate TLS material before Fastify is created. Key contents never enter logs/config output. */
+export function readInstalledTlsOptions(config: InstalledServerConfig): SecureContextOptions | undefined {
+  if (config.mode === 'local') return undefined
+  const tls = config.tls
+  if (!tls) throw new Error('Для режиму network не задано TLS-параметри.')
+  const readTlsFile = (path: string, parameter: string): Buffer => {
+    try {
+      const stat = statSync(path)
+      if (!stat.isFile()) throw new Error('not-file')
+      return readFileSync(path)
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code === 'ENOENT') throw new Error(`TLS-файл ${parameter} не знайдено: ${path}`)
+      if (code === 'EACCES' || code === 'EPERM') throw new Error(`Немає прав прочитати TLS-файл ${parameter}: ${path}`)
+      throw new Error(`TLS-параметр ${parameter} має вказувати на доступний звичайний файл: ${path}`)
+    }
+  }
+  const certificate = readTlsFile(tls.certificatePath, 'certificatePath')
+  const privateKey = readTlsFile(tls.privateKeyPath, 'privateKeyPath')
+  const chain = tls.certificateChainPath ? readTlsFile(tls.certificateChainPath, 'certificateChainPath') : undefined
+  try {
+    const leaf = new X509Certificate(certificate)
+    if (Date.parse(leaf.validFrom) > Date.now() || Date.parse(leaf.validTo) <= Date.now()) throw new Error('certificate-time')
+    leaf.checkPrivateKey(createPrivateKey(privateKey))
+    const cert = chain ? Buffer.concat([certificate, Buffer.from('\n'), chain]) : certificate
+    createSecureContext({ cert, key: privateKey })
+    return { cert, key: privateKey, minVersion: 'TLSv1.2' }
+  } catch {
+    throw new Error('TLS-сертифікат або приватний ключ некоректний, не відповідає парі чи сертифікат прострочений/ще не чинний.')
   }
 }
 
