@@ -1,0 +1,16 @@
+{
+  "name": "@hromadaaid/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/server/src/installed.js",
+  "files": [
+    "dist/**",
+    "service/**",
+    "package.json"
+  ],
+  "dependencies": {
+    "argon2": "0.45.1",
+    "fastify": "5.12.7"
+  }
+}

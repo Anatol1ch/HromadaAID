@@ -3,9 +3,9 @@
   <name>HromadaAID API</name>
   <description>Центральний HTTP API HromadaAID</description>
 
-  <executable>__PROGRAM_DIRECTORY__\runtime\node.exe</executable>
-  <arguments>"__PROGRAM_DIRECTORY__\server\src\installed.js" --config "__DATA_DIRECTORY__\server.json"</arguments>
-  <workingdirectory>__PROGRAM_DIRECTORY__</workingdirectory>
+  <executable>__PROGRAM_DIRECTORY__\Server\runtime\node.exe</executable>
+  <arguments>"__PROGRAM_DIRECTORY__\Server\app\dist\server\src\installed.js" --config "__DATA_DIRECTORY__\server.json"</arguments>
+  <workingdirectory>__PROGRAM_DIRECTORY__\Server\app</workingdirectory>
 
   <startmode>Automatic</startmode>
   <delayedAutoStart/>
