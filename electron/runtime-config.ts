@@ -47,13 +47,22 @@ export function validateServerBaseUrl(value: unknown): URL {
   return new URL(url.origin)
 }
 
-export function readSavedConnectionConfig(userDataPath: string): { config?: SavedConnectionConfig; error?: string } {
-  const path = join(userDataPath, 'server-connection.json')
+export function readSavedConnectionConfig(userDataPath: string, packagedDefaultPath?: string): { config?: SavedConnectionConfig; error?: string } {
+  let path = join(userDataPath, 'server-connection.json')
   let raw: string
   try { raw = readFileSync(path, 'utf8') }
   catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (!packagedDefaultPath) return {}
+      path = packagedDefaultPath
+      try { raw = readFileSync(path, 'utf8') }
+      catch (defaultError) {
+        if ((defaultError as NodeJS.ErrnoException).code === 'ENOENT') return {}
+        return { error: 'Не вдалося прочитати встановлену адресу сервера.' }
+      }
+    } else {
     return { error: 'Не вдалося прочитати локальну адресу сервера. Вкажіть її повторно в налаштуваннях.' }
+    }
   }
   try {
     const parsed: unknown = JSON.parse(raw)

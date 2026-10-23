@@ -1,4 +1,4 @@
-import { existsSync, realpathSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, realpathSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, win32 } from 'node:path'
 
 const pathKeys = ['programDirectory', 'dataDirectory', 'backupDirectory']
@@ -57,19 +57,31 @@ export function validateInstallerOptions(options, { inspectVolume } = {}) {
   if (hasServer) {
     const existingConfig = join(paths.dataDirectory, 'server.json')
     const existingDatabase = join(paths.dataDirectory, 'hromada-aid.sqlite')
-    if (existsSync(existingDatabase) && !existsSync(existingConfig)) throw new Error('У каталозі вже є база HromadaAID без конфігурації. Встановлення зупинено, щоб не створити іншу порожню базу.')
+    const freshDatabase = join(paths.dataDirectory, 'Database', 'hromada-aid.sqlite')
+    const keyPath = join(paths.backupDirectory, '.hromadaaid-backup-key.dpapi')
+    const archivePresent = existsSync(paths.backupDirectory) && readdirSync(paths.backupDirectory).some(name => name.toLocaleLowerCase('en-US').endsWith('.hraid'))
+    if ((existsSync(existingDatabase) || existsSync(freshDatabase)) && !existsSync(existingConfig)) throw new Error('У каталозі вже є база HromadaAID без конфігурації. Встановлення зупинено, щоб не створити іншу порожню базу.')
     if (existsSync(existingConfig)) {
       if (!statSync(existingConfig).isFile()) throw new Error('server.json має бути звичайним файлом.')
       let current
       try { current = JSON.parse(readFileSync(existingConfig, 'utf8')) } catch { throw new Error('Наявний server.json некоректний; його не буде перезаписано.') }
       if (typeof current.databasePath !== 'string' || typeof current.backupDirectory !== 'string') throw new Error('Наявний server.json не містить очікуваних шляхів; перевірте його вручну.')
       const samePath = (a, b) => win32.resolve(a).toLocaleLowerCase('en-US') === win32.resolve(b).toLocaleLowerCase('en-US')
-      if (!samePath(current.databasePath, join(paths.dataDirectory, 'hromada-aid.sqlite')) || !samePath(current.backupDirectory, paths.backupDirectory)) {
+      const databaseInsideSelectedData = samePath(current.databasePath, existingDatabase) || samePath(current.databasePath, freshDatabase)
+      if (!databaseInsideSelectedData || !samePath(current.backupDirectory, paths.backupDirectory)) {
         throw new Error('Вибрані каталоги відрізняються від наявної конфігурації. Для оновлення залиште попередні шляхи.')
       }
       if (typeof current.programDirectory === 'string' && !samePath(current.programDirectory, paths.programDirectory)) {
         throw new Error('Каталог програми відрізняється від наявного server.json. Для оновлення залиште попередній шлях.')
       }
+      const configuredDatabase = win32.resolve(current.databasePath)
+      const databaseExists = existsSync(configuredDatabase)
+      if ((existsSync(existingDatabase) || existsSync(freshDatabase)) && !databaseExists) throw new Error('Знайдено SQLite поза шляхом із server.json. Встановлення зупинено, наявні дані не змінено.')
+      const keyExists = existsSync(keyPath)
+      if (databaseExists !== keyExists || (archivePresent && !(databaseExists && keyExists))) throw new Error('Наявні база, DPAPI-ключ або резервні архіви не утворюють повний комплект. Потрібне явне рішення адміністратора.')
+    } else {
+      const databaseExists = existsSync(existingDatabase) || existsSync(freshDatabase)
+      if (databaseExists || existsSync(keyPath) || archivePresent) throw new Error('У вибраних каталогах уже є база, DPAPI-ключ або архіви без сумісної конфігурації. Автоматичну ініціалізацію зупинено.')
     }
   }
   return { mode: options.mode, ...paths }
@@ -88,7 +100,7 @@ export function renderInstalledServerConfig(options) {
     programDirectory: valid.programDirectory,
     host: '127.0.0.1',
     port: 4310,
-    databasePath: join(valid.dataDirectory, 'hromada-aid.sqlite'),
+    databasePath: join(valid.dataDirectory, 'Database', 'hromada-aid.sqlite'),
     backupDirectory: valid.backupDirectory,
   }, null, 2) + '\n'
 }

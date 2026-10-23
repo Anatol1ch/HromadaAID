@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, openSync, closeSync, writeFileSync, readFileSync, lstatSync } from 'node:fs'
+import { existsSync, mkdirSync, openSync, closeSync, writeFileSync, readFileSync, lstatSync, renameSync, rmSync } from 'node:fs'
 import { dirname, join, resolve, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { renderInstalledServerConfig, renderWinSWConfig, validateInstallerOptions } from './windows-installer-config.mjs'
@@ -16,6 +16,7 @@ function parseArguments(args) {
     programDirectory: values.get('--program-dir'),
     dataDirectory: values.get('--data-dir'),
     backupDirectory: values.get('--backup-dir'),
+    packageRoot: values.get('--package-root'),
   }
 }
 
@@ -24,12 +25,14 @@ export function prepareServerInstall(options, root = resolve(dirname(fileURLToPa
   if (valid.mode === 'client') return { configured: false }
 
   const serverConfigPath = join(valid.dataDirectory, 'server.json')
-  const databasePath = join(valid.dataDirectory, 'hromada-aid.sqlite')
+  const defaultDatabasePath = join(valid.dataDirectory, 'Database', 'hromada-aid.sqlite')
+  const legacyDatabasePath = join(valid.dataDirectory, 'hromada-aid.sqlite')
   const existed = existsSync(serverConfigPath)
   const serviceDirectory = join(valid.programDirectory, 'Server', 'service')
   const sourceTemplate = join(root, 'server', 'windows-service', 'HromadaAIDService.xml.template')
   const packagedTemplate = join(root, 'service', 'HromadaAIDService.xml.template')
-  const templatePath = existsSync(sourceTemplate) ? sourceTemplate : packagedTemplate
+  const packagedDistTemplate = join(root, 'dist', 'service', 'HromadaAIDService.xml.template')
+  const templatePath = existsSync(sourceTemplate) ? sourceTemplate : existsSync(packagedTemplate) ? packagedTemplate : packagedDistTemplate
   if (!existsSync(templatePath)) throw new Error('Шаблон конфігурації WinSW не знайдено; каталог даних не змінено.')
   const renderedXml = renderWinSWConfig(readFileSync(templatePath, 'utf8'), valid)
   if (existed) {
@@ -37,14 +40,15 @@ export function prepareServerInstall(options, root = resolve(dirname(fileURLToPa
     if (win32.resolve(existing.programDirectory).toLocaleLowerCase('en-US') !== win32.resolve(valid.programDirectory).toLocaleLowerCase('en-US')) {
       throw new Error('Наявний server.json прив’язаний до іншого каталогу програми; автоматичне переміщення конфігурації заборонено.')
     }
-  } else if (existsSync(databasePath)) {
+  } else if (existsSync(defaultDatabasePath) || existsSync(legacyDatabasePath)) {
     throw new Error('Знайдено SQLite без server.json. Конфігурацію не створено, щоб не підмінити наявні дані.')
   }
 
   mkdirSync(valid.dataDirectory, { recursive: true })
   mkdirSync(valid.backupDirectory, { recursive: true })
+  mkdirSync(join(valid.dataDirectory, 'Database'), { recursive: true })
   mkdirSync(join(valid.dataDirectory, 'Logs'), { recursive: true })
-  const config = renderInstalledServerConfig(valid)
+  const config = existed ? readFileSync(serverConfigPath, 'utf8') : renderInstalledServerConfig(valid)
   if (!existed) {
     let descriptor
     try { descriptor = openSync(serverConfigPath, 'wx', 0o600) }
@@ -58,16 +62,22 @@ export function prepareServerInstall(options, root = resolve(dirname(fileURLToPa
   const serviceXmlPath = join(serviceDirectory, 'HromadaAIDService.xml')
   mkdirSync(serviceDirectory, { recursive: true })
   if (!existsSync(serviceXmlPath)) writeFileSync(serviceXmlPath, renderedXml, { flag: 'wx', encoding: 'utf8' })
-  else if (!lstatSync(serviceXmlPath).isFile()) throw new Error('Конфігурація WinSW не є звичайним файлом.')
+  else {
+    if (!lstatSync(serviceXmlPath).isFile() || lstatSync(serviceXmlPath).isSymbolicLink()) throw new Error('Конфігурація WinSW не є звичайним файлом.')
+    const temporaryXmlPath = `${serviceXmlPath}.${process.pid}.tmp`
+    try {
+      writeFileSync(temporaryXmlPath, renderedXml, { flag: 'wx', encoding: 'utf8' })
+      renameSync(temporaryXmlPath, serviceXmlPath)
+    } finally { rmSync(temporaryXmlPath, { force: true }) }
+  }
 
-  return { configured: true, configCreated: !existed, configPath: serverConfigPath, databasePath }
+  return { configured: true, configCreated: !existed, configPath: serverConfigPath, databasePath: JSON.parse(config).databasePath }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const options = parseArguments(process.argv.slice(2))
-    const packagedRoot = join(options.programDirectory, 'Server', 'app')
-    const result = prepareServerInstall(options, packagedRoot)
+    const result = prepareServerInstall(options, options.packageRoot ?? resolve(dirname(fileURLToPath(import.meta.url)), '..'))
     if (result.configured) console.log(`Параметри сервера підготовлено: ${result.configPath}. SQLite не створювалася.`)
   } catch (error) {
     console.error(`Не вдалося підготувати параметри сервера: ${error instanceof Error ? error.message : 'перевірте вибрані каталоги та наявні дані.'}`)

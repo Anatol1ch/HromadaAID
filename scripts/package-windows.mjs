@@ -121,6 +121,8 @@ async function main() {
   await copyFile(join(root, 'packaging', 'prepare-server-install.mjs'), join(serverTarget, 'installer', 'prepare-server-install.mjs'))
   await copyFile(join(root, 'packaging', 'windows-installer-config.mjs'), join(serverTarget, 'installer', 'windows-installer-config.mjs'))
   await copyFile(join(root, 'packaging', 'windows-installer-paths.ps1'), join(serverTarget, 'installer', 'windows-installer-paths.ps1'))
+  await copyFile(join(root, 'packaging', 'install-server-service.ps1'), join(serverTarget, 'installer', 'install-server-service.ps1'))
+  await copyFile(join(root, 'packaging', 'windows-service-control.ps1'), join(serverTarget, 'installer', 'windows-service-control.ps1'))
   await stripNonRuntimeTestFiles(join(serverTarget, 'app', 'node_modules', '.pnpm'))
 
   const clientFiles = await assertPackage(clientTarget)
@@ -141,7 +143,7 @@ async function main() {
     },
     installModes: ['Клієнт', 'Сервер', 'Сервер + клієнт'],
     installerSource: 'packaging/windows-installer.nsi',
-    serviceRegistration: 'not performed by this installer foundation'
+    serviceRegistration: 'NSIS invokes the packaged service installer after path validation'
   }
   await writeFile(join(payloadRoot, 'package-manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8')
   console.log('Підготовлено окремі payload клієнта й сервера: ' + payloadRoot)

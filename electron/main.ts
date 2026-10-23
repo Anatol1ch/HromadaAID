@@ -133,7 +133,7 @@ if (!hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     try {
       const userDataPath = app.getPath('userData')
-      const savedConnection = readSavedConnectionConfig(userDataPath)
+      const savedConnection = readSavedConnectionConfig(userDataPath, join(process.resourcesPath, 'server-connection.json'))
       savedApiUrl = savedConnection.config?.apiUrl ?? null
       runtimeConfig = readElectronRuntimeConfig(process.env, savedConnection)
       trustedIpcMain.handle('app:get-version', async () => app.getVersion())

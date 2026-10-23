@@ -18,7 +18,8 @@
     "server:backup-key-setup": "pnpm server:build && node dist-server/server/src/backup-key-setup.js",
     "server:test-backups": "pnpm server:build && node --test dist-server/server/src/backup-distribution.test.js dist-server/server/src/backup-restore.test.js dist-server/server/src/backup-restore-cli.test.js",
     "server:backup-restore": "pnpm server:build && node dist-server/server/src/backup-restore-cli.js",
-    "windows:package": "pnpm build && pnpm server:build && node scripts/prepare-server-package.mjs && pnpm --filter @hromadaaid/server deploy --prod --legacy dist-package/server && node node_modules/electron-builder/cli.js --win --x64 --dir && node scripts/package-windows.mjs",
+    "server:test-installer": "pnpm server:build && node --test dist-server/server/src/installer-initialization.test.js",
+    "windows:package": "pnpm build && pnpm server:build && node scripts/prepare-server-package.mjs && node scripts/deploy-server-package.mjs && node node_modules/electron-builder/cli.js --win --x64 --dir && node scripts/package-windows.mjs",
     "windows:installer": "pnpm run windows:package && node scripts/build-windows-installer.mjs"
   },
   "dependencies": {},

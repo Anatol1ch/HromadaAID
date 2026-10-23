@@ -2,11 +2,12 @@ import assert from 'node:assert/strict'
 import { createServer as createHttpServer } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { spawn } from 'node:child_process'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import test from 'node:test'
-import { enforceTlsCertificateValidation, safeTransportErrorMessage, validateServerBaseUrl } from './runtime-config.js'
+import { enforceTlsCertificateValidation, readSavedConnectionConfig, safeTransportErrorMessage, validateServerBaseUrl } from './runtime-config.js'
 
 const fixture = (name: string) => readFileSync(resolve(process.cwd(), 'server', 'test-fixtures', name))
 
@@ -16,6 +17,20 @@ test('server address validation permits HTTPS anywhere and HTTP only on loopback
   assert.equal(validateServerBaseUrl('https://192.0.2.15:4310').protocol, 'https:')
   assert.throws(() => validateServerBaseUrl('http://192.0.2.15:4310'), /Для віддаленого сервера потрібен HTTPS/)
   assert.throws(() => validateServerBaseUrl('http://user:pass@127.0.0.1:4310'), /Для віддаленого сервера потрібен HTTPS/)
+})
+
+test('server-plus-client package default is used only when no per-user address exists', () => {
+  const root = mkdtempSync(join(tmpdir(), 'hromada-client-default-'))
+  const userData = join(root, 'user'), resources = join(root, 'resources')
+  const packaged = join(resources, 'server-connection.json')
+  try {
+    mkdirSync(userData, { recursive: true })
+    mkdirSync(resources, { recursive: true })
+    writeFileSync(packaged, JSON.stringify({ version: 1, apiUrl: 'http://127.0.0.1:4310' }))
+    assert.equal(readSavedConnectionConfig(userData, packaged).config?.apiUrl, 'http://127.0.0.1:4310')
+    writeFileSync(join(userData, 'server-connection.json'), JSON.stringify({ version: 1, apiUrl: 'https://server.example.test' }))
+    assert.equal(readSavedConnectionConfig(userData, packaged).config?.apiUrl, 'https://server.example.test')
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
 test('TLS and redirect failures become safe user-facing messages', () => {

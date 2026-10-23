@@ -12,6 +12,7 @@ ShowUnInstDetails show
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "nsDialogs.nsh"
+!define MUI_CUSTOMFUNCTION_ABORT "HromadaAidRestoreServiceAfterAbort"
 !ifndef CLIENT_PAYLOAD
   !error "CLIENT_PAYLOAD must point to the electron-builder win-unpacked directory"
 !endif
@@ -50,6 +51,14 @@ Section "Клієнт HromadaAID" SEC_CLIENT
 SectionEnd
 
 Section "Сервер HromadaAID" SEC_SERVER
+  ; Stop an existing instance before replacing its runtime or WinSW files.
+  SetOutPath "$PLUGINSDIR"
+  File /oname=windows-service-control.ps1 "${PROJECT_DIR}\packaging\windows-service-control.ps1"
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-service-control.ps1" -Action stop-before-update -ProgramDirectory "$INSTDIR" -StateFile "$PLUGINSDIR\service-state.txt"' $1
+  ${If} $1 != 0
+    MessageBox MB_ICONSTOP|MB_OK "Не вдалося штатно зупинити попередню службу. Файли сервера не оновлено. Код: $1"
+    Abort
+  ${EndIf}
   SetOutPath "$INSTDIR\Server"
   File /r "${SERVER_PAYLOAD}\*"
 SectionEnd
@@ -61,17 +70,34 @@ Section -PrepareServer
     SetOutPath "$PLUGINSDIR"
     File /oname=prepare-server-install.mjs "${PROJECT_DIR}\packaging\prepare-server-install.mjs"
     File /oname=windows-installer-config.mjs "${PROJECT_DIR}\packaging\windows-installer-config.mjs"
-    ExecWait '"$INSTDIR\Server\runtime\node.exe" "$PLUGINSDIR\prepare-server-install.mjs" --program-dir "$INSTDIR" --data-dir "$DataDirectory" --backup-dir "$BackupDirectory"' $1
+    ExecWait '"$INSTDIR\Server\runtime\node.exe" "$PLUGINSDIR\prepare-server-install.mjs" --program-dir "$INSTDIR" --data-dir "$DataDirectory" --backup-dir "$BackupDirectory" --package-root "$INSTDIR\Server"' $1
     ${If} $1 != 0
       MessageBox MB_ICONSTOP|MB_OK "Не вдалося підготувати конфігурацію сервера. Каталоги та наявні дані залишено без видалення. Код: $1"
       Abort
+    ${EndIf}
+    ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Server\installer\install-server-service.ps1" -ProgramDirectory "$INSTDIR" -DataDirectory "$DataDirectory" -BackupDirectory "$BackupDirectory" -PreviousServiceStateFile "$PLUGINSDIR\service-state.txt"' $1
+    ${If} $1 != 0
+      MessageBox MB_ICONSTOP|MB_OK "Не вдалося підготувати Windows Service. Наявні бази, ключі та резервні копії збережено. Перевірте права, диски, конфігурацію та журнали інсталятора. Код: $1"
+      Abort
+    ${EndIf}
+    Delete "$PLUGINSDIR\service-state.txt"
+    SectionGetFlags ${SEC_CLIENT} $0
+    IntOp $0 $0 & ${SF_SELECTED}
+    ${If} $0 != 0
+      CreateDirectory "$INSTDIR\Client\resources"
+      IfFileExists "$INSTDIR\Client\resources\server-connection.json" +3 0
+      FileOpen $4 "$INSTDIR\Client\resources\server-connection.json" w
+      FileWrite $4 '{"version":1,"apiUrl":"http://127.0.0.1:4310"}$\r$\n'
+      FileClose $4
     ${EndIf}
   ${EndIf}
 SectionEnd
 
 Section -UninstallMetadata
   WriteRegStr HKLM "Software\HromadaAID\Installer" "ProgramDirectory" "$INSTDIR"
-  ${If} $DataDirectory != ""
+  SectionGetFlags ${SEC_SERVER} $0
+  IntOp $0 $0 & ${SF_SELECTED}
+  ${If} $0 != 0
     WriteRegStr HKLM "Software\HromadaAID\Installer" "DataDirectory" "$DataDirectory"
     WriteRegStr HKLM "Software\HromadaAID\Installer" "BackupDirectory" "$BackupDirectory"
   ${EndIf}
@@ -79,6 +105,13 @@ Section -UninstallMetadata
 SectionEnd
 
 Section "Uninstall"
+  IfFileExists "$INSTDIR\Server\installer\windows-service-control.ps1" 0 unSkipServiceRemoval
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Server\installer\windows-service-control.ps1" -Action uninstall -ProgramDirectory "$INSTDIR"' $0
+  ${If} $0 != 0
+    MessageBox MB_ICONSTOP|MB_OK "Не вдалося штатно зупинити або видалити службу HromadaAIDApi. Файли та дані залишено. Код: $0"
+    Abort
+  ${EndIf}
+unSkipServiceRemoval:
   Delete "$SMPROGRAMS\HromadaAID.lnk"
   Delete "$DESKTOP\HromadaAID.lnk"
   RMDir /r "$INSTDIR\Client"
@@ -91,8 +124,17 @@ SectionEnd
 Function .onInit
   SetRegView 64
   SetShellVarContext all
-  StrCpy $DataDirectory "$APPDATA\HromadaAID\Data"
-  StrCpy $BackupDirectory "$APPDATA\HromadaAID\Backups"
+  ReadEnvStr $0 "ProgramData"
+  ${If} $0 == ""
+    ReadEnvStr $0 "SystemDrive"
+    ${If} $0 == ""
+      MessageBox MB_ICONSTOP|MB_OK "Не вдалося визначити системний каталог ProgramData."
+      Abort
+    ${EndIf}
+    StrCpy $0 "$0\ProgramData"
+  ${EndIf}
+  StrCpy $DataDirectory "$0\HromadaAID\Data"
+  StrCpy $BackupDirectory "$0\HromadaAID\Backups"
   SectionSetFlags ${SEC_CLIENT} ${SF_SELECTED}
   SectionSetFlags ${SEC_SERVER} 0
   ReadRegStr $0 HKLM "Software\HromadaAID\Installer" "DataDirectory"
@@ -103,6 +145,18 @@ Function .onInit
   ${If} $0 != ""
     StrCpy $BackupDirectory $0
   ${EndIf}
+FunctionEnd
+
+Function .onInstFailed
+  IfFileExists "$PLUGINSDIR\windows-service-control.ps1" 0 installFailureDone
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-service-control.ps1" -Action restore-after-failure -ProgramDirectory "$INSTDIR" -StateFile "$PLUGINSDIR\service-state.txt"' $0
+installFailureDone:
+FunctionEnd
+
+Function HromadaAidRestoreServiceAfterAbort
+  IfFileExists "$PLUGINSDIR\windows-service-control.ps1" 0 userAbortDone
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-service-control.ps1" -Action restore-after-failure -ProgramDirectory "$INSTDIR" -StateFile "$PLUGINSDIR\service-state.txt"' $0
+userAbortDone:
 FunctionEnd
 
 Function IsServerSelected

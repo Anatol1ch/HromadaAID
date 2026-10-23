@@ -109,7 +109,10 @@ $database = $null
 if ($Mode -ne 'client') {
   $config = Join-Path $DataDirectory 'server.json'
   $database = Join-Path $DataDirectory 'hromada-aid.sqlite'
-  if ([IO.File]::Exists($database) -and -not [IO.File]::Exists($config)) {
+  $freshDatabase = Join-Path (Join-Path $DataDirectory 'Database') 'hromada-aid.sqlite'
+  $keyFile = Join-Path $BackupDirectory '.hromadaaid-backup-key.dpapi'
+  $archivePresent = [IO.Directory]::Exists($BackupDirectory) -and @(Get-ChildItem -LiteralPath $BackupDirectory -Filter '*.hraid' -File -ErrorAction Stop).Count -gt 0
+  if (([IO.File]::Exists($database) -or [IO.File]::Exists($freshDatabase)) -and -not [IO.File]::Exists($config)) {
     Stop-WithMessage 'У вибраному каталозі знайдено базу HromadaAID без server.json. Потрібна явна перевірка наявних даних.'
   }
   if ([IO.File]::Exists($config)) {
@@ -117,11 +120,18 @@ if ($Mode -ne 'client') {
     catch { Stop-WithMessage 'Наявний server.json некоректний; він не буде перезаписаний.' }
     $expectedDatabase = [IO.Path]::GetFullPath($database)
     $expectedBackup = [IO.Path]::GetFullPath($BackupDirectory)
-    if ([IO.Path]::GetFullPath([string]$existing.databasePath) -ine $expectedDatabase -or [IO.Path]::GetFullPath([string]$existing.backupDirectory) -ine $expectedBackup) {
+    $existingDatabase = [IO.Path]::GetFullPath([string]$existing.databasePath)
+    if (($existingDatabase -ine $expectedDatabase -and $existingDatabase -ine [IO.Path]::GetFullPath($freshDatabase)) -or [IO.Path]::GetFullPath([string]$existing.backupDirectory) -ine $expectedBackup) {
       Stop-WithMessage 'Вибрані каталоги не відповідають наявному server.json. Для оновлення залиште попередні шляхи.'
     }
     if ([string]$existing.programDirectory -and [IO.Path]::GetFullPath([string]$existing.programDirectory) -ine [IO.Path]::GetFullPath($ProgramDirectory)) {
       Stop-WithMessage 'Каталог програми не відповідає наявному server.json. Для оновлення залиште попередній шлях або виконайте окреме перенесення.'
     }
+    $databaseExists = [IO.File]::Exists($existingDatabase)
+    if (([IO.File]::Exists($database) -or [IO.File]::Exists($freshDatabase)) -and -not $databaseExists) { Stop-WithMessage 'Знайдено SQLite поза шляхом із server.json; наявні дані залишено без змін.' }
+    $keyExists = [IO.File]::Exists($keyFile)
+    if (($databaseExists -xor $keyExists) -or ($archivePresent -and -not ($databaseExists -and $keyExists))) { Stop-WithMessage 'Наявні база, DPAPI-ключ або резервні архіви не утворюють повний комплект; потрібна окрема перевірка адміністратора.' }
+  } elseif ([IO.File]::Exists($database) -or [IO.File]::Exists($freshDatabase) -or [IO.File]::Exists($keyFile) -or $archivePresent) {
+    Stop-WithMessage 'У вибраних каталогах уже є база, DPAPI-ключ або архіви без сумісної конфігурації; автоматичну ініціалізацію зупинено.'
   }
 }
