@@ -45,7 +45,7 @@ export default function AnnualPlanning({ programs, aidTypes, readOnly = false }:
 
 /** All program tables and the annual summary use the exact same column widths. */
 function PlanningColumns() {
-  return <colgroup><col style={{width:'38%'}}/><col style={{width:'20%'}}/><col style={{width:'26%'}}/><col style={{width:165}}/></colgroup>
+  return <colgroup><col/><col style={{width:150}}/><col style={{width:190}}/><col style={{width:165}}/></colgroup>
 }
 
 function PlanModal({ year, type, program, plan, onClose, onSaved }: { year: number; type: AidTypeOption; program: ProgramOption; plan?: AnnualAidPlan; onClose: () => void; onSaved: () => void }) {

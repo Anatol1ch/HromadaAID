@@ -44,7 +44,7 @@ export default function LoginScreen({ state, onLogin, connectionActions }: { sta
   const sessionExpired = state.status === 'unauthenticated' && message === 'Час вашого сеансу минув. Увійдіть повторно, щоб продовжити роботу.'
   return <main className="auth-screen" aria-busy={busy || undefined}>
     <section className="auth-card" aria-labelledby="auth-title">
-      <button type="button" className="auth-connection-link" onClick={() => setConnectionModalOpen(true)}><Settings size={16} aria-hidden="true"/>Налаштувати підключення</button>
+      <button type="button" className="auth-connection-link" aria-label="Налаштувати підключення" title="Налаштувати підключення" onClick={() => setConnectionModalOpen(true)}><Settings size={16} aria-hidden="true"/></button>
       <div className="auth-identity">
         <div className="auth-mark"><HeartHandshake size={28} aria-hidden="true"/></div>
         <div className="auth-brand">Hromada<span>AID</span></div>
