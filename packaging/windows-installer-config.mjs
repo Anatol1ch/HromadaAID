@@ -51,7 +51,6 @@ export function validateInstallerOptions(options, { inspectVolume } = {}) {
   if (inspectVolume) for (const key of keys) {
     const volume = inspectVolume(paths[key])
     if (!volume || volume.driveType !== 3 || String(volume.fileSystem).toUpperCase() !== 'NTFS') throw new Error(`Каталог «${key}» має бути на доступному локальному диску NTFS.`)
-    if (Number(volume.freeBytes) < 64 * 1024 * 1024) throw new Error(`На диску каталогу «${key}» недостатньо вільного місця.`)
   }
 
   if (hasServer) {

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { copyFile, cp, lstat, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, cp, lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
@@ -27,7 +27,11 @@ async function downloadVerified(url, expectedHash, destination) {
 
 async function assertPackage(rootPath) {
   const files = []
+  const visitedDirectories = new Set()
   async function walk(directory) {
+    const resolvedDirectory = await realpath(directory)
+    if (visitedDirectories.has(resolvedDirectory)) return
+    visitedDirectories.add(resolvedDirectory)
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name)
       const relativePath = path.slice(rootPath.length + 1).replaceAll('\\', '/')
@@ -43,7 +47,8 @@ async function assertPackage(rootPath) {
       } else if (entry.isSymbolicLink()) {
         const target = await stat(path).catch(() => undefined)
         if (!target) throw new Error('Пошкоджене посилання в payload: ' + relativePath)
-        files.push(relativePath)
+        if (target.isDirectory()) await walk(path)
+        else if (target.isFile()) files.push(relativePath)
       }
     }
   }
@@ -52,16 +57,30 @@ async function assertPackage(rootPath) {
 }
 
 async function stripNonRuntimeTestFiles(directory) {
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (entry.isSymbolicLink()) continue
-    const path = join(directory, entry.name)
-    if (entry.isDirectory()) {
-      if (/^(?:test|tests|__tests__|fixtures|fixture)$/i.test(entry.name)) await rm(path, { recursive: true, force: true })
-      else await stripNonRuntimeTestFiles(path)
-    } else if (entry.isFile() && /\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(entry.name)) {
-      await rm(path, { force: true })
+  const visitedDirectories = new Set()
+  async function walk(currentDirectory) {
+    const resolvedDirectory = await realpath(currentDirectory)
+    if (visitedDirectories.has(resolvedDirectory)) return
+    visitedDirectories.add(resolvedDirectory)
+    for (const entry of await readdir(currentDirectory, { withFileTypes: true })) {
+      const path = join(currentDirectory, entry.name)
+      const info = entry.isSymbolicLink() ? await stat(path).catch(() => undefined) : undefined
+      if (entry.isSymbolicLink() && !info) continue
+      if (info?.isDirectory()) {
+        if (/^(?:test|tests|__tests__|fixtures|fixture)$/i.test(entry.name)) await rm(path, { recursive: true, force: true })
+        else await walk(path)
+        continue
+      }
+      if (entry.isSymbolicLink()) continue
+      if (entry.isDirectory()) {
+        if (/^(?:test|tests|__tests__|fixtures|fixture)$/i.test(entry.name)) await rm(path, { recursive: true, force: true })
+        else await walk(path)
+      } else if (entry.isFile() && /\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(entry.name)) {
+        await rm(path, { force: true })
+      }
     }
   }
+  await walk(directory)
 }
 
 async function removePnpmRootLinks(appDirectory) {
@@ -122,6 +141,9 @@ async function main() {
   await copyFile(join(root, 'packaging', 'windows-installer-config.mjs'), join(serverTarget, 'installer', 'windows-installer-config.mjs'))
   await copyFile(join(root, 'packaging', 'windows-installer-paths.ps1'), join(serverTarget, 'installer', 'windows-installer-paths.ps1'))
   await copyFile(join(root, 'packaging', 'install-server-service.ps1'), join(serverTarget, 'installer', 'install-server-service.ps1'))
+  await copyFile(join(root, 'packaging', 'admin-setup.ps1'), join(serverTarget, 'installer', 'admin-setup.ps1'))
+  await copyFile(join(root, 'packaging', 'verify-server-package.mjs'), join(serverTarget, 'installer', 'verify-server-package.mjs'))
+  await copyFile(join(root, 'packaging', 'server-package-transaction.mjs'), join(serverTarget, 'installer', 'server-package-transaction.mjs'))
   await copyFile(join(root, 'packaging', 'windows-service-control.ps1'), join(serverTarget, 'installer', 'windows-service-control.ps1'))
   await stripNonRuntimeTestFiles(join(serverTarget, 'app', 'node_modules', '.pnpm'))
 
@@ -131,16 +153,32 @@ async function main() {
     throw new Error('Серверний пакет не має повного runtime/WinSW набору.')
   }
   const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+  const integrityFiles = []
+  for (const relativePath of serverFiles) {
+    const bytes = await readFile(join(serverTarget, ...relativePath.split('/')))
+    integrityFiles.push({ path: relativePath, sizeBytes: bytes.byteLength, sha256: hash(bytes) })
+  }
+  await writeFile(join(serverTarget, 'package-integrity.json'), JSON.stringify({ formatVersion: 1, files: integrityFiles }, null, 2) + '\n', 'utf8')
+  const completeServerFiles = await assertPackage(serverTarget)
+  const sumBytes = async (directory, files) => (await Promise.all(files.map(path => stat(join(directory, ...path.split('/')))))).reduce((total, info) => total + info.size, 0)
+  const clientBytes = await sumBytes(clientTarget, clientFiles)
+  const serverBytes = await sumBytes(serverTarget, completeServerFiles)
+  const installerSupportBytes = await Promise.all([
+    'windows-installer-paths.ps1', 'windows-service-control.ps1', 'prepare-server-install.mjs',
+    'windows-installer-config.mjs', 'install-server-service.ps1', 'admin-setup.ps1',
+  ].map(path => stat(join(root, 'packaging', path)).then(info => info.size)))
   const manifest = {
     formatVersion: 1,
     appVersion: packageJson.version,
-    client: { source: 'electron-builder win-unpacked', files: clientFiles },
+    client: { source: 'electron-builder win-unpacked', sizeBytes: clientBytes, files: clientFiles },
     server: {
+      sizeBytes: serverBytes,
       nodeVersion: nodeVersion, nodeArchiveSha256: nodeZipSha256,
       winswVersion: winswVersion, winswSha256: winswSha256,
       entrypoint: 'app/dist/server/src/installed.js',
-      files: serverFiles
+      files: completeServerFiles
     },
+    installer: { supportFilesBytes: installerSupportBytes.reduce((sum, value) => sum + value, 0) },
     installModes: ['Клієнт', 'Сервер', 'Сервер + клієнт'],
     installerSource: 'packaging/windows-installer.nsi',
     serviceRegistration: 'NSIS invokes the packaged service installer after path validation'

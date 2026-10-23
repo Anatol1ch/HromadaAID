@@ -2,7 +2,10 @@
   [Parameter(Mandatory = $true)][ValidateSet('client', 'server', 'server-client')][string]$Mode,
   [Parameter(Mandatory = $true)][string]$ProgramDirectory,
   [Parameter(Mandatory = $false)][string]$DataDirectory,
-  [Parameter(Mandatory = $false)][string]$BackupDirectory
+  [Parameter(Mandatory = $false)][string]$BackupDirectory,
+  [Parameter(Mandatory = $true)][ValidateRange(0, 9007199254740991)][Int64]$ClientBytes,
+  [Parameter(Mandatory = $true)][ValidateRange(0, 9007199254740991)][Int64]$ServerBytes,
+  [Parameter(Mandatory = $true)][ValidateRange(0, 9007199254740991)][Int64]$SupportBytes
 )
 $ErrorActionPreference = 'Stop'
 
@@ -76,12 +79,52 @@ foreach ($entry in $paths.GetEnumerator()) {
   }
   try { $resolved[$entry.Key] = Resolve-PotentialPath $entry.Value }
   catch { Stop-WithMessage $_.Exception.Message }
-  $drive = [IO.Path]::GetPathRoot($entry.Value).TrimEnd('\')
+  $drive = [IO.Path]::GetPathRoot($resolved[$entry.Key]).TrimEnd('\')
   $volume = Get-CimInstance Win32_LogicalDisk -Filter ("DeviceID='" + $drive + "'")
   if ($null -eq $volume -or $volume.DriveType -ne 3 -or $volume.FileSystem -ne 'NTFS') {
     Stop-WithMessage "Каталог $($entry.Key) має бути на доступному локальному диску NTFS."
   }
-  if ([int64]$volume.FreeSpace -lt 67108864) { Stop-WithMessage "На диску каталогу $($entry.Key) недостатньо вільного місця." }
+}
+
+# The payload sizes come from the file-by-file packaging manifest. All consumers
+# sharing a volume are aggregated before comparing with its one free-space value.
+$requirements = @{}
+function Add-VolumeRequirement([string]$Path, [Int64]$Bytes) {
+  $root = [IO.Path]::GetPathRoot($Path).TrimEnd('\').ToUpperInvariant()
+  if (-not $requirements.ContainsKey($root)) { $requirements[$root] = [Int64]0 }
+  $requirements[$root] += $Bytes
+}
+$includesClient = $Mode -ne 'server'
+$includesServer = $Mode -ne 'client'
+$programPayload = [Int64]0
+if ($includesClient) { $programPayload += $ClientBytes }
+if ($includesServer) { $programPayload += $ServerBytes }
+$programReserve = [Math]::Ceiling($programPayload * 0.15)
+Add-VolumeRequirement $resolved['програми'] ($programPayload + $programReserve)
+if ($includesServer) {
+  Add-VolumeRequirement $resolved['серверних даних'] (16MB)
+  Add-VolumeRequirement $resolved['резервних копій'] (16MB)
+}
+$tempPath = [IO.Path]::GetTempPath()
+try { $tempResolved = Resolve-PotentialPath $tempPath }
+catch { Stop-WithMessage "Системний тимчасовий каталог недоступний: $tempPath" }
+$tempRoot = [IO.Path]::GetPathRoot($tempResolved).TrimEnd('\')
+$tempVolume = Get-CimInstance Win32_LogicalDisk -Filter ("DeviceID='" + $tempRoot + "'")
+if ($null -eq $tempVolume -or $tempVolume.DriveType -ne 3 -or $tempVolume.FileSystem -ne 'NTFS') {
+  Stop-WithMessage 'Системний тимчасовий каталог має бути на доступному локальному диску NTFS.'
+}
+Add-VolumeRequirement $tempResolved ($SupportBytes + 8MB)
+
+foreach ($volumeRoot in $requirements.Keys) {
+  $volume = Get-CimInstance Win32_LogicalDisk -Filter ("DeviceID='" + $volumeRoot + "'")
+  if ($null -eq $volume) { Stop-WithMessage "Диск $volumeRoot недоступний." }
+  $required = [Int64]$requirements[$volumeRoot]
+  $available = [Int64]$volume.FreeSpace
+  if ($available -lt $required) {
+    $requiredText = [Math]::Ceiling($required / 1MB).ToString('N0', [Globalization.CultureInfo]::GetCultureInfo('uk-UA')) + ' МіБ'
+    $availableText = [Math]::Floor($available / 1MB).ToString('N0', [Globalization.CultureInfo]::GetCultureInfo('uk-UA')) + ' МіБ'
+    Stop-WithMessage "На диску $volumeRoot недостатньо місця: потрібно щонайменше $requiredText, доступно $availableText. Змініть каталог або звільніть місце."
+  }
 }
 
 $labels = @($resolved.Keys)

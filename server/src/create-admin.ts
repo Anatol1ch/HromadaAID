@@ -1,21 +1,110 @@
+import { lstatSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { stdin, stdout } from 'node:process'
 import { createInterface } from 'node:readline/promises'
+import { DatabaseSync } from 'node:sqlite'
 import { createFirstAdministrator } from './auth.js'
 import { openInstalledServerDatabase } from './database.js'
+import { maximumSupportedSchemaVersion } from '../../electron/database.js'
 
-function readDatabasePath(argumentsList: string[]): string {
-  if (argumentsList[0] === '--') argumentsList = argumentsList.slice(1)
-  if (argumentsList.length !== 2 || argumentsList[0] !== '--database' || !argumentsList[1] || argumentsList[1].startsWith('-')) {
-    throw new Error('Використання: pnpm server:create-admin -- --database <шлях-до-серверної-sqlite>')
+type AdminInput = { username: string; password: string; confirmation: string }
+
+function readArguments(args: string[]): { databasePath: string; mode: 'interactive' | 'installer' | 'status' } {
+  if (args[0] === '--') args = args.slice(1)
+  const databaseIndex = args.indexOf('--database')
+  const databaseValue = databaseIndex >= 0 ? args[databaseIndex + 1] : undefined
+  const modes = args.filter(value => value === '--installer-stdin' || value === '--status')
+  if (!databaseValue || databaseValue.startsWith('-') || modes.length > 1 || args.length !== 2 + modes.length || databaseIndex !== 0) {
+    throw new Error('Некоректні параметри створення початкового адміністратора.')
   }
-  const databasePath = resolve(argumentsList[1])
+  const databasePath = resolve(databaseValue)
   const appData = process.env.APPDATA
   const localDatabase = appData ? resolve(appData, 'hromada-aid', 'hromada-aid.sqlite') : undefined
   if (localDatabase && databasePath.toLocaleLowerCase('uk-UA') === localDatabase.toLocaleLowerCase('uk-UA')) {
     throw new Error('Створення адміністратора у локальній SQLite Electron заборонено. Вкажіть серверну SQLite.')
   }
-  return databasePath
+  return { databasePath, mode: modes[0] === '--installer-stdin' ? 'installer' : modes[0] === '--status' ? 'status' : 'interactive' }
+}
+
+async function readInstallerInput(): Promise<AdminInput> {
+  const chunks: Buffer[] = []
+  let length = 0
+  for await (const chunk of stdin) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    length += buffer.length
+    if (length > 8192) { buffer.fill(0); for (const item of chunks) item.fill(0); throw new Error('Введені дані завеликі.') }
+    chunks.push(buffer)
+    if (buffer.includes(0x0a)) break
+  }
+  const inputBytes = Buffer.concat(chunks)
+  for (const chunk of chunks) chunk.fill(0)
+  let value: Partial<AdminInput> | undefined
+  try {
+    const line = inputBytes.toString('utf8').split(/\r?\n/, 1)[0]
+    value = JSON.parse(line) as Partial<AdminInput>
+    if (typeof value.username !== 'string' || typeof value.password !== 'string' || typeof value.confirmation !== 'string') throw new Error('Заповніть логін, пароль і підтвердження пароля.')
+    if (value.password !== value.confirmation) throw new Error('Паролі не збігаються.')
+    return { username: value.username, password: value.password, confirmation: value.confirmation }
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error('Не вдалося прочитати введені дані адміністратора.')
+    throw error
+  } finally {
+    if (value) { value.password = ''; value.confirmation = ''; value.username = '' }
+    inputBytes.fill(0)
+  }
+}
+
+function reportDatabaseUsers(databasePath: string): void {
+  if (!lstatSync(databasePath).isFile()) throw new Error('Шлях до SQLite не є звичайним файлом.')
+  const database = new DatabaseSync(databasePath, { readOnly: true })
+  try {
+    const hasUsers = database.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='users'").get()
+    if (!hasUsers) throw new Error('База не має сумісної таблиці користувачів.')
+    const result = database.prepare('SELECT COUNT(*) AS value FROM users').get() as { value: number }
+    const schemaVersion = Number((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
+    stdout.write(JSON.stringify({ users: Number(result.value) === 0 ? 0 : 'present', schemaVersion, maximumSupportedSchemaVersion }) + '\n')
+  } finally { database.close() }
+}
+
+async function main(): Promise<void> {
+  const { databasePath, mode } = readArguments(process.argv.slice(2))
+  if (mode === 'status') { reportDatabaseUsers(databasePath); return }
+  if (mode === 'installer') {
+    let input: AdminInput | undefined
+    try {
+      input = await readInstallerInput()
+      const database = openInstalledServerDatabase(databasePath)
+      try {
+        const result = await createFirstAdministrator(database, { username: input.username, password: input.password })
+        if (!result.ok) throw new Error(result.message)
+      } finally { database.close() }
+      stdout.write('admin-created\n')
+    } finally {
+      if (input) { input.password = ''; input.confirmation = ''; input.username = '' }
+    }
+    return
+  }
+
+  const readline = createInterface({ input: stdin, output: stdout })
+  let password = ''
+  let repeatPassword = ''
+  try {
+    const username = await readline.question('Логін першого адміністратора: ')
+    readline.close()
+    password = await readHiddenPassword('Пароль (від 8 до 256 символів): ')
+    repeatPassword = await readHiddenPassword('Повторіть пароль: ')
+    if (password !== repeatPassword) throw new Error('Паролі не збігаються.')
+    const database = openInstalledServerDatabase(databasePath)
+    try {
+      const result = await createFirstAdministrator(database, { username, password })
+      if (!result.ok) throw new Error(result.message)
+    } finally { database.close() }
+    stdout.write('Початкового адміністратора створено.\n')
+  } finally {
+    password = ''
+    repeatPassword = ''
+    readline.close()
+  }
 }
 
 async function readHiddenPassword(prompt: string): Promise<string> {
@@ -26,54 +115,17 @@ async function readHiddenPassword(prompt: string): Promise<string> {
   stdin.setEncoding('utf8')
   return await new Promise<string>((resolvePassword, rejectPassword) => {
     let password = ''
-    const restore = () => {
-      stdin.off('data', onData)
-      stdin.setRawMode(false)
-      stdout.write('\n')
-    }
+    const restore = () => { stdin.off('data', onData); stdin.setRawMode(false); stdout.write('\n') }
     const onData = (chunk: string) => {
       for (const character of chunk) {
-        if (character === '\r' || character === '\n') {
-          restore()
-          resolvePassword(password)
-          return
-        }
-        if (character === '\u0003') {
-          restore()
-          rejectPassword(new Error('Операцію скасовано.'))
-          return
-        }
-        if (character === '\u007f' || character === '\b') {
-          password = Array.from(password).slice(0, -1).join('')
-          continue
-        }
+        if (character === '\r' || character === '\n') { restore(); resolvePassword(password); return }
+        if (character === '\u0003') { restore(); rejectPassword(new Error('Операцію скасовано.')); return }
+        if (character === '\u007f' || character === '\b') { password = Array.from(password).slice(0, -1).join(''); continue }
         password += character
       }
     }
     stdin.on('data', onData)
   })
-}
-
-async function main(): Promise<void> {
-  const databasePath = readDatabasePath(process.argv.slice(2))
-  const readline = createInterface({ input: stdin, output: stdout })
-  try {
-    const username = await readline.question('Логін першого адміністратора: ')
-    readline.close()
-    const password = await readHiddenPassword('Пароль (щонайменше 8 символів): ')
-    const repeatPassword = await readHiddenPassword('Повторіть пароль: ')
-    if (password !== repeatPassword) throw new Error('Паролі не збігаються.')
-    const database = openInstalledServerDatabase(databasePath)
-    try {
-      const result = await createFirstAdministrator(database, { username, password })
-      if (!result.ok) throw new Error(result.message)
-    } finally {
-      database.close()
-    }
-    stdout.write('Початкового адміністратора створено.\n')
-  } finally {
-    readline.close()
-  }
 }
 
 void main().catch((error: unknown) => {

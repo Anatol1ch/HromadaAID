@@ -419,7 +419,7 @@ const migrations: Migration[] = [{
   `,
 }]
 
-const maximumSupportedSchemaVersion = Math.max(...migrations.map(({ version }) => version))
+export const maximumSupportedSchemaVersion = Math.max(...migrations.map(({ version }) => version))
 
 export class DatabaseSchemaError extends Error {
   constructor(message: string) {

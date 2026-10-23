@@ -7,15 +7,21 @@ param(
 $ErrorActionPreference = 'Stop'
 $serviceName = 'HromadaAIDApi'
 $serviceAccount = 'NT SERVICE\HromadaAIDApi'
-$server = Join-Path $ProgramDirectory 'Server'
-$wrapper = Join-Path $server 'service\HromadaAIDService.exe'
-$node = Join-Path $server 'runtime\node.exe'
+$stagedServer = Join-Path $ProgramDirectory 'Server.next'
+$activeServer = Join-Path $ProgramDirectory 'Server'
+$previousServer = Join-Path $ProgramDirectory 'Server.previous'
+$failedServer = Join-Path $ProgramDirectory 'Server.failed'
+$journalPath = Join-Path $DataDirectory '.hromadaaid-update-state.json'
 $config = Join-Path $DataDirectory 'server.json'
 $key = Join-Path $BackupDirectory '.hromadaaid-backup-key.dpapi'
+$pendingAdminPath = Join-Path $DataDirectory '.hromadaaid-first-admin-pending.json'
 $aclSnapshots = @{}
-$createdService = $false
+$newServiceRegistered = $false
+$hadOldPackage = [IO.Directory]::Exists($activeServer)
+$initialInstallRetry = $false
 $wasServiceRunning = $false
-$hadServiceBeforeUpdate = $false
+$oldSchemaMaximum = 0
+$journal = $null
 
 function Invoke-Checked([string]$File, [string[]]$Arguments, [string]$Failure) {
   & $File @Arguments
@@ -27,29 +33,67 @@ function Save-Acl([string]$Path) {
 function Restore-Acls {
   foreach ($entry in $aclSnapshots.GetEnumerator()) {
     try {
-      $acl = Get-Acl -LiteralPath $entry.Key
-      $acl.SetSecurityDescriptorSddlForm([string]$entry.Value)
-      Set-Acl -LiteralPath $entry.Key -AclObject $acl
-    } catch { [Console]::Error.WriteLine('Не вдалося повернути попередній ACL для каталогу інсталяції; потрібне адміністративне відновлення.') }
+      if ([IO.Directory]::Exists($entry.Key) -or [IO.File]::Exists($entry.Key)) {
+        $acl = Get-Acl -LiteralPath $entry.Key
+        $acl.SetSecurityDescriptorSddlForm([string]$entry.Value)
+        Set-Acl -LiteralPath $entry.Key -AclObject $acl
+      }
+    } catch { [Console]::Error.WriteLine('Не вдалося повернути попередні права доступу; потрібне адміністративне відновлення.') }
   }
 }
 function Set-AclChecked([string]$Path, [string[]]$Rules, [bool]$ResetInheritance = $true) {
   $arguments = @($Path)
   if ($ResetInheritance) { $arguments += '/inheritance:r' }
-  $arguments += '/grant:r'
-  $arguments += $Rules
-  Invoke-Checked "$env:SystemRoot\System32\icacls.exe" $arguments "Не вдалося налаштувати ACL для вибраного каталогу: $Path"
+  $arguments += '/grant:r'; $arguments += $Rules
+  Invoke-Checked "$env:SystemRoot\System32\icacls.exe" $arguments 'Не вдалося налаштувати права доступу до вибраних каталогів.'
 }
 function Set-ReadOnlyServiceFile([string]$Path) {
   Set-AclChecked $Path @('SYSTEM:F', 'BUILTIN\Administrators:F', "$serviceAccount`:R")
-  Invoke-Checked "$env:SystemRoot\System32\icacls.exe" @($Path, '/deny', "$serviceAccount`:(W,D)") "Не вдалося заборонити зміну захищеного файла: $Path"
+  Invoke-Checked "$env:SystemRoot\System32\icacls.exe" @($Path, '/deny', "$serviceAccount`:(W,D)") 'Не вдалося захистити конфігураційний файл від змін службою.'
 }
-function Remove-NewService {
-  if (-not $createdService) { return }
-  try { & $wrapper stop 2>$null; & $wrapper uninstall 2>$null } catch { }
+function Invoke-PackageTransaction([string]$PackageRoot, [string]$Action, [string[]]$AdditionalArguments = @()) {
+  $node = Join-Path $PackageRoot 'runtime\node.exe'
+  $tool = Join-Path $PackageRoot 'installer\server-package-transaction.mjs'
+  if (-not [IO.File]::Exists($node) -or -not [IO.File]::Exists($tool)) { throw 'Пакет не містить безпечного механізму перемикання серверних файлів.' }
+  $arguments = @($tool, $Action, '--program-dir', $ProgramDirectory, '--data-dir', $DataDirectory) + $AdditionalArguments
+  & $node @arguments
+  if ($LASTEXITCODE -ne 0) { throw 'Не вдалося виконати контрольоване перемикання серверного пакета.' }
+}
+function Get-SupportedSchemaMaximum([string]$PackageRoot) {
+  $databaseModule = Join-Path $PackageRoot 'app\dist\electron\database.js'
+  if (-not [IO.File]::Exists($databaseModule)) { throw 'Пакет не містить метаданих сумісності SQLite.' }
+  $text = [IO.File]::ReadAllText($databaseModule)
+  $versions = [regex]::Matches($text, 'version\s*:\s*(\d+)') | ForEach-Object { [int]$_.Groups[1].Value }
+  if (-not $versions -or ($versions | Measure-Object -Maximum).Maximum -lt 1) { throw 'Не вдалося визначити сумісну версію схеми SQLite.' }
+  return [int](($versions | Measure-Object -Maximum).Maximum)
+}
+function Get-DatabaseStatus([string]$Node, [string]$PackageRoot, [string]$DatabasePath) {
+  $cli = Join-Path $PackageRoot 'app\dist\server\src\create-admin.js'
+  if (-not [IO.File]::Exists($cli)) { throw 'Пакет не містить перевірки стану облікових записів.' }
+  $output = & $Node $cli --database $DatabasePath --status 2>$null
+  if ($LASTEXITCODE -ne 0) { throw 'Не вдалося безпечно прочитати стан серверної бази.' }
+  try { return ($output | Select-Object -Last 1 | ConvertFrom-Json) }
+  catch { throw 'Перевірка стану серверної бази повернула неочікуваний результат.' }
+}
+function Wait-ServiceRemoved {
+  $deadline = [DateTime]::UtcNow.AddSeconds(20)
+  while ([DateTime]::UtcNow -lt $deadline -and (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 250 }
+  if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) { throw 'Windows SCM не видалив попередню реєстрацію служби.' }
+}
+function Register-Service([string]$Wrapper) {
+  Invoke-Checked $Wrapper @('install') 'WinSW не зміг зареєструвати службу HromadaAIDApi.'
+  $script:newServiceRegistered = $true
+  Invoke-Checked "$env:SystemRoot\System32\sc.exe" @('sidtype', $serviceName, 'unrestricted') 'Не вдалося налаштувати service SID.'
+  $sidResult = & "$env:SystemRoot\System32\sc.exe" qsidtype $serviceName 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0 -or $sidResult -notmatch 'UNRESTRICTED|unrestricted') { throw 'Не вдалося підтвердити service SID служби.' }
+}
+function Get-HealthUrl($Settings) {
+  $hostName = [string]$Settings.host
+  if ($hostName.Contains(':') -and -not $hostName.StartsWith('[')) { $hostName = "[$hostName]" }
+  $scheme = if ($Settings.mode -eq 'network') { 'https' } else { 'http' }
+  return "${scheme}://${hostName}:$([int]$Settings.port)/health"
 }
 function Test-HromadaServiceHealth([string]$Url) {
-  $response = $null
   try {
     $response = Invoke-WebRequest -Uri $Url -Method Get -TimeoutSec 3 -UseBasicParsing
     $body = $response.Content | ConvertFrom-Json
@@ -64,6 +108,22 @@ function Test-HromadaServiceHealth([string]$Url) {
     } catch { return $false }
   }
 }
+function Wait-ServiceHealthy([string]$Url, [int]$TimeoutSeconds = 60) {
+  $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+  do {
+    Start-Sleep -Milliseconds 500
+    $service = Get-Service -Name $serviceName -ErrorAction Stop
+    if ($service.Status -eq 'Running' -and (Test-HromadaServiceHealth $Url)) { return }
+  } while ([DateTime]::UtcNow -lt $deadline)
+  throw "Служба або Fastify не пройшли перевірку доступності за $TimeoutSeconds секунд. Перевірте порт, TLS, конфігурацію та журнали сервера."
+}
+function Unregister-ServiceIfPresent([string]$Wrapper) {
+  $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+  if ($null -eq $service) { return }
+  if ($service.Status -ne 'Stopped') { Stop-Service -Name $serviceName -ErrorAction Stop; (Get-Service -Name $serviceName).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(45)) }
+  if ([IO.File]::Exists($Wrapper)) { & $Wrapper uninstall; if ($LASTEXITCODE -ne 0) { throw 'Не вдалося видалити реєстрацію служби.' } }
+  Wait-ServiceRemoved
+}
 
 try {
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -72,10 +132,30 @@ try {
   foreach ($path in @($ProgramDirectory, $DataDirectory, $BackupDirectory)) {
     if (-not [IO.Path]::IsPathFullyQualified($path) -or $path.StartsWith('\\')) { throw 'Усі каталоги сервера мають бути абсолютними локальними шляхами.' }
   }
-  foreach ($path in @($server, (Join-Path $DataDirectory 'Database'), (Join-Path $DataDirectory 'Logs'), $BackupDirectory)) {
+  foreach ($path in @($stagedServer, (Join-Path $DataDirectory 'Database'), (Join-Path $DataDirectory 'Logs'), $BackupDirectory)) {
     if (-not [IO.Directory]::Exists($path)) { throw "Каталог недоступний: $path" }
   }
-  foreach ($path in @($wrapper, $node, $config)) { if (-not [IO.File]::Exists($path)) { throw "Не знайдено обов'язковий файл серверного пакета: $path" } }
+  foreach ($path in @((Join-Path $stagedServer 'service\HromadaAIDService.exe'), (Join-Path $stagedServer 'runtime\node.exe'), $config)) {
+    if (-not [IO.File]::Exists($path)) { throw "Не знайдено обов'язковий файл серверного пакета: $path" }
+  }
+  $newNode = Join-Path $stagedServer 'runtime\node.exe'
+  $packageVerifier = Join-Path $stagedServer 'installer\verify-server-package.mjs'
+  if (-not [IO.File]::Exists($packageVerifier)) { throw 'Не знайдено перевірку повноти серверного пакета.' }
+  & $newNode $packageVerifier $stagedServer
+  if ($LASTEXITCODE -ne 0) { throw 'Новий серверний пакет неповний або пошкоджений; встановлену версію не перемикали.' }
+  if ([IO.File]::Exists($journalPath)) {
+    try { $priorJournal = Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json }
+    catch { throw 'Журнал попереднього встановлення пошкоджений; автоматичне оновлення зупинено.' }
+    $serviceExists = $null -ne (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)
+    if ($priorJournal.phase -eq 'initial-install-needs-review' -and -not $priorJournal.hadPreviousPackage -and -not $serviceExists -and -not [IO.Directory]::Exists($previousServer)) {
+      $initialInstallRetry = $true
+      $hadOldPackage = $false
+      Remove-Item -LiteralPath $journalPath -Force
+      if ([IO.Directory]::Exists($failedServer)) { Remove-Item -LiteralPath $failedServer -Recurse -Force }
+    } else { throw 'Виявлено незавершений журнал оновлення сервера. Нове оновлення зупинено; потрібне контрольоване відновлення попереднього пакета.' }
+  }
+  if ([IO.Directory]::Exists($previousServer) -or [IO.Directory]::Exists($failedServer)) { throw 'Знайдено службовий каталог попереднього або невдалого пакета. Автоматичне видалення чи перезапис зупинено; потрібна перевірка адміністратора.' }
+
   $settings = Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
   if ($settings.configVersion -notin @(1, 2)) { throw 'Версія server.json несумісна із встановленою версією HromadaAID.' }
   $database = [IO.Path]::GetFullPath([string]$settings.databasePath)
@@ -87,93 +167,159 @@ try {
   $hasArchives = @(Get-ChildItem -LiteralPath $BackupDirectory -Filter '*.hraid' -File -ErrorAction Stop).Count -gt 0
   if (($databaseExists -xor $keyExists) -or ($hasArchives -and -not ($databaseExists -and $keyExists))) { throw 'Виявлено неповний комплект бази, DPAPI-ключа або архівів. Наявні дані збережено; потрібна окрема перевірка адміністратора.' }
 
-  $preflight = Join-Path $server 'app\dist\server\src\installer-preflight.js'
-  if (-not [IO.File]::Exists($preflight)) { throw 'Не знайдено перевірку конфігурації серверного пакета.' }
-  & $node $preflight --config $config
+  $preflight = Join-Path $stagedServer 'app\dist\server\src\installer-preflight.js'
+  & $newNode $preflight --config $config
   if ($LASTEXITCODE -ne 0) { throw 'Конфігурація сервера, TLS або каталоги не пройшли перевірку.' }
-  $tlsCertificate = if ($settings.tls) { [IO.Path]::GetFullPath([string]$settings.tls.certificatePath) } else { $null }
-  $tlsPrivateKey = if ($settings.tls) { [IO.Path]::GetFullPath([string]$settings.tls.privateKeyPath) } else { $null }
-
-  $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-  $hadServiceBeforeUpdate = $null -ne $existingService
-  if ($PreviousServiceStateFile -and [IO.File]::Exists($PreviousServiceStateFile)) {
-    $wasServiceRunning = [IO.File]::ReadAllText($PreviousServiceStateFile).Trim() -eq 'Running'
-  } else {
-    $wasServiceRunning = $null -ne $existingService -and $existingService.Status -eq 'Running'
+  $newSchemaMaximum = Get-SupportedSchemaMaximum $stagedServer
+  if ($hadOldPackage) {
+    $oldSchemaMaximum = Get-SupportedSchemaMaximum $activeServer
+    if ($newSchemaMaximum -lt $oldSchemaMaximum) { throw 'Новий сервер не підтримує всі версії SQLite, які підтримує встановлена версія. Оновлення не активовано.' }
   }
-  if ($null -eq $existingService) {
-    $createdService = $true
-    Invoke-Checked $wrapper @('install') 'WinSW не зміг зареєструвати Windows Service.'
-  } else {
-    if ($existingService.Status -ne 'Stopped') { throw 'Служба має бути штатно зупинена перед оновленням серверних файлів.' }
-    Invoke-Checked $wrapper @('uninstall') 'WinSW не зміг зняти реєстрацію служби перед оновленням.'
-    $deadline = [DateTime]::UtcNow.AddSeconds(20)
-    while ([DateTime]::UtcNow -lt $deadline -and (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 250 }
-    if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) { throw 'Windows SCM не видалив стару реєстрацію служби.' }
-    $createdService = $true
-    Invoke-Checked $wrapper @('install') 'WinSW не зміг повторно зареєструвати Windows Service.'
-  }
-  Invoke-Checked "$env:SystemRoot\System32\sc.exe" @('sidtype', $serviceName, 'unrestricted') 'Windows не зміг увімкнути service SID.'
-  $sidResult = & "$env:SystemRoot\System32\sc.exe" qsidtype $serviceName 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0 -or $sidResult -notmatch 'UNRESTRICTED|unrestricted') { throw 'Не вдалося підтвердити service SID служби.' }
 
-  foreach ($path in @($server, $DataDirectory, $databaseRoot, (Join-Path $DataDirectory 'Logs'), $BackupDirectory, $config, $key, $tlsCertificate, $tlsPrivateKey)) { if ($path) { Save-Acl $path } }
-  Set-AclChecked $server @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)RX")
+  $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+  if ($PreviousServiceStateFile -and [IO.File]::Exists($PreviousServiceStateFile)) { $wasServiceRunning = [IO.File]::ReadAllText($PreviousServiceStateFile).Trim() -eq 'Running' }
+  else { $wasServiceRunning = $null -ne $service -and $service.Status -eq 'Running' }
+
+  foreach ($path in @($ProgramDirectory, $activeServer, $DataDirectory, $databaseRoot, (Join-Path $DataDirectory 'Logs'), $BackupDirectory, $config, $key)) { Save-Acl $path }
   Set-AclChecked $DataDirectory @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)RX")
   Set-AclChecked $databaseRoot @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)M")
   Set-AclChecked (Join-Path $DataDirectory 'Logs') @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)M")
-  # The backup service needs to create and rotate archives. The DPAPI file itself
-  # receives a separate non-inheriting read-only ACL after key initialization.
   Set-AclChecked $BackupDirectory @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)M")
   Set-ReadOnlyServiceFile $config
-  if ($tlsCertificate) { Set-AclChecked $tlsCertificate @('SYSTEM:F', 'BUILTIN\Administrators:F', "$serviceAccount`:R") }
-  if ($tlsPrivateKey) { Set-ReadOnlyServiceFile $tlsPrivateKey }
+  if ($settings.tls) {
+    $tlsCertificate = [IO.Path]::GetFullPath([string]$settings.tls.certificatePath)
+    $tlsPrivateKey = [IO.Path]::GetFullPath([string]$settings.tls.privateKeyPath)
+    if ([IO.File]::Exists($tlsCertificate)) { Save-Acl $tlsCertificate; Set-AclChecked $tlsCertificate @('SYSTEM:F', 'BUILTIN\Administrators:F', "$serviceAccount`:R") }
+    if ([IO.File]::Exists($tlsPrivateKey)) { Save-Acl $tlsPrivateKey; Set-ReadOnlyServiceFile $tlsPrivateKey }
+  }
 
   if (-not $databaseExists -and -not $keyExists) {
-    $initialize = Join-Path $server 'app\dist\server\src\installer-initialization.js'
-    if (-not [IO.File]::Exists($initialize)) { throw 'Не знайдено перевірений механізм первинної ініціалізації.' }
-    & $node $initialize --config $config --confirm-initialization
-    if ($LASTEXITCODE -ne 0) { throw 'Первинну ініціалізацію скасовано або не завершено; користувацькі дані не видалялися.' }
+    if ($hasArchives) { throw 'У каталозі резервних копій уже є архіви. Чисту ініціалізацію зупинено.' }
+    $pending = [ordered]@{ formatVersion = 1; databasePath = $database; createdAt = [DateTime]::UtcNow.ToString('o') } | ConvertTo-Json -Compress
+    try { [IO.File]::WriteAllText($pendingAdminPath, $pending, [Text.UTF8Encoding]::new($false)) }
+    catch { if (-not [IO.File]::Exists($pendingAdminPath)) { throw 'Не вдалося зафіксувати незавершений стан першого налаштування.' } }
+    Set-ReadOnlyServiceFile $pendingAdminPath
+    $initialize = Join-Path $stagedServer 'app\dist\server\src\installer-initialization.js'
+    & $newNode $initialize --config $config --confirm-initialization
+    if ($LASTEXITCODE -ne 0) { throw 'Первинну ініціалізацію не завершено; повторний запуск зможе продовжити її.' }
+    $databaseExists = $true; $keyExists = [IO.File]::Exists($key)
   } else {
-    $verify = Join-Path $server 'app\dist\server\src\installer-initialization.js'
-    & $node $verify --config $config --confirm-initialization
+    $verify = Join-Path $stagedServer 'app\dist\server\src\installer-initialization.js'
+    & $newNode $verify --config $config --confirm-initialization
     if ($LASTEXITCODE -ne 0) { throw 'Наявний ключ або конфігурація несумісні; повторну ініціалізацію не виконано.' }
   }
 
   if ([IO.File]::Exists($key)) { Set-ReadOnlyServiceFile $key }
-  # Restore the service's backup-directory permissions after DPAPI setup, which
-  # hardens that directory for the creating administrator by design.
   Set-AclChecked $BackupDirectory @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)M")
   if ([IO.File]::Exists($key)) { Set-ReadOnlyServiceFile $key }
 
+  $databaseStatus = Get-DatabaseStatus $newNode $stagedServer $database
+  if ([int]$databaseStatus.schemaVersion -gt $newSchemaMaximum) { throw 'Схема наявної SQLite новіша за цей пакет сервера; оновлення зупинено.' }
+  if ($hadOldPackage -and [int]$databaseStatus.schemaVersion -gt $oldSchemaMaximum) { throw 'Попередній пакет не підтримує поточну версію SQLite. Оновлення з автоматичним відкатом небезпечне й зупинене.' }
+  $pendingExists = [IO.File]::Exists($pendingAdminPath)
+  if ($pendingExists) {
+    try { $pending = Get-Content -LiteralPath $pendingAdminPath -Raw | ConvertFrom-Json }
+    catch { throw 'Маркер незавершеного першого налаштування пошкоджений; автоматичне створення облікового запису зупинено.' }
+    if ([IO.Path]::GetFullPath([string]$pending.databasePath) -ine $database) { throw 'Маркер першого налаштування належить іншій SQLite; автоматичні зміни зупинено.' }
+  }
+  if ($databaseStatus.users -eq 0) {
+    if (-not $pendingExists) { throw 'База існує без користувачів і без маркера першого встановлення. Створення адміністратора в довільній базі заборонено; потрібне окреме рішення адміністратора.' }
+    $adminScript = Join-Path $stagedServer 'installer\admin-setup.ps1'
+    $createAdminCli = Join-Path $stagedServer 'app\dist\server\src\create-admin.js'
+    & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $adminScript -NodeExecutable $newNode -CreateAdminScript $createAdminCli -DatabasePath $database
+    if ($LASTEXITCODE -ne 0) { throw 'Першого адміністратора не створено. Наявні база, ключ і архіви збережено; повторіть встановлення для продовження.' }
+    $databaseStatus = Get-DatabaseStatus $newNode $stagedServer $database
+    if ($databaseStatus.users -ne 'present') { throw 'Після створення адміністратора перевірка облікового запису не пройшла.' }
+  }
+
+  $preparedArguments = @('--had-previous', ([string]$hadOldPackage).ToLowerInvariant(), '--old-schema', [string]$oldSchemaMaximum, '--schema-before', [string]$databaseStatus.schemaVersion, '--service-was-running', ([string]$wasServiceRunning).ToLowerInvariant())
+  Invoke-PackageTransaction $stagedServer 'prepare' $preparedArguments
+  $oldWrapper = Join-Path $activeServer 'service\HromadaAIDService.exe'
+  if ($null -ne $service) {
+    if ($service.Status -ne 'Stopped') { throw 'Служба має бути штатно зупинена перед оновленням серверних файлів.' }
+    if (-not $hadOldPackage -or -not [IO.File]::Exists($oldWrapper)) { throw 'Не знайдено попередній WinSW для безпечного оновлення.' }
+    & $oldWrapper uninstall
+    if ($LASTEXITCODE -ne 0) { throw 'WinSW не зміг зняти реєстрацію попередньої служби.' }
+    Wait-ServiceRemoved
+  }
+  $activateArguments = if ($initialInstallRetry) { @('--initial-retry', 'true') } else { @() }
+  Invoke-PackageTransaction $stagedServer 'activate' $activateArguments
+
+  $wrapper = Join-Path $activeServer 'service\HromadaAIDService.exe'
+  Set-AclChecked $activeServer @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)RX")
+  Register-Service $wrapper
+  $settings = Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
+  $healthUrl = Get-HealthUrl $settings
   Invoke-Checked $wrapper @('start') 'Windows Service не запустилася.'
-  $listenAddress = [string]$settings.host
-  if ($listenAddress.Contains(':') -and -not $listenAddress.StartsWith('[')) { $listenAddress = "[$listenAddress]" }
-  $scheme = if ($settings.mode -eq 'network') { 'https' } else { 'http' }
-  $healthUrl = "${scheme}://${listenAddress}:$([int]$settings.port)/health"
-  $deadline = [DateTime]::UtcNow.AddSeconds(60)
-  $healthy = $false
-  do {
-    Start-Sleep -Milliseconds 500
-    $service = Get-Service -Name $serviceName -ErrorAction Stop
-    if ($service.Status -eq 'Running' -and (Test-HromadaServiceHealth $healthUrl)) { $healthy = $true; break }
-  } while ([DateTime]::UtcNow -lt $deadline)
-  if ($service.Status -ne 'Running' -or -not $healthy) { throw 'Служба або Fastify не пройшли перевірку доступності за 60 секунд. Перевірте порт, TLS, конфігурацію та журнали сервера.' }
-  Write-Output 'Службу HromadaAIDApi зареєстровано й запущено. Дані розміщені в окремих вибраних каталогах.'
+  Invoke-PackageTransaction $activeServer 'health-check'
+  Wait-ServiceHealthy $healthUrl
+  Invoke-PackageTransaction $activeServer 'healthy'
+  try { if ([IO.File]::Exists($pendingAdminPath)) { Remove-Item -LiteralPath $pendingAdminPath -Force } } catch { [Console]::Error.WriteLine('Не вдалося прибрати маркер першого налаштування; сервер пройшов health-перевірку.') }
+  try {
+    $finalizeArguments = if ($initialInstallRetry) { @('--initial-retry', 'true') } else { @() }
+    Invoke-PackageTransaction $activeServer 'finalize' $finalizeArguments
+  } catch { [Console]::Error.WriteLine('Сервер пройшов health-перевірку, але попередній пакет або журнал залишено для наступного контрольованого прибирання.') }
+  Write-Output 'Службу HromadaAIDApi зареєстровано, запущено й перевірено. Попередній пакет видаляється лише після успішної перевірки.'
 } catch {
-  Remove-NewService
-  Restore-Acls
-  if ($hadServiceBeforeUpdate -and -not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) {
+  $failure = $_.Exception.Message
+  $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+  if ($null -ne $service -and $service.Status -ne 'Stopped') { try { Stop-Service -Name $serviceName -ErrorAction Stop; (Get-Service -Name $serviceName).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(45)) } catch { } }
+  $activeWrapper = Join-Path $activeServer 'service\HromadaAIDService.exe'
+  if ($newServiceRegistered -and [IO.File]::Exists($activeWrapper)) { try { & $activeWrapper uninstall 2>$null } catch { } }
+
+  if ($hadOldPackage -and [IO.Directory]::Exists($activeServer) -and -not [IO.Directory]::Exists($previousServer)) {
     try {
-      Invoke-Checked $wrapper @('install') 'restore-registration-failed'
-      Invoke-Checked "$env:SystemRoot\System32\sc.exe" @('sidtype', $serviceName, 'unrestricted') 'restore-sid-failed'
-      $createdService = $false
-    } catch { [Console]::Error.WriteLine('Не вдалося відновити реєстрацію попередньої служби автоматично; серверні дані збережено.') }
+      $oldWrapper = Join-Path $activeServer 'service\HromadaAIDService.exe'
+      if (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) { Register-Service $oldWrapper }
+      if ($wasServiceRunning) {
+        $currentService = Get-Service -Name $serviceName -ErrorAction Stop
+        if ($currentService.Status -ne 'Running') { Invoke-Checked $oldWrapper @('start') 'Не вдалося повторно запустити встановлену службу.' }
+        Wait-ServiceHealthy (Get-HealthUrl (Get-Content -LiteralPath $config -Raw | ConvertFrom-Json))
+      }
+      if ([IO.File]::Exists($journalPath)) { Invoke-PackageTransaction $stagedServer 'discard-prepared' }
+      Restore-Acls
+      [Console]::Error.WriteLine("Оновлення зупинено до перемикання пакета; попередній сервер залишено: $failure")
+      exit 1
+    } catch { $failure = 'Попередній пакет залишився на місці, але його стан служби потребує перевірки адміністратором.' }
   }
-  if (-not $createdService -and $wasServiceRunning -and (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) {
-    try { & $wrapper start 2>$null; if ($LASTEXITCODE -ne 0) { throw 'start-failed' } }
-    catch { [Console]::Error.WriteLine('Попередня служба не запустилася автоматично після невдалого оновлення; потрібне ручне відновлення служби.') }
+
+  if ([IO.Directory]::Exists($previousServer)) {
+    $canRollback = $false
+    try {
+      $statusRoot = if ([IO.Directory]::Exists($activeServer)) { $activeServer } else { $stagedServer }
+      $current = Get-DatabaseStatus (Join-Path $statusRoot 'runtime\node.exe') $statusRoot ([string]((Get-Content -LiteralPath $config -Raw | ConvertFrom-Json).databasePath))
+      $canRollback = [int]$current.schemaVersion -le $oldSchemaMaximum
+    } catch { $canRollback = $false }
+    if ($canRollback -and -not [IO.Directory]::Exists($failedServer)) {
+      try {
+        Invoke-PackageTransaction $statusRoot 'rollback' @('--schema-version', [string]$current.schemaVersion)
+        $rollbackWrapper = Join-Path $activeServer 'service\HromadaAIDService.exe'
+        Register-Service $rollbackWrapper
+        if ($wasServiceRunning) {
+          Invoke-Checked $rollbackWrapper @('start') 'Не вдалося запустити попередній пакет після відкату.'
+          Wait-ServiceHealthy (Get-HealthUrl (Get-Content -LiteralPath $config -Raw | ConvertFrom-Json))
+        }
+        $rollbackToolRoot = if ([IO.Directory]::Exists($failedServer)) { $failedServer } elseif ([IO.Directory]::Exists($stagedServer)) { $stagedServer } else { $activeServer }
+        Invoke-PackageTransaction $rollbackToolRoot 'finalize-rollback'
+        Restore-Acls
+        [Console]::Error.WriteLine("Нове оновлення не пройшло перевірку. Попередній серверний пакет відновлено: $failure")
+        exit 1
+      } catch {
+        try { Unregister-ServiceIfPresent (Join-Path $activeServer 'service\HromadaAIDService.exe') } catch { }
+        $failure = 'Не вдалося завершити безпечний відкат. Попередній пакет і журнал збережено; потрібне адміністративне відновлення.'
+      }
+    } else {
+      $failure = 'Версія SQLite змінилася або її сумісність неможливо підтвердити. Попередній пакет не запускався; обидва пакети та журнал збережено для адміністративного відновлення.'
+    }
+  } elseif ([IO.File]::Exists($journalPath)) {
+    try {
+      if (-not $hadOldPackage) {
+        $transactionRoot = if ([IO.Directory]::Exists($activeServer)) { $activeServer } else { $stagedServer }
+        Invoke-PackageTransaction $transactionRoot 'initial-needs-review'
+      }
+    } catch { }
   }
-  [Console]::Error.WriteLine("Встановлення серверної служби не завершено: $($_.Exception.Message)")
+  Restore-Acls
+  [Console]::Error.WriteLine("Встановлення сервера не завершено: $failure")
   exit 1
 }
