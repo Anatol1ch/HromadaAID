@@ -21,6 +21,7 @@ import ValidatedInput, { ValidatedTextarea } from './components/ValidatedInput'
 import { formatDate } from './lib/dates'
 import DeleteConfirmation from './components/DeleteConfirmation'
 import ConfirmDialog from './components/ConfirmDialog'
+import { ArrowRight } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { allowedDictionarySections as sectionsForRoles, USER_ROLE_LABELS, USER_ROLES } from '../shared/authorization'
 
@@ -48,6 +49,8 @@ export default function Dictionaries({
   canManagePlans = true,
   canManageDecisions = true,
   canManagePersonal = true,
+  initialSection,
+  onViewDecisionAssignments,
 }: {
   allowedSections?: readonly DictionarySection[]
   onAccessDenied?: () => void
@@ -55,9 +58,11 @@ export default function Dictionaries({
   canManagePlans?: boolean
   canManageDecisions?: boolean
   canManagePersonal?: boolean
+  initialSection?: DictionarySection
+  onViewDecisionAssignments?: (decision: DecisionSummary) => void
 }) {
   const { year } = useReportingYear()
-  const [section, setSection] = useState<Section>(allowedSections[0] ?? 'programs')
+  const [section, setSection] = useState<Section>(initialSection ?? allowedSections[0] ?? 'programs')
   const [data, setData] = useState<CatalogData>({ programs: [], aidTypes: [], programOrderRevision: '', aidTypeOrderRevisions: {} })
   const [deletePreview, setDeletePreview] = useState<DeletePreview | null>(null)
   const [decisions, setDecisions] = useState<DecisionSummary[]>([])
@@ -103,6 +108,7 @@ export default function Dictionaries({
   useConnectionRefresh(() => { void refresh() })
   useEffect(() => { void refresh() }, [refresh])
   useEffect(() => { if (!allowedSections.includes(section)) setSection(allowedSections[0] ?? 'programs') }, [allowedSections, section])
+  useEffect(() => { if (initialSection && allowedSections.includes(initialSection)) setSection(initialSection) }, [initialSection, allowedSections])
   useCatalogUpdates(() => { void refresh() })
 
   const reorder = async (input: CatalogOrderInput) => {
@@ -183,8 +189,8 @@ export default function Dictionaries({
       {activeSection === 'programs' && <ProgramsCatalog loading={loading} error={loadError} onRetry={() => void refresh()} programs={data.programs} aidTypes={data.aidTypes} ordering={ordering} onReorder={reorder} onEditProgram={editProgram} onEditAid={editAidType} onDelete={(entity, id) => void requestDelete(entity, id)} readOnly={!canManageCatalogs}/>}
       {activeSection === 'decisions' && <>
         <DictionaryToolbar loading={loading} unavailable={Boolean(loadError)} title="Рішення виконкому" count={`Рішень: ${decisions.length}`}>{canManageDecisions && <button className="primary-button" onClick={openNewDecision}><Plus size={17}/>Додати рішення</button>}</DictionaryToolbar>
-        <DictionaryTable loading={loading} error={loadError} onRetry={() => void refresh()} label="Рішення виконкому" className="dictionary-decisions" empty={!decisions.length ? `За ${year} рік рішень поки немає. Додайте перше рішення.` : undefined} columns={[{label:'Номер рішення'},{label:'Дата рішення',width:'24%'},{label:'Пов’язаних призначень',width:'30%',className:'dictionary-center'},{label:'Дії',width:'94px',className:'dictionary-actions-cell'}]}>
-          {decisions.map(item => <tr key={item.id}><td><strong className="registry-name">№ {item.decisionNumber}</strong></td><td className="dictionary-nowrap">{formatDate(item.decisionDate)}</td><td className="dictionary-center dictionary-number">{item.assignmentCount}</td><td className="dictionary-actions-cell">{canManageDecisions && <div className="registry-row-actions"><button className="table-action" title="Редагувати рішення" aria-label={`Редагувати рішення: № ${item.decisionNumber}`} onClick={() => { const next = { id: item.id, expectedUpdatedAt: item.updatedAt, decisionNumber: item.decisionNumber, decisionDate: item.decisionDate, title: item.title ?? '' }; setDecisionDraft(next); setInitial(JSON.stringify(next)); setError('') }}><Pencil size={16}/></button><button className="table-action danger-action" title="Видалити рішення" onClick={() => void requestDelete('decision', item.id)} aria-label={`Видалити рішення: № ${item.decisionNumber}`}><Trash2 size={16}/></button></div>}</td></tr>)}
+        <DictionaryTable loading={loading} error={loadError} onRetry={() => void refresh()} label="Рішення виконкому" className="dictionary-decisions" empty={!decisions.length ? `За ${year} рік рішень поки немає. Додайте перше рішення.` : undefined} columns={[{label:'Номер рішення'},{label:'Дата рішення',width:'24%'},{label:'Пов’язаних призначень',width:'30%',className:'dictionary-center'},{label:'Дії',width:'150px',className:'dictionary-actions-cell'}]}>
+          {decisions.map(item => <tr key={item.id}><td><strong className="registry-name">№ {item.decisionNumber}</strong></td><td className="dictionary-nowrap">{formatDate(item.decisionDate)}</td><td className="dictionary-center dictionary-number">{item.assignmentCount}</td><td className="dictionary-actions-cell"><div className="registry-row-actions"><button className="table-action" title="Переглянути допомоги за цим рішенням" aria-label={`Переглянути допомоги за рішенням № ${item.decisionNumber}`} onClick={() => onViewDecisionAssignments?.(item)}><ArrowRight size={16}/></button>{canManageDecisions && <><button className="table-action" title="Редагувати рішення" aria-label={`Редагувати рішення: № ${item.decisionNumber}`} onClick={() => { const next = { id: item.id, expectedUpdatedAt: item.updatedAt, decisionNumber: item.decisionNumber, decisionDate: item.decisionDate, title: item.title ?? '' }; setDecisionDraft(next); setInitial(JSON.stringify(next)); setError('') }}><Pencil size={16}/></button><button className="table-action danger-action" title="Видалити рішення" onClick={() => void requestDelete('decision', item.id)} aria-label={`Видалити рішення: № ${item.decisionNumber}`}><Trash2 size={16}/></button></>}</div></td></tr>)}
         </DictionaryTable>
       </>}
     </section>}

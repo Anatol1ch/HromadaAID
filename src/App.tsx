@@ -25,6 +25,7 @@ import { useOverviewData } from './components/useOverviewData'
 import { useReportingYear } from './context/YearContext'
 import { YearContext } from './context/YearContext'
 import { notifyConnectionRestored } from './services/connectionRefresh'
+import { decisionAssignmentTarget, type DecisionAssignmentTarget } from './lib/decision-assignment-navigation'
 
 const nav = [
   { label: 'Головна', page: 'home' as WorkspacePage, icon: Home, permission: 'dashboard.read' as Permission },
@@ -165,6 +166,8 @@ function App() {
 function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extract<ClientAuthState, { status: 'authenticated' }>; onChangePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; message?: string }>; connectionActions: { getState: () => Promise<import('../shared/api-contract').ServerConnectionState>; check: (apiUrl: string) => Promise<import('../shared/api-contract').ServerConnectionCheckResult>; save: (apiUrl: string) => Promise<import('../shared/api-contract').ServerConnectionSaveResult> } }) {
   const [activeNav, setActiveNav] = useState('Головна')
   const [createAssignment, setCreateAssignment] = useState(false)
+  const [decisionContext, setDecisionContext] = useState<(DecisionAssignmentTarget & { label: string }) | null>(null)
+  const [dictionarySection, setDictionarySection] = useState<DictionarySection | undefined>()
   const [notice, setNotice] = useState('')
   const [accessDeniedRevision, setAccessDeniedRevision] = useState(0)
   const [year, setYear] = useState(initialAccountingYear)
@@ -181,9 +184,20 @@ function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extrac
   const requiredRolesFor = (item: typeof nav[number]) => item.page === 'dictionaries'
     ? USER_ROLES.filter((role) => dictionarySectionsForRoles([role]).length > 0)
     : USER_ROLES.filter((role) => hasWorkspacePage([role], item.page))
-  const navigate = (label: string) => { const item = visibleNav.find((value) => value.label === label); if (!item) return; if (!canOpenPage(item.page, item.permission)) { showAccessDenied(); return }; setCreateAssignment(false); setActiveNav(label); setNotice(''); closeAccessDenied() }
+  const navigate = (label: string) => { const item = visibleNav.find((value) => value.label === label); if (!item) return; if (!canOpenPage(item.page, item.permission)) { showAccessDenied(); return }; setCreateAssignment(false); if (label !== 'Реєстр допомог') setDecisionContext(null); if (label !== 'Довідники') setDictionarySection(undefined); setActiveNav(label); setNotice(''); closeAccessDenied() }
   const navigateSettings = () => { setCreateAssignment(false); setActiveNav('Налаштування'); setNotice(''); closeAccessDenied() }
-  const newAssignment = () => { if (!can('assignments.manage') || !canOpenPage('assignments', 'assignments.read')) return; setCreateAssignment(true); setActiveNav('Реєстр допомог'); setNotice('') }
+  const newAssignment = () => { if (!can('assignments.manage') || !canOpenPage('assignments', 'assignments.read')) return; setDecisionContext(null); setCreateAssignment(true); setActiveNav('Реєстр допомог'); setNotice('') }
+  const viewDecisionAssignments = (decision: { id: string; decisionDate: string; decisionNumber: string }) => {
+    const target = decisionAssignmentTarget(decision.id, decision.decisionDate, canOpenPage('assignments', 'assignments.read'))
+    if (!target || !dictionarySections.includes('decisions')) { showAccessDenied(); return }
+    setDictionarySection('decisions')
+    setDecisionContext({ ...target, label: `№ ${decision.decisionNumber} від ${decision.decisionDate}` })
+    setYear(target.year); setCreateAssignment(false); setActiveNav('Реєстр допомог'); setNotice(''); closeAccessDenied()
+  }
+  const returnToDecision = () => {
+    if (!decisionContext || !dictionarySections.includes('decisions') || !canOpenPage('dictionaries', 'catalogs.read')) { setDecisionContext(null); showAccessDenied(); return }
+    setYear(decisionContext.year); setDictionarySection('decisions'); setDecisionContext(null); setActiveNav('Довідники'); setNotice(''); closeAccessDenied()
+  }
   const logout = async () => {
     if (logoutBusy) return
     setLogoutBusy(true)
@@ -218,9 +232,9 @@ function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extrac
           'Звітність': canOpenPage('reports', 'reports.read'),
           'Довідники': dictionarySections.some((section) => section === 'programs' || section === 'plans'),
         }}/> :
-          activeNav === 'Реєстр допомог' ? <AidRegistry createOnOpen={createAssignment}/> :
+          activeNav === 'Реєстр допомог' ? <AidRegistry createOnOpen={createAssignment} decisionContext={decisionContext ?? undefined} onReturnToDecision={decisionContext ? returnToDecision : undefined}/> :
           activeNav === 'Формування відомостей' ? <StatementFormation/> :
-          activeNav === 'Довідники' ? <Dictionaries allowedSections={dictionarySections} onAccessDenied={showAccessDenied} canManageCatalogs={can('catalogs.manage')} canManagePlans={can('planning.manage')} canManageDecisions={can('decisions.manage')} canManagePersonal={can('recipients.manage') || can('banks.manage')}/> :
+          activeNav === 'Довідники' ? <Dictionaries allowedSections={dictionarySections} initialSection={dictionarySection} onViewDecisionAssignments={viewDecisionAssignments} onAccessDenied={showAccessDenied} canManageCatalogs={can('catalogs.manage')} canManagePlans={can('planning.manage')} canManageDecisions={can('decisions.manage')} canManagePersonal={can('recipients.manage') || can('banks.manage')}/> :
           activeNav === 'Огляд' ? <Dashboard/> : activeNav === 'Користувачі' ? <UsersAdmin currentUserId={auth.user.id}/> : activeNav === 'Налаштування' ? <SettingsPage user={user} onChangePassword={onChangePassword} connectionActions={connectionActions}/> : <Reports/>}</div>
       </div>
     </main>
