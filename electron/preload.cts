@@ -19,6 +19,7 @@ const api: HromadaAidApi = {
   platform: process.platform,
   appInfo: {
     getVersion: () => invoke('app:get-version'),
+    openExternal: url => invoke('app:open-external', url),
   },
   auth: {
     getState: () => invoke('auth:get-state'),

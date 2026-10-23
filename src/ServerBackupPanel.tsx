@@ -75,7 +75,7 @@ export default function ServerBackupPanel() {
         })}><RotateCcw size={17} aria-hidden="true"/>Оновити перелік</button>
       </div>
       {operationLabel && <div className="backup-operation-status" role="status" aria-live="polite"><LoaderCircle size={17} aria-hidden="true"/>{operationLabel}</div>}
-      {maintenance && <Alert variant="info">Сервер очікує завершення процедури відновлення в серверному терміналі. Операції з копіями тимчасово недоступні.</Alert>}
+      {maintenance && <div className="backup-admin-instruction"><Alert variant="warning"><strong>Триває технічне обслуговування.</strong> Сервер очікує завершення адміністративної процедури відновлення. Операції з копіями тимчасово недоступні.</Alert><div><strong>Для адміністратора сервера</strong><p>Зупиніть Fastify, виконайте <code>pnpm server:backup-restore</code> у серверному терміналі й дочекайтеся завершення команди. Запустіть Fastify після успішного завершення.</p></div></div>}
     </section>
 
     <section className="server-backup-group" aria-labelledby="server-backup-list-title">
@@ -103,7 +103,7 @@ export default function ServerBackupPanel() {
 
     {notice && <SystemToast key={`${notice.title}-${notice.message}`} kind={notice.kind} title={notice.title} message={notice.message} onClose={() => setNotice(null)} duration={notice.kind === 'warning' ? 0 : 5_000}/>}
     {preview && <Modal title="Відновлення резервної копії" description="Перевірте дату архіву та наслідки перед підтвердженням." busy={busy} onClose={() => { if (!busy) setPreview(null) }}>
-      <div className="backup-restore-warning"><strong>Дата копії: {date(preview.createdAt)}</strong><Alert variant="error">{preview.message}</Alert><p>Зміни після цієї дати будуть втрачені. Після підтвердження Fastify перейде в режим технічного обслуговування. Відновлення ще не буде завершене.</p></div>
+      <div className="backup-restore-warning"><strong>Увага! Відновлення замінить поточні дані системи.</strong><span>Дата копії: {date(preview.createdAt)}</span><Alert variant="error">{preview.message}</Alert><p>Усі зміни, внесені після дати створення резервної копії, буде втрачено. Після підтвердження система перейде в режим технічного обслуговування. Для завершення відновлення необхідно виконати адміністративну процедуру на сервері.</p><p>Підготовка відновлення не означає, що дані вже відновлено. Після завершення процедури всім користувачам потрібно буде увійти до системи повторно.</p></div>
       <p className="server-backup-expiry">Підтвердження чинне до {date(preview.expiresAt)}. Після відновлення всі користувачі мають увійти повторно.</p>
       <label className="backup-restore-confirm"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)}/> Я розумію, що зміни після дати копії буде втрачено, й підтверджую підготовку відновлення.</label>
       <div className="settings-form-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setPreview(null)}>Скасувати</button><button className="danger-button" type="button" disabled={busy || !confirmed} onClick={() => void run('Передаємо підтвердження серверу…', async () => {

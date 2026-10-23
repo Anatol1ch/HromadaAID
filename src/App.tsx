@@ -5,9 +5,9 @@ import WelcomeScreen from './components/WelcomeScreen'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { waitForStartupGate } from './lib/startup-timing'
 import { initialAccountingYear, rememberAccountingYear } from './lib/accountingYear'
-import { Activity, ChevronRight, CircleHelp, Code2, Plus, ArrowUpRight, CalendarDays, FileText, HandCoins, HeartHandshake, Home, LogOut, Settings, BookOpen, ChartNoAxesCombined, UsersRound, Lock, LockKeyhole } from 'lucide-react'
+import { Activity, ChevronRight, CircleHelp, Code2, Plus, ArrowUpRight, CalendarDays, FileText, HandCoins, HeartHandshake, Home, LogOut, Settings, BookOpen, ChartNoAxesCombined, UsersRound, Lock, LockKeyhole, Phone, Mail, Send } from 'lucide-react'
 import type { AuthenticatedUser, ClientAuthState } from '../shared/auth-contract'
-import { allowedDictionarySections as dictionarySectionsForRoles, hasWorkspacePage, USER_ROLE_LABELS, USER_ROLES, type Permission, type WorkspacePage } from '../shared/authorization'
+import { allowedDictionarySections as dictionarySectionsForRoles, hasWorkspacePage, USER_ROLE_LABELS, type Permission, type WorkspacePage } from '../shared/authorization'
 import StatementFormation from './StatementFormation'
 import Dictionaries, { type DictionarySection } from './Dictionaries'
 import AidRegistry from './AidRegistry'
@@ -26,6 +26,9 @@ import { useReportingYear } from './context/YearContext'
 import { YearContext } from './context/YearContext'
 import { notifyConnectionRestored } from './services/connectionRefresh'
 import { decisionAssignmentTarget, type DecisionAssignmentTarget } from './lib/decision-assignment-navigation'
+import Modal from './components/Modal'
+
+const ACCESS_RESTRICTED_HINT = 'Доступ для вашої ролі обмежено'
 
 const nav = [
   { label: 'Головна', page: 'home' as WorkspacePage, icon: Home, permission: 'dashboard.read' as Permission },
@@ -76,10 +79,10 @@ function App() {
     const startupAt = Date.now()
     void (async () => {
       try {
-        const [state, initialConnection] = await waitForStartupGate(startupAt, 2_000, () => Promise.all([
+        const [state, initialConnection] = await waitForStartupGate(startupAt, 5_000, () => Promise.all([
           window.hromadaAid.auth.getState(),
           window.hromadaAid.connection.getState(),
-        ]))
+        ]), Date.now, undefined, ([authState, connectionState]) => authState.status === 'unavailable' || connectionState.status === 'unavailable' || connectionState.status === 'maintenance')
         if (!active) return
         setConnection(initialConnection)
         if (!receivedEvent) {
@@ -103,7 +106,7 @@ function App() {
     setWelcome({ user, loading: true })
     let result: Awaited<ReturnType<typeof window.hromadaAid.auth.validateSession>>
     try {
-      result = await waitForStartupGate(startedAt, 1_500, () => window.hromadaAid.auth.validateSession())
+      result = await waitForStartupGate(startedAt, 5_000, () => window.hromadaAid.auth.validateSession(), Date.now, undefined, value => !value.ok)
     } catch {
       if (attempt === welcomeAttempt.current) setWelcome({ user, loading: false, error: 'Не вдалося перевірити сеанс. Перевірте підключення та спробуйте ще раз.' })
       return
@@ -157,7 +160,7 @@ function App() {
     return { ok: result.ok, message: 'message' in result ? result.message : undefined }
   }
   if (!startupReady || !auth) return <StartupScreen/>
-  if (welcome) return <><WelcomeScreen user={welcome.user} loading={welcome.loading} error={welcome.error} onRetry={() => void initializeWelcome(welcome.user, Date.now() - 1_500)} onSignOut={() => { void window.hromadaAid.auth.logout().then(result => { setAuth(result.state); setWelcome(null) }) }}/>{connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
+  if (welcome) return <><WelcomeScreen user={welcome.user} loading={welcome.loading} error={welcome.error} onRetry={() => void initializeWelcome(welcome.user, Date.now())} onSignOut={() => { void window.hromadaAid.auth.logout().then(result => { setAuth(result.state); setWelcome(null) }) }}/>{connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
   if (auth.status === 'password-change-required') return <><TemporaryPasswordScreen state={auth} onChangePassword={changePassword}/>{connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
   if (auth.status !== 'authenticated') return <><LoginScreen state={auth} onLogin={login} connectionActions={connectionActions}/>{connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
   return <><Workspace key={auth.user.id} auth={auth} onChangePassword={changePassword} connectionActions={connectionActions}/>{connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay key="server-connection-overlay" status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
@@ -172,6 +175,7 @@ function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extrac
   const [accessDeniedRevision, setAccessDeniedRevision] = useState(0)
   const [year, setYear] = useState(initialAccountingYear)
   const [logoutBusy, setLogoutBusy] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const permissions = useMemo(() => new Set(auth.user.permissions), [auth.user.permissions])
   const can = (permission: Permission) => permissions.has(permission)
   const visibleNav = nav.filter((item) => item.label !== 'Користувачі' || (can('users.manage')))
@@ -181,9 +185,6 @@ function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extrac
   const closeAccessDenied = useCallback(() => setAccessDeniedRevision(0), [])
   useEffect(() => { rememberAccountingYear(year) }, [year])
   useEffect(() => { if (activeNav !== 'Налаштування' && !visibleNav.some((item) => item.label === activeNav && canOpenPage(item.page, item.permission))) setActiveNav('Головна') }, [activeNav, visibleNav, dictionarySections, permissions])
-  const requiredRolesFor = (item: typeof nav[number]) => item.page === 'dictionaries'
-    ? USER_ROLES.filter((role) => dictionarySectionsForRoles([role]).length > 0)
-    : USER_ROLES.filter((role) => hasWorkspacePage([role], item.page))
   const navigate = (label: string) => { const item = visibleNav.find((value) => value.label === label); if (!item) return; if (!canOpenPage(item.page, item.permission)) { showAccessDenied(); return }; setCreateAssignment(false); if (label !== 'Реєстр допомог') setDecisionContext(null); if (label !== 'Довідники') setDictionarySection(undefined); setActiveNav(label); setNotice(''); closeAccessDenied() }
   const navigateSettings = () => { setCreateAssignment(false); setActiveNav('Налаштування'); setNotice(''); closeAccessDenied() }
   const newAssignment = () => { if (!can('assignments.manage') || !canOpenPage('assignments', 'assignments.read')) return; setDecisionContext(null); setCreateAssignment(true); setActiveNav('Реєстр допомог'); setNotice('') }
@@ -191,7 +192,7 @@ function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extrac
     const target = decisionAssignmentTarget(decision.id, decision.decisionDate, canOpenPage('assignments', 'assignments.read'))
     if (!target || !dictionarySections.includes('decisions')) { showAccessDenied(); return }
     setDictionarySection('decisions')
-    setDecisionContext({ ...target, label: `№ ${decision.decisionNumber} від ${decision.decisionDate}` })
+    setDecisionContext({ ...target, label: `Рішення № ${decision.decisionNumber} від ${new Date(`${decision.decisionDate}T00:00:00`).toLocaleDateString('uk-UA')}` })
     setYear(target.year); setCreateAssignment(false); setActiveNav('Реєстр допомог'); setNotice(''); closeAccessDenied()
   }
   const returnToDecision = () => {
@@ -214,24 +215,24 @@ function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extrac
       <nav className="nav-list">{visibleNav.map(({ label, icon: Icon, permission }) => {
         const item = nav.find((entry) => entry.label === label)!
         const available = canOpenPage(item.page, permission)
-        const hint = available ? label : `Доступ мають ролі: ${requiredRolesFor(item).map((role) => USER_ROLE_LABELS[role]).join(', ')}.`
+        const hint = available ? label : ACCESS_RESTRICTED_HINT
         return <button key={label} type="button" aria-label={available ? label : `${label}. ${hint}`} title={hint}
           aria-current={available && activeNav === label ? 'page' : undefined} aria-disabled={!available}
           className={`nav-item ${available && activeNav === label ? 'active' : ''}${available ? '' : ' nav-item-locked'}`}
           onClick={() => navigate(label)}><Icon size={19} strokeWidth={1.8} aria-hidden="true"/><span>{label}</span>{!available && <LockKeyhole className="nav-lock" size={14} aria-hidden="true"/>}</button>
       })}</nav>
-      <div className="sidebar-bottom"><div className="nav-label">СИСТЕМА</div><button type="button" className={`nav-item${activeNav === 'Налаштування' ? ' active' : ''}`} aria-label="Налаштування" title="Налаштування" aria-current={activeNav === 'Налаштування' ? 'page' : undefined} onClick={navigateSettings}><Settings size={19} strokeWidth={1.8} aria-hidden="true"/><span>Налаштування</span></button><div className="help-card"><div className="help-icon"><CircleHelp size={18}/></div><div><strong>Потрібна допомога?</strong><p>Зверніться до адміністратора системи</p></div><ChevronRight size={17}/></div><div className="user-row"><div className="avatar">{user ? displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() : 'Л'}</div><button type="button" className="user-profile-link" onClick={navigateSettings} title="Мій обліковий запис"><strong>{displayName}</strong><span title={roles}>{roles}</span></button>{user && <div className="user-actions"><button type="button" className="icon-button" title="Вийти" aria-label="Вийти" disabled={logoutBusy} onClick={() => void logout()}><LogOut size={16}/></button></div>}</div></div>
+      <div className="sidebar-bottom"><div className="nav-label">СИСТЕМА</div><button type="button" className={`nav-item${activeNav === 'Налаштування' ? ' active' : ''}`} aria-label="Налаштування" title="Налаштування" aria-current={activeNav === 'Налаштування' ? 'page' : undefined} onClick={navigateSettings}><Settings size={19} strokeWidth={1.8} aria-hidden="true"/><span>Налаштування</span></button><button type="button" className="help-card help-card-button" onClick={() => setHelpOpen(true)}><span className="help-icon"><CircleHelp size={18}/></span><span className="help-copy"><strong>Потрібна допомога?</strong><span>Зверніться до адміністратора системи</span></span><ChevronRight size={17}/></button><div className="user-row"><div className="avatar">{user ? displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() : 'Л'}</div><button type="button" className="user-profile-link" onClick={navigateSettings} title="Мій обліковий запис"><strong>{displayName}</strong><span title={roles}>{roles}</span></button>{user && <div className="user-actions"><button type="button" className="icon-button" title="Вийти" aria-label="Вийти" disabled={logoutBusy} onClick={() => void logout()}><LogOut size={16}/></button></div>}</div></div>
     </aside>
     <main className="main-area">
-      <header className="topbar"><Breadcrumbs items={[{ label: 'Робочий простір', section: 'Головна' }, { label: activeNav }]} navigate={navigate}/><div className="top-actions"><YearPicker value={year} onChange={setYear} label="Рік"/></div></header>
+      <header className="topbar"><div className="topbar-inner"><Breadcrumbs items={[{ label: 'Робочий простір', section: 'Головна' }, { label: activeNav }]} navigate={navigate}/><div className="top-actions"><YearPicker value={year} onChange={setYear} label="Рік"/></div></div></header>
       <div className={`content${activeNav === 'Головна' ? ' home-content' : ''}`}>
         {notice && <Alert variant="info" onDismiss={() => setNotice('')}>{notice}</Alert>}
-        <div>{activeNav === 'Головна' ? <StartPage navigate={navigate} onCreate={newAssignment} canCreate={can('assignments.manage')} onAccessDenied={showAccessDenied} availableActions={{
+        <div>{activeNav === 'Головна' ? <StartPage navigate={navigate} onCreate={newAssignment} canCreate={can('assignments.manage')} availableActions={{
           'Реєстр допомог': canOpenPage('assignments', 'assignments.read'),
           'Формування відомостей': canOpenPage('statements', 'statements.generate'),
           'Звітність': canOpenPage('reports', 'reports.read'),
           'Довідники': dictionarySections.some((section) => section === 'programs' || section === 'plans'),
-        }}/> :
+        }} canViewOverview={canOpenPage('overview', 'dashboard.read')} onAccessDenied={showAccessDenied}/> :
           activeNav === 'Реєстр допомог' ? <AidRegistry createOnOpen={createAssignment} decisionContext={decisionContext ?? undefined} onReturnToDecision={decisionContext ? returnToDecision : undefined}/> :
           activeNav === 'Формування відомостей' ? <StatementFormation/> :
           activeNav === 'Довідники' ? <Dictionaries allowedSections={dictionarySections} initialSection={dictionarySection} onViewDecisionAssignments={viewDecisionAssignments} onAccessDenied={showAccessDenied} canManageCatalogs={can('catalogs.manage')} canManagePlans={can('planning.manage')} canManageDecisions={can('decisions.manage')} canManagePersonal={can('recipients.manage') || can('banks.manage')}/> :
@@ -239,6 +240,7 @@ function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extrac
       </div>
     </main>
     {accessDeniedRevision > 0 && <AccessDeniedToast key={accessDeniedRevision} onClose={closeAccessDenied}/>}
+    {helpOpen && <Modal title="Допомога та підтримка" description="З питань роботи системи, технічних несправностей та налаштування звертайтеся до розробника й адміністратора HromadaAID." onClose={() => setHelpOpen(false)} headerIcon={<CircleHelp size={19} aria-hidden="true"/>}><div className="support-contact-card"><strong>Розробник та адміністратор системи</strong><span>Анатолій Мироненко</span><a href="tel:+380985196340" onClick={event => { event.preventDefault(); void window.hromadaAid.appInfo.openExternal('tel:+380985196340') }}><Phone size={16}/>+380 98 519 63 40</a><a href="mailto:tech.vishnsrada@ukr.net" onClick={event => { event.preventDefault(); void window.hromadaAid.appInfo.openExternal('mailto:tech.vishnsrada@ukr.net') }}><Mail size={16}/>tech.vishnsrada@ukr.net</a><a href="mailto:myronenko.anatoliu@gmail.com" onClick={event => { event.preventDefault(); void window.hromadaAid.appInfo.openExternal('mailto:myronenko.anatoliu@gmail.com') }}><Mail size={16}/>myronenko.anatoliu@gmail.com</a><a href="https://t.me/antlmrnnk" onClick={event => { event.preventDefault(); void window.hromadaAid.appInfo.openExternal('https://t.me/antlmrnnk') }}><Send size={16}/>@antlmrnnk</a></div></Modal>}
   </div><UnsavedChangesConfirmation/></YearContext.Provider>
 }
 
@@ -247,10 +249,15 @@ function StartupScreen() { return <main className="app-startup" aria-busy="true"
 type BreadcrumbItem = { label: string; section?: string }
 function Breadcrumbs({ items, navigate }: { items: BreadcrumbItem[]; navigate: (section: string) => void }) { return <nav className="crumb" aria-label="Навігаційні крихти"><ol>{items.map((item, index) => <li key={`${index}-${item.label}`}>{index > 0 && <ChevronRight size={15} aria-hidden="true"/>}{index === items.length - 1 ? <span aria-current="page">{item.label}</span> : item.section ? <button type="button" onClick={() => navigate(item.section!)}>{item.label}</button> : <span>{item.label}</span>}</li>)}</ol></nav> }
 
-function StartPage({ navigate, onCreate, canCreate, onAccessDenied, availableActions }: { navigate: (label: string) => void; onCreate: () => void; canCreate: boolean; onAccessDenied: () => void; availableActions: Record<string, boolean> }) {
-  const { year } = useReportingYear(); const { data, loading, error, refresh } = useOverviewData(year, false)
+function StartPage({ navigate, onCreate, canCreate, availableActions, canViewOverview, onAccessDenied }: { navigate: (label: string) => void; onCreate: () => void; canCreate: boolean; availableActions: Record<string, boolean>; canViewOverview: boolean; onAccessDenied: () => void }) {
+  const { year } = useReportingYear()
   const links = [{ title: 'Відкрити реєстр призначень', section: 'Реєстр допомог', text: 'Пошук, редагування та зміна статусів', icon: HandCoins }, { title: 'Сформувати відомості', section: 'Формування відомостей', text: 'Персональні, зведені та банківські документи', icon: FileText }, { title: 'Переглянути звітність', section: 'Звітність', text: 'Виплати та виконання річного плану', icon: ChartNoAxesCombined }, { title: 'Перейти до довідників', section: 'Довідники', text: 'Програми, види допомог і планові показники', icon: BookOpen }]
-  return <div className="workspace-page"><section className="page-heading workspace-heading"><div className="workspace-coat-area"><img src={communityCoat} alt="Герб Вишнівської територіальної громади"/></div><div className="workspace-identity-copy"><div className="eyebrow">РОБОЧИЙ ПРОСТІР ГРОМАДИ</div><h1><span>Вишнівська селищна</span>{' '}<span>територіальна громада</span></h1><p className="workspace-system-name">HromadaAID</p><p className="subtitle">Автоматизована система обліку матеріальних допомог</p></div></section><section className="dashboard-panel workspace-actions" aria-labelledby="workspace-actions-title"><div className="workspace-primary"><div><h2 id="workspace-actions-title">Щоденна робота</h2><p>Оберіть дію, щоб розпочати роботу з призначеннями.</p></div>{canCreate && <button type="button" className="primary-button" onClick={onCreate}><Plus size={19}/>Створити призначення</button>}</div><div className="workspace-shortcuts">{links.map(({ title, section, text, icon: Icon }, index) => { const available = availableActions[section] ?? false; return <button type="button" aria-label={available ? title : `${title}. Доступ обмежено`} aria-describedby={`workspace-shortcut-${index}`} aria-disabled={!available} title={available ? title : 'Доступ обмежено'} className={available ? '' : 'workspace-shortcut-locked'} key={section} onClick={() => available ? navigate(section) : onAccessDenied()}><span className="workspace-action-icon"><Icon size={20} aria-hidden="true"/></span><span><strong>{title}</strong><small id={`workspace-shortcut-${index}`}>{text}</small></span>{available ? <ArrowUpRight size={18} aria-hidden="true"/> : <Lock className="workspace-shortcut-lock" size={15} aria-hidden="true"/>}</button> })}</div></section><section className="dashboard-panel workspace-year" aria-label="Обліковий період"><div className="workspace-year-label"><CalendarDays size={21} aria-hidden="true"/><div><span>Обраний обліковий рік</span><strong>{year}</strong></div></div><div className="workspace-year-summary" aria-live={loading || error ? undefined : 'polite'}>{loading ? <DataState kind="loading" compact message="Завантажуємо підсумок…"/> : error ? <Alert variant="error" action={<button type="button" onClick={() => void refresh()}>Повторити</button>}>{error}</Alert> : data ? <><strong>{`Призначено допомог: ${data.assignmentCount}`}</strong><span>{data.assignmentCount ? 'Показники та стан виконання доступні в огляді.' : 'Додайте призначення або перевірте записи в реєстрі.'}</span></> : null}</div><button type="button" className="secondary-button" onClick={() => navigate('Огляд')}>Відкрити огляд<ArrowUpRight size={16}/></button></section><footer className="page-footer"><p>© {new Date().getFullYear()} Вишнівська селищна рада. Внутрішня інформаційна система.</p><hr aria-hidden="true"/><p className="home-footer-credit"><Code2 size={17} strokeWidth={1.7} aria-hidden="true"/><span>Developed by <strong>Anatolii Myronenko</strong></span></p></footer></div>
+  return <div className="workspace-page"><section className="page-heading workspace-heading"><div className="workspace-coat-area"><img src={communityCoat} alt="Герб Вишнівської територіальної громади"/></div><div className="workspace-identity-copy"><div className="eyebrow">РОБОЧИЙ ПРОСТІР ГРОМАДИ</div><h1><span>Вишнівська селищна</span>{' '}<span>територіальна громада</span></h1><p className="workspace-system-name">HromadaAID</p><p className="subtitle">Автоматизована система обліку матеріальних допомог</p></div></section><section className="dashboard-panel workspace-actions" aria-labelledby="workspace-actions-title"><div className="workspace-primary"><div><h2 id="workspace-actions-title">Щоденна робота</h2><p>Оберіть дію, щоб розпочати роботу з призначеннями.</p></div>{canCreate && <button type="button" className="primary-button" onClick={onCreate}><Plus size={19}/>Створити призначення</button>}</div><div className="workspace-shortcuts">{links.map(({ title, section, text, icon: Icon }, index) => { const available = availableActions[section] ?? false; return <button type="button" aria-label={available ? title : `${title}. ${ACCESS_RESTRICTED_HINT}`} aria-describedby={`workspace-shortcut-${index}`} aria-disabled={!available} title={available ? title : ACCESS_RESTRICTED_HINT} className={available ? '' : 'workspace-shortcut-locked'} key={section} onClick={() => available ? navigate(section) : onAccessDenied()}><span className="workspace-action-icon"><Icon size={20} aria-hidden="true"/></span><span><strong>{title}</strong><small id={`workspace-shortcut-${index}`}>{text}</small></span>{available ? <ArrowUpRight size={18} aria-hidden="true"/> : <Lock className="workspace-shortcut-lock" size={15} aria-hidden="true"/>}</button> })}</div></section><section className="dashboard-panel workspace-year" aria-label="Обліковий період"><div className="workspace-year-label"><CalendarDays size={21} aria-hidden="true"/><div><span>Обраний обліковий рік</span><strong>{year}</strong></div></div>{canViewOverview ? <><OverviewHomeSummary year={year}/><button type="button" className="secondary-button" onClick={() => navigate('Огляд')}>Відкрити огляд<ArrowUpRight size={16}/></button></> : <div className="workspace-year-summary"><span>Робочий простір і доступні вам функції за {year} рік.</span></div>}</section><footer className="page-footer"><p>© {new Date().getFullYear()} Вишнівська селищна рада. Внутрішня інформаційна система.</p><hr aria-hidden="true"/><p className="home-footer-credit"><Code2 size={17} strokeWidth={1.7} aria-hidden="true"/><span>Developed by <strong>Anatolii Myronenko</strong></span></p></footer></div>
+}
+
+function OverviewHomeSummary({ year }: { year: number }) {
+  const { data, loading, error, refresh } = useOverviewData(year, false)
+  return <div className="workspace-year-summary" aria-live={loading || error ? undefined : 'polite'}>{loading ? <DataState kind="loading" compact message="Завантажуємо підсумок…"/> : error ? <Alert variant="error" action={<button type="button" onClick={() => void refresh()}>Повторити</button>}>{error}</Alert> : data ? <><strong>{`Призначено допомог: ${data.assignmentCount}`}</strong><span>{data.assignmentCount ? 'Показники та стан виконання доступні в огляді.' : 'Додайте призначення або перевірте записи в реєстрі.'}</span></> : null}</div>
 }
 
 export default App

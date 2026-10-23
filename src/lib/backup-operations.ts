@@ -25,5 +25,5 @@ export function safeBackupErrorMessage(error: unknown): string {
 export const restorePendingNotice = {
   kind: 'warning' as const,
   title: 'Потрібно завершити відновлення на сервері',
-  message: 'Fastify перейшов у режим технічного обслуговування. Зупиніть його та виконайте pnpm server:backup-restore у серверному терміналі. Не запускайте Fastify до завершення команди.',
+  message: 'Підготовка відновлення передана серверу, але дані ще не відновлено. Після процедури всім користувачам потрібно буде увійти повторно.',
 }

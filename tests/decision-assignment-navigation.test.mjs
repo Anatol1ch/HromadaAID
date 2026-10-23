@@ -38,6 +38,8 @@ test('context filter compares decision IDs, respects the selected year, and retu
   assert.match(app, /setYear\(target\.year\)/)
   assert.match(app, /setDictionarySection\('decisions'\)/)
   assert.match(app, /setYear\(decisionContext\.year\)/)
+  assert.match(app, /Рішення № \$\{decision\.decisionNumber\} від \$\{new Date\(/)
+  assert.match(aidRegistry, /decision-assignment-context[\s\S]*Допомоги за рішенням[\s\S]*decisionContext\.label[\s\S]*Повернутися до рішення/)
   // The context transition passes only the decision reference and performs no recipient-card lookup.
   const transition = app.slice(app.indexOf('const viewDecisionAssignments'), app.indexOf('const returnToDecision'))
   assert.match(transition, /decision\.id/)

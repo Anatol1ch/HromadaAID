@@ -136,6 +136,12 @@ if (!hasSingleInstanceLock) {
       savedApiUrl = savedConnection.config?.apiUrl ?? null
       runtimeConfig = readElectronRuntimeConfig(process.env, savedConnection)
       trustedIpcMain.handle('app:get-version', async () => app.getVersion())
+      trustedIpcMain.handle('app:open-external', async (_event, value: unknown): Promise<boolean> => {
+        if (typeof value !== 'string' || value.length > 300) return false
+        const safe = /^(?:tel:\+380\d{9}|mailto:(?:tech\.vishnsrada@ukr\.net|myronenko\.anatoliu@gmail\.com)|https:\/\/t\.me\/antlmrnnk)$/i.test(value)
+        if (!safe) return false
+        try { await shell.openExternal(value); return true } catch { return false }
+      })
       let savingConnection = false
       const publishAuthState = (state: ClientAuthState) => {
         remoteBackup?.authChanged(state)

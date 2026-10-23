@@ -316,7 +316,7 @@ export type HromadaAidApi = {
     setAllowed: (id: string, allowed: boolean, expectedUpdatedAt: string) => Promise<import('./backup-contract.js').BackupInstallation>
   }
   appName: string; platform: string
-  appInfo: { getVersion: () => Promise<string> }
+  appInfo: { getVersion: () => Promise<string>; openExternal: (url: string) => Promise<boolean> }
   auth: {
     getState: () => Promise<ClientAuthState>
     getLastLogin: () => Promise<string | null>
