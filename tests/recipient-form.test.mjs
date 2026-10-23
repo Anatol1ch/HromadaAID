@@ -6,8 +6,8 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import ts from 'typescript'
-import { openAppDatabase } from '../electron/database.ts'
-import { registerRecipientIpc } from '../electron/recipient-ipc.ts'
+import { openTestDatabase } from './fakes/database.mjs'
+import { registerRecipientFixture } from './fakes/recipient-fixture.ts'
 import { recipientTextFields, validateRecipientInput } from '../electron/recipient-validation.ts'
 import { handlers } from './fakes/ipc-security.mjs'
 import { confirmModalClose, finishCloseConfirmation, getCloseConfirmation } from '../src/components/closeConfirmation.ts'
@@ -23,7 +23,7 @@ const complete = {
 const required = [...Object.keys(recipientTextFields).filter(key => recipientTextFields[key].required), 'registeredAddressParts', 'sex', 'isVpo']
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'hromada-aid-recipient-test-'))
-  const db = openAppDatabase(root)
+  const db = openTestDatabase(root)
   t.after(() => {
     db.close()
     assert.equal(dirname(resolve(root)), resolve(tmpdir()))
@@ -32,7 +32,7 @@ function fixture(t) {
   })
   db.prepare('INSERT INTO banks(id,name) VALUES(?,?)').run('test-bank', 'Вигаданий банк')
   db.prepare('INSERT INTO bank_details(id,bank_id,mfo,edrpou) VALUES(?,?,?,?)').run('test-detail', 'test-bank', '000001', '00000001')
-  registerRecipientIpc(db)
+  registerRecipientFixture(db)
   return { db, call: (channel, ...args) => handlers.get(channel)({}, ...args) }
 }
 

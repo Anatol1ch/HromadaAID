@@ -1,5 +1,3 @@
-import { mkdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { migrateAddresses } from './migration-addresses.js'
 import { BankMigrationError, migrateBanks } from './migration-banks.js'
@@ -479,11 +477,6 @@ const aidTypes = [
   { id: 'aid-veterans-release', code: 'VETERANS_RELEASE', programId: 'program-veterans', shortName: 'Допомога після звільнення з полону', officialName: 'Одноразова матеріальна допомога військовослужбовцям Сил безпеки і оборони України, стосовно яких встановлено факт позбавлення особистої свободи внаслідок збройної агресії проти України, в разі звільнення з полону' },
   { id: 'aid-veterans-missing-family', code: 'VETERANS_MISSING_FAMILY', programId: 'program-veterans', shortName: 'Допомога сім’ям зниклих безвісти', officialName: 'Щорічна одноразова матеріальна допомога членам сімей військовослужбовців, стосовно яких встановлено факт зниклих безвісти' },
 ]
-
-export function openAppDatabase(userDataPath: string): DatabaseSync {
-  mkdirSync(userDataPath, { recursive: true })
-  return openInitializedDatabase(join(userDataPath, 'hromada-aid.sqlite'))
-}
 
 /**
  * Opens an explicitly selected SQLite database using the complete HromadaAID

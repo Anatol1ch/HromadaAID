@@ -4,14 +4,14 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { openAppDatabase } from '../electron/database.ts'
-import { registerRecordsIpc } from '../electron/records-ipc.ts'
+import { openTestDatabase } from './fakes/database.mjs'
+import { registerRecordsFixture } from './fakes/records-fixture.ts'
 import { executeDeletion } from '../electron/deletion-service.ts'
 import { handlers } from './fakes/ipc-security.mjs'
 
 function fixture(t) {
  const root=mkdtempSync(join(tmpdir(),'hromada-order-test-')), connections=[]
- const open=()=>{const db=openAppDatabase(root);connections.push(db);registerRecordsIpc(db);return db}
+ const open=()=>{const db=openTestDatabase(root);connections.push(db);registerRecordsFixture(db);return db}
  t.after(()=>{for(const db of connections)try{db.close()}catch{};assert.equal(dirname(resolve(root)),resolve(tmpdir()));rmSync(root,{recursive:true,force:true})})
  return {db:open(),open,root}
 }
@@ -102,7 +102,7 @@ test('Failed migration 18 rolls back both schema additions and rankings and clos
  const {db,root}=fixture(t)
  asVersion17(db);db.exec("CREATE TRIGGER block_migration BEFORE UPDATE ON aid_types BEGIN SELECT RAISE(ABORT,'synthetic migration failure'); END")
  const before=snapshot(db);db.close()
- assert.throws(()=>openAppDatabase(root),/synthetic migration failure/)
+ assert.throws(()=>openTestDatabase(root),/synthetic migration failure/)
  const check=new DatabaseSync(join(root,'hromada-aid.sqlite'))
  try {
   assert.equal(check.prepare('PRAGMA user_version').get().user_version,17)

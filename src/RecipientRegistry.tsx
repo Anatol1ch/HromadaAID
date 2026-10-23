@@ -67,7 +67,7 @@ function RecipientRegistry({ embedded = false, readOnly = false }: { embedded?: 
     try {
       setRecipients(await recipientRepository.list(true))
     } catch {
-      setLoadError('Не вдалося завантажити список. Перевірте доступ до локального сховища й повторіть спробу.')
+      setLoadError('Не вдалося завантажити список. Перевірте підключення до сервера й повторіть спробу.')
     } finally {
       setLoading(false)
     }
@@ -158,7 +158,7 @@ function RecipientRegistry({ embedded = false, readOnly = false }: { embedded?: 
         </tr>)}
       </DictionaryTable>
     </section>
-    <p className="registry-storage-note"><UserRound size={16}/> Дані зберігаються локально на цьому комп’ютері.</p>
+    <p className="registry-storage-note"><UserRound size={16}/> Дані зберігаються в центральній базі на сервері HromadaAID.</p>
     {detailError && <Alert variant="error" action={<button type="button" onClick={() => setDetailError('')}>Закрити</button>}>{detailError}</Alert>}
     {viewing && <RecipientDetails recipient={viewing} history={history} historyLoading={historyLoading} historyError={historyError} onClose={() => setViewing(null)} onEdit={readOnly ? undefined : () => { setViewing(null); void beginEdit(viewing.id) }}/>}
     {deletePreview && <DeleteConfirmation preview={deletePreview} onClose={() => setDeletePreview(null)} onDeleted={async () => { setDeletePreview(null); await loadRecipients() }}/>}

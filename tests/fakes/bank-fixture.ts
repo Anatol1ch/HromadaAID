@@ -1,8 +1,9 @@
+// Test-only compatibility harness for server business-rule fixtures; never shipped to Electron.
 import type { DatabaseSync } from 'node:sqlite'
-import { trustedIpcMain as ipcMain } from './ipc-security.js'
-import { bankDetails, getBank, listBanks, removeBank, saveBank } from './bank-store.js'
+import { trustedIpcMain as ipcMain } from './ipc-security.mjs'
+import { bankDetails, getBank, listBanks, removeBank, saveBank } from '../../electron/bank-store.js'
 
-export function registerBankIpc(database: DatabaseSync) {
+export function registerBankFixture(database: DatabaseSync) {
   ipcMain.handle('banks:list', (_event, query: unknown) => {
     if (query !== undefined && typeof query !== 'string') throw new Error('Некоректний пошуковий запит.')
     return listBanks(database, query as string | undefined)

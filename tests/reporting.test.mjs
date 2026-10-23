@@ -4,8 +4,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { openAppDatabase } from '../electron/database.ts'
-import { registerRecordsIpc } from '../electron/records-ipc.ts'
+import { openTestDatabase } from './fakes/database.mjs'
+import { registerRecordsFixture } from './fakes/records-fixture.ts'
 import { dashboardSummary, reportSummary } from '../electron/financial-summary.ts'
 import { reportGroups, reportNumbers, reportTotals, parsePlanMoney, reportPeriodText } from '../src/lib/reporting.ts'
 import { handlers } from './fakes/ipc-security.mjs'
@@ -13,7 +13,7 @@ import { previewDeletion, executeDeletion } from '../electron/deletion-service.t
 
 function fixture(t) {
  const root=mkdtempSync(join(tmpdir(),'hromada-report-test-')),connections=[]
- const open=()=>{const db=openAppDatabase(root);connections.push(db);registerRecordsIpc(db);return db}
+ const open=()=>{const db=openTestDatabase(root);connections.push(db);registerRecordsFixture(db);return db}
  t.after(()=>{for(const db of connections)try{db.close()}catch{};assert.equal(dirname(resolve(root)),resolve(tmpdir()));rmSync(root,{recursive:true,force:true})})
  const db=open(),call=(channel,...args)=>JSON.parse(JSON.stringify(handlers.get(channel)({},...args)))
  return {db,root,open,call}
@@ -86,7 +86,7 @@ test('Migration 18→19 aggregates existing plans without modifying originals or
 test('Failed migration 19 rolls back its schema and version and leaves the connection unlocked',t=>{
  const {db,root}=fixture(t)
  db.exec('DROP TABLE annual_aid_plans; DELETE FROM schema_migrations WHERE version=19; PRAGMA user_version=18; CREATE TABLE annual_aid_plans(conflict TEXT)')
- db.close();assert.throws(()=>openAppDatabase(root),/already exists/)
+ db.close();assert.throws(()=>openTestDatabase(root),/already exists/)
  const check=new DatabaseSync(join(root,'hromada-aid.sqlite'))
  try {assert.equal(check.prepare('PRAGMA user_version').get().user_version,18);assert.equal(check.prepare('SELECT MAX(version) n FROM schema_migrations').get().n,18);check.exec('BEGIN EXCLUSIVE;ROLLBACK')}finally{check.close()}
 })

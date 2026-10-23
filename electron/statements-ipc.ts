@@ -1,6 +1,5 @@
 import { bankStatementFileName, statementFileName } from './statement-filenames.js'
 import { statementKey, statementPeriodText, statementPlan, validateStatementParameters } from './statement-parameters.js'
-import { readStatementRows } from './statement-data.js'
 import { dialog } from 'electron'
 import { trustedIpcMain as ipcMain } from './ipc-security.js'
 import { copyFileSync, readFileSync, unlinkSync } from 'node:fs'
@@ -8,9 +7,7 @@ import { spawn } from 'node:child_process'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
-import type { DatabaseSync } from 'node:sqlite'
 import type { GeneratedStatement, StatementKind } from './api-contract.js'
-import { listStatementAssignments } from './statement-list-data.js'
 import { cancelDocumentGeneration, cleanupDocumentTemp, createDocumentDirectory, initializeDocumentTemp, isDocumentTempPath, removeDocumentDirectory, setDocumentWorker } from './document-temp.js'
 
 type Row = Record<string, number | string | null>
@@ -95,9 +92,8 @@ function invokeExcel(scriptPath: string, payload: object) {
 }
 
 export type StatementDataSource = { readRows: (ids: string[], year: string) => Promise<Row[]>; readBankRows: (ids: string[], year: number) => Promise<Row[]> }
-export function registerStatementsIpc(database?: DatabaseSync, source?: StatementDataSource) {
+export function registerStatementsIpc(source: StatementDataSource) {
   initializeDocumentTemp()
-  if (database) ipcMain.handle('statements:list', (_event, yearValue: unknown) => listStatementAssignments(database, yearValue))
 
   ipcMain.handle('statements:generate', async (_event, kindValue: unknown, idsValue: unknown, yearValue: unknown, parametersValue: unknown) => {
     if (shuttingDown) return { ok: false, message: 'Застосунок завершує роботу.' }
@@ -108,7 +104,7 @@ export function registerStatementsIpc(database?: DatabaseSync, source?: Statemen
     if (!year) return { ok: false, message: 'Оберіть коректний звітний рік.' }
     const kind = kindValue as StatementKind
     const ids = [...new Set(idsValue as string[])]
-    const rows = source ? await source.readRows(ids, year) : readStatementRows(database!, ids, year)
+    const rows = await source.readRows(ids, year)
     if (rows.length !== ids.length) return { ok: false, message: 'Частина призначень недоступна: їх видалено, змінено статус або рік рішення. Оновіть список.' }
     try {
       for (const row of rows) asMinor(row.amount_minor)
@@ -196,7 +192,7 @@ export function registerStatementsIpc(database?: DatabaseSync, source?: Statemen
     }
     const excelName = bankStatementFileName()
     const ids = [...new Set(idsValue as string[])]
-    const rows = source ? await source.readBankRows(ids, Number(yearValue)) : database!.prepare(`SELECT a.id,a.amount_minor,r.last_name,r.first_name,r.patronymic,r.rnokpp,r.bank_account FROM assignments a JOIN recipients r ON r.id=a.recipient_id JOIN decisions d ON d.id=a.decision_id WHERE a.id IN (${ids.map(() => '?').join(',')}) AND substr(d.decision_date,1,4)=? AND a.status IN ('Призначено','В роботі','Передано до казначейства') ORDER BY d.decision_date,a.created_at,a.id`).all(...ids, String(yearValue)) as Row[]
+    const rows = await source.readBankRows(ids, Number(yearValue))
     if (rows.length !== ids.length) return { ok: false, message: 'Частина призначень недоступна: їх видалено, змінено статус або рік рішення. Оновіть список.' }
     const missing = rows.flatMap((row) => {
       const fields = [!String(row.rnokpp ?? '').trim() ? 'РНОКПП' : '', !String(row.bank_account ?? '').trim() ? 'банківський рахунок' : ''].filter(Boolean)

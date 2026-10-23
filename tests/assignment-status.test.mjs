@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, dirname, basename } from 'node:path'
-import { openAppDatabase } from '../electron/database.ts'
+import { openTestDatabase } from './fakes/database.mjs'
 import { changeAssignmentStatuses } from '../electron/assignment-status.ts'
 import { eligibleAssignmentIds, keepEligibleSelection, selectionForYear, selectionState, toggleEligibleSelection } from '../src/lib/assignmentSelection.ts'
 
@@ -17,7 +17,7 @@ function fixture(t, statuses = ['Призначено', 'Призначено'])
     assert(basename(root).startsWith('hromada-aid-batch-status-test-'))
     rmSync(resolve(root), { recursive: true, force: true })
   })
-  const reopen = () => { const db = openAppDatabase(root); connections.push(db); return db }
+  const reopen = () => { const db = openTestDatabase(root); connections.push(db); return db }
   const db = reopen()
   const stamp = '2027-01-01T09:00:00.000Z'
   db.prepare('INSERT INTO recipients(id,last_name,first_name,is_vpo,created_at,updated_at) VALUES(?,?,?,?,?,?)').run('person', 'Вигаданий', 'Тестовий', 0, stamp, stamp)
@@ -142,6 +142,6 @@ test('Static UI/IPC flow: one bulk call, no filter/sort/year reset, guarded date
   const modal = readFileSync(new URL('../src/components/BatchAssignmentStatusModal.tsx', import.meta.url), 'utf8')
   assert.equal((modal.match(/assignmentRepository.changeStatuses\(/g) || []).length, 1)
   assert(modal.includes('if (inFlight.current) return')); assert(modal.includes('isIsoCalendarDate(paidOn)')); assert(modal.includes("useState('')")); assert(!modal.includes('todayIsoDate'))
-  const records = readFileSync(new URL('../electron/records-ipc.ts', import.meta.url), 'utf8')
-  assert(records.includes("trustedIpcMain as ipcMain")); assert(records.includes("ipcMain.handle('assignments:change-statuses'"))
+  const records = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8')
+  assert(records.includes("trustedIpcMain.handle('assignments:change-statuses'")); assert(records.includes("http.postJson('/api/assignments/change-statuses'"))
 })

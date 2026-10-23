@@ -3,16 +3,16 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
-import { openAppDatabase } from '../electron/database.ts'
-import { registerRecordsIpc } from '../electron/records-ipc.ts'
+import { openTestDatabase } from './fakes/database.mjs'
+import { registerRecordsFixture } from './fakes/records-fixture.ts'
 import { dashboardSummary } from '../electron/financial-summary.ts'
 import { overviewRows, overviewMoney, overviewTypeGroups } from '../src/lib/overview.ts'
 import { handlers } from './fakes/ipc-security.mjs'
 
 test('Overview: exact existing metrics, pending exclusion, paid dates, dynamic catalogs and manual order',t=>{
- const root=mkdtempSync(join(tmpdir(),'hromada-overview-test-')),db=openAppDatabase(root)
+ const root=mkdtempSync(join(tmpdir(),'hromada-overview-test-')),db=openTestDatabase(root)
  t.after(()=>{db.close();assert.equal(dirname(resolve(root)),resolve(tmpdir()));rmSync(root,{recursive:true,force:true})})
- registerRecordsIpc(db)
+ registerRecordsFixture(db)
  const list=()=>handlers.get('catalogs:list')({},true)
  const save=input=>handlers.get('catalogs:save')({},input)
  const stamp='2026-01-01'

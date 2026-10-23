@@ -3,7 +3,7 @@ import type { AidTypeOption, CatalogList, ProgramOption } from './api-contract.j
 
 type Row = Record<string, string | number | null>
 
-/** Shared catalog read model for local IPC and the standalone API. */
+/** Server catalog read model. */
 export function listCatalogs(database: DatabaseSync, includeInactive = false): CatalogList {
   const programs = database.prepare(`SELECT p.id, p.short_name AS shortName, p.official_name AS officialName, p.is_active AS isActive, p.updated_at AS updatedAt,
     p.approval_id AS approvalId, COALESCE(p.approval_number,pa.document_number) AS approvalNumber, COALESCE(p.approval_date,pa.document_date) AS approvalDate, COALESCE(p.approval_title,pa.title) AS approvalTitle,

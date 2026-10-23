@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
 import { createServer } from 'vite'
 import react from '@vitejs/plugin-react'
-import { openAppDatabase } from '../electron/database.ts'
+import { openTestDatabase } from './fakes/database.mjs'
 import { reportSummary } from '../electron/financial-summary.ts'
-import { registerRecordsIpc } from '../electron/records-ipc.ts'
+import { registerRecordsFixture } from './fakes/records-fixture.ts'
 import { handlers } from './fakes/ipc-security.mjs'
 import { reportBudgetCode, reportCount, reportMoney } from '../src/lib/reporting.ts'
 const runtime=join(process.env.USERPROFILE,'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
@@ -16,7 +16,7 @@ const require=createRequire(import.meta.url),{chromium}=require(runtime),{expect
 let server,browser,root,origin,summary,catalogs
 before(async()=>{
  root=await mkdtemp(join(tmpdir(),'hromada-report-ui-'))
- const db=openAppDatabase(root)
+ const db=openTestDatabase(root)
  summary=reportSummary(db,2027,{kind:'annual'})
  catalogs={programs:db.prepare('SELECT id,short_name shortName,official_name officialName,is_active isActive FROM programs ORDER BY sort_order,id').all(),aidTypes:db.prepare('SELECT t.id,t.short_name shortName,t.official_name officialName,t.program_id programId,t.is_active isActive FROM aid_types t JOIN programs p ON p.id=t.program_id ORDER BY p.sort_order,p.id,t.sort_order,t.id').all()}
  db.close()
@@ -358,9 +358,9 @@ print('4 large-value PDFs: one A4, complete names, unbroken currency, uniform pr
 })
 
 test('Manual catalog order survives new zero types, reorder and database reopen in all screen reports and PDFs',async t=>{
- let db=openAppDatabase(join(root,'manual-report-order'))
+ let db=openTestDatabase(join(root,'manual-report-order'))
  t.after(()=>{try{db.close()}catch{}})
- registerRecordsIpc(db)
+ registerRecordsFixture(db)
  const call=(channel,input)=>handlers.get(channel)({},input)
  const list=()=>call('catalogs:list',true)
  let page=await pageFor(t)
@@ -404,7 +404,7 @@ test('Manual catalog order survives new zero types, reorder and database reopen 
  const reordered=await verify('reordered')
  assert.notDeepEqual(reordered.programs.map(program=>program.id),initial.programs.map(program=>program.id))
  assert.deepEqual(reordered.aidTypes.filter(type=>type.programId===target).map(type=>type.id),typeOrder)
- db.close();db=openAppDatabase(join(root,'manual-report-order'));registerRecordsIpc(db)
+ db.close();db=openTestDatabase(join(root,'manual-report-order'));registerRecordsFixture(db)
  page=await pageFor(t)
  const reopened=await verify('reopened')
  assert.deepEqual(reopened.programs,reordered.programs)

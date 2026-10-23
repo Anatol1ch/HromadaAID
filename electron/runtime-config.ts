@@ -1,11 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-export type ElectronMode = 'local' | 'remote'
 export type ConnectionSource = 'environment' | 'saved' | 'none' | 'invalid'
-export type ElectronRuntimeConfig =
-  | { mode: 'local'; source: ConnectionSource; apiUrl?: undefined; configurationError?: string; lockedReason?: string }
-  | { mode: 'remote'; source: ConnectionSource; apiUrl?: URL; configurationError?: string; lockedReason?: string }
+export type ElectronRuntimeConfig = { source: ConnectionSource; apiUrl?: URL; configurationError?: string; lockedReason?: string }
 
 export type SavedConnectionConfig = { apiUrl: string }
 
@@ -46,23 +43,17 @@ export function readSavedConnectionConfig(userDataPath: string): { config?: Save
   }
 }
 
-/** Explicit environment mode wins. An environment URL always pins the remote address. */
-export function readElectronRuntimeConfig(environment = process.env, saved: ReturnType<typeof readSavedConnectionConfig> = {}, packaged = false): ElectronRuntimeConfig {
-  const rawMode = environment.HROMADAAID_MODE?.trim()
-  if (rawMode && rawMode !== 'local' && rawMode !== 'remote') throw new ElectronRuntimeConfigError('Змінна HROMADAAID_MODE має значення local або remote.')
+/** A configured environment URL pins the address; otherwise use the saved client setting. */
+export function readElectronRuntimeConfig(environment = process.env, saved: ReturnType<typeof readSavedConnectionConfig> = {}): ElectronRuntimeConfig {
   const explicitUrl = environment.HROMADAAID_API_URL?.trim()
-
-  if (rawMode === 'local') return { mode: 'local', source: 'none', lockedReason: 'Режим local зафіксовано змінною HROMADAAID_MODE; підключення до сервера в цьому запуску неактивне.' }
-  const shouldRemote = rawMode === 'remote' || !!explicitUrl || !!saved.config || !!saved.error || packaged
-  if (!shouldRemote) return { mode: 'local', source: 'none' }
   if (explicitUrl) {
-    try { return { mode: 'remote', source: 'environment', apiUrl: validateServerBaseUrl(explicitUrl), lockedReason: 'Адресу зафіксовано змінною HROMADAAID_API_URL у цьому запуску.' } }
-    catch (error) { return { mode: 'remote', source: 'invalid', configurationError: error instanceof Error ? error.message : 'Некоректна адреса сервера.', lockedReason: 'Адресу зафіксовано змінною HROMADAAID_API_URL у цьому запуску.' } }
+    try { return { source: 'environment', apiUrl: validateServerBaseUrl(explicitUrl), lockedReason: 'Адресу зафіксовано змінною HROMADAAID_API_URL у цьому запуску.' } }
+    catch (error) { return { source: 'invalid', configurationError: error instanceof Error ? error.message : 'Некоректна адреса сервера.', lockedReason: 'Адресу зафіксовано змінною HROMADAAID_API_URL у цьому запуску.' } }
   }
-  if (saved.error) return { mode: 'remote', source: 'invalid', configurationError: saved.error }
+  if (saved.error) return { source: 'invalid', configurationError: saved.error }
   if (saved.config) {
-    try { return { mode: 'remote', source: 'saved', apiUrl: validateServerBaseUrl(saved.config.apiUrl) } }
-    catch { return { mode: 'remote', source: 'invalid', configurationError: 'Локальна адреса сервера некоректна. Вкажіть її повторно в налаштуваннях.' } }
+    try { return { source: 'saved', apiUrl: validateServerBaseUrl(saved.config.apiUrl) } }
+    catch { return { source: 'invalid', configurationError: 'Адреса сервера некоректна. Вкажіть її повторно в налаштуваннях.' } }
   }
-  return { mode: 'remote', source: 'none', ...(rawMode === 'remote' ? { configurationError: 'Налаштуйте адресу сервера, щоб увійти.' } : {}) }
+  return { source: 'none', configurationError: 'Налаштуйте адресу сервера, щоб увійти.' }
 }

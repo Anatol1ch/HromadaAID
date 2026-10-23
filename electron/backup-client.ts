@@ -20,7 +20,7 @@ export class RemoteBackupClient {
   get currentState(): ClientBackupState { return { ...this.state } }
   get archiveDirectory(): string | undefined { return this.storage?.directory }
   authChanged(state: ClientAuthState): void {
-    this.enabled = state.mode === 'remote' && state.status === 'authenticated'
+    this.enabled = state.status === 'authenticated'
     this.epoch++
     this.controller?.abort()
     if (this.timer) clearInterval(this.timer)

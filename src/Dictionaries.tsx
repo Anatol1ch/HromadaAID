@@ -97,7 +97,7 @@ export default function Dictionaries({
       if (sequence !== refreshSequence.current) return
       if (catalogs) { setCatalogsLoaded(true); setData(catalogs) }
       setDecisions(nextDecisions.filter(item => item.decisionDate.slice(0, 4) === String(year))); setError('')
-    } catch { if (sequence === refreshSequence.current) setLoadError('Не вдалося завантажити довідники з локального сховища.') }
+    } catch { if (sequence === refreshSequence.current) setLoadError('Не вдалося завантажити довідники із сервера.') }
     finally { if (sequence === refreshSequence.current) setLoading(false) }
   }, [year, allowedSections])
   useConnectionRefresh(() => { void refresh() })

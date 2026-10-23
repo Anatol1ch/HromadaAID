@@ -4,21 +4,6 @@ import { HttpClientError } from './http-client.js'
 let getMainWindow: () => BrowserWindow | null = () => null
 let expectedPageUrl = ''
 
-const localIpcChannels = [
-  'recipients:list', 'recipients:get', 'recipients:save', 'recipients:assignment-history',
-  'banks:list', 'banks:get', 'banks:details', 'banks:save', 'banks:remove',
-  'catalogs:list', 'catalogs:save', 'catalogs:reorder',
-  'program-approvals:list', 'program-approvals:save',
-  'decisions:list', 'decisions:get', 'decisions:save', 'decisions:add-assignments',
-  'assignments:list', 'assignments:save', 'assignments:change-statuses',
-  'dashboard:get',
-  'reports:get', 'reports:summary', 'reports:annual-plan-list', 'reports:annual-plan-save',
-  'reports:generate', 'reports:save-pdf', 'reports:save-excel', 'reports:release',
-  'reports:plan-list', 'reports:plan-save', 'reports:plan-remove',
-  'deletion:preview', 'deletion:execute',
-  'statements:list', 'statements:generate', 'statements:generate-bank', 'statements:save', 'statements:save-pdf',
-] as const
-
 export function configureIpcSecurity(getWindow: () => BrowserWindow | null, pageUrl: string) {
   getMainWindow = getWindow
   expectedPageUrl = pageUrl
@@ -56,15 +41,4 @@ export const trustedIpcMain = {
       }
     })
   },
-}
-
-/** Registers one shared safe failure path until a remote equivalent is available. */
-export function registerRemoteIpcBlockers(unblockedChannels: readonly string[] = []) {
-  const unblocked = new Set(unblockedChannels)
-  for (const channel of localIpcChannels) {
-    if (unblocked.has(channel)) continue
-    trustedIpcMain.handle(channel, () => {
-      throw new Error('Віддалений режим ще не підтримує цю операцію. Доступ до локальної бази даних заблоковано.')
-    })
-  }
 }

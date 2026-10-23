@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import ts from 'typescript'
-import { openAppDatabase } from '../electron/database.ts'
+import { openTestDatabase } from './fakes/database.mjs'
 import { migrateAssignmentStatuses } from '../electron/migration-assignment-statuses.ts'
-import { registerRecordsIpc } from '../electron/records-ipc.ts'
+import { registerRecordsFixture } from './fakes/records-fixture.ts'
 import { changeAssignmentStatuses } from '../electron/assignment-status.ts'
 import { dashboardSummary, reportSummary } from '../electron/financial-summary.ts'
 import { ASSIGNMENT_STATUSES, isStatementEligible } from '../electron/assignment-model.ts'
@@ -42,7 +42,7 @@ function fixture(t, legacy = false) {
     assert(basename(root).startsWith('hromada-aid-five-status-test-'))
     rmSync(resolve(root), { recursive: true, force: true })
   })
-  const reopen = () => { const db = openAppDatabase(root); connections.push(db); return db }
+  const reopen = () => { const db = openTestDatabase(root); connections.push(db); return db }
   const db = legacy ? new DatabaseSync(join(root, 'hromada-aid.sqlite')) : reopen()
   if (legacy) { connections.push(db); oldMigrations(db) }
   db.prepare('INSERT INTO programs(id,code,short_name,official_name) VALUES(?,?,?,?)').run('test-program', 'TEST', 'Тестова програма', 'Тестова програма (вигадана)')
@@ -50,7 +50,7 @@ function fixture(t, legacy = false) {
   db.prepare('INSERT INTO recipients(id,last_name,first_name,is_vpo,created_at,updated_at) VALUES(?,?,?,?,?,?)').run('person', 'Вигаданий', 'Тестовий', 0, stamp, stamp)
   for (const year of [2026, 2027, 2028]) db.prepare('INSERT INTO decisions(id,decision_number,decision_date,created_at,updated_at) VALUES(?,?,?,?,?)').run(`d${year}`, `TEST-${year}`, `${year}-01-02`, stamp, stamp)
   const add = (id, status, amount = 100, year = 2027, paidOn = null) => db.prepare('INSERT INTO assignments(id,recipient_id,decision_id,aid_type_id,amount_minor,status,created_at,updated_at,paid_on) VALUES(?,?,?,?,?,?,?,?,?)').run(id, 'person', `d${year}`, 'test-aid', amount, status, stamp, stamp, paidOn)
-  const call = (channel, ...args) => { registerRecordsIpc(db); return handlers.get(channel)({}, ...args) }
+  const call = (channel, ...args) => { registerRecordsFixture(db); return handlers.get(channel)({}, ...args) }
   return { db, reopen, add, call }
 }
 

@@ -3,15 +3,15 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname, resolve } from 'node:path'
-import { openAppDatabase } from '../electron/database.ts'
-import { registerRecordsIpc } from '../electron/records-ipc.ts'
+import { openTestDatabase } from './fakes/database.mjs'
+import { registerRecordsFixture } from './fakes/records-fixture.ts'
 import { handlers } from './fakes/ipc-security.mjs'
 
 test('Catalog IPC: create/edit programs and aids preserve linked assignment IDs, status and amounts',t=>{
  const root=mkdtempSync(join(tmpdir(),'hromada-catalog-test-'))
- const db=openAppDatabase(root)
+ const db=openTestDatabase(root)
  t.after(()=>{db.close();assert.equal(dirname(resolve(root)),resolve(tmpdir()));rmSync(root,{recursive:true,force:true})})
- handlers.clear();registerRecordsIpc(db)
+ handlers.clear();registerRecordsFixture(db)
  const list=()=>handlers.get('catalogs:list')({},true)
  const save=input=>handlers.get('catalogs:save')({},input)
  const stamp='2026-01-01T10:00:00.000Z'
@@ -23,8 +23,8 @@ test('Catalog IPC: create/edit programs and aids preserve linked assignment IDs,
  const program=catalogs.programs.find(p=>p.id==='program-social')
  const aid=catalogs.aidTypes.find(a=>a.id==='aid-social-treatment')
  assert.equal(aid.programId,program.id);assert.equal(aid.assignmentCount,1)
- assert.equal(save({...program,kind:'program',shortName:'Тестова змінена програма'}).ok,true)
- assert.equal(save({...aid,kind:'aidType',shortName:'Тестова змінена допомога'}).ok,true)
+ assert.equal(save({...program,expectedUpdatedAt:program.updatedAt,kind:'program',shortName:'Тестова змінена програма'}).ok,true)
+ assert.equal(save({...aid,expectedUpdatedAt:aid.updatedAt,kind:'aidType',shortName:'Тестова змінена допомога'}).ok,true)
  assert.deepEqual(db.prepare('SELECT * FROM assignments').all(),before)
  catalogs=list()
  assert.equal(catalogs.programs.find(p=>p.id===program.id).assignmentCount,1)

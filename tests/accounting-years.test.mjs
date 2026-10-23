@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
-import { openAppDatabase } from '../electron/database.ts'
-import { registerRecordsIpc, listAssignments } from '../electron/records-ipc.ts'
+import { openTestDatabase } from './fakes/database.mjs'
+import { registerRecordsFixture, listAssignments } from './fakes/records-fixture.ts'
 import { changeAssignmentStatuses } from '../electron/assignment-status.ts'
 import { dashboardSummary, reportSummary } from '../electron/financial-summary.ts'
 import { readStatementRows } from '../electron/statement-data.ts'
@@ -14,13 +14,13 @@ import { handlers } from './fakes/ipc-security.mjs'
 
 function fixture(t) {
   const root=mkdtempSync(join(tmpdir(),'hromada-accounting-years-'))
-  const db=openAppDatabase(root)
+  const db=openTestDatabase(root)
   t.after(()=>{db.close();assert.equal(dirname(resolve(root)),resolve(tmpdir()));assert(basename(root).startsWith('hromada-accounting-years-'));rmSync(root,{recursive:true,force:true})})
   db.prepare('INSERT INTO banks(id,name) VALUES(?,?)').run('bank','Вигаданий банк')
   db.prepare('INSERT INTO bank_details(id,bank_id,mfo,edrpou) VALUES(?,?,?,?)').run('detail','bank','000001','00000001')
   db.prepare('INSERT INTO recipients(id,last_name,first_name,patronymic,rnokpp,passport,bank_details_id,bank_account,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
     .run('person','Вигаданий','Приклад','Тестович','0000000001','ТТ000001','detail','UA000000000000000000000000001','2026-01-01','2026-01-01')
-  registerRecordsIpc(db)
+  registerRecordsFixture(db)
   const call=(channel,...args)=>handlers.get(channel)({},...args)
   const decisions={}
   for(const year of [2026,2027]) {

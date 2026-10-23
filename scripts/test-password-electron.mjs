@@ -37,7 +37,7 @@ try {
   const runtime = join(process.env.USERPROFILE, '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs')
   const { _electron } = await import(pathToFileURL(runtime).href)
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== 'ELECTRON_RUN_AS_NODE'))
-  electron = await _electron.launch({ executablePath: resolve('node_modules/electron/dist/electron.exe'), args: [resolve('.')], cwd: resolve('.'), env: { ...env, HROMADAAID_MODE: 'remote', HROMADAAID_API_URL: baseUrl, HROMADA_AID_TEST_DATA_DIR: profile } })
+  electron = await _electron.launch({ executablePath: resolve('node_modules/electron/dist/electron.exe'), args: [resolve('.')], cwd: resolve('.'), env: { ...env, HROMADAAID_API_URL: baseUrl, HROMADA_AID_TEST_DATA_DIR: profile } })
   let diagnostics = ''
   electron.process().stdout.on('data', chunk => { diagnostics += chunk.toString().split('\n').filter(line => line.includes('[HromadaAID test]')).join('\n') })
   const page = await electron.firstWindow()

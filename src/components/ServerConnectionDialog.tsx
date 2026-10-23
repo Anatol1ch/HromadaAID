@@ -52,7 +52,7 @@ export default function ServerConnectionDialog({ onClose, getState, check, save,
   }
 
   const changedSinceCheck = !result?.ok || !sameServerAddress(result.apiUrl, address)
-  const activeLabel = state?.active ? 'Адреса використовується в цьому запуску.' : state?.mode === 'local' && state.apiUrl ? 'Адресу збережено для наступного запуску remote mode.' : 'Адреса ще не налаштована.'
+  const activeLabel = state?.active ? 'Адреса використовується в цьому запуску.' : 'Адреса ще не налаштована.'
   return <Modal title="Налаштування підключення" description="Укажіть базову адресу сервера HromadaAID." headerIcon={<Server size={21} aria-hidden="true"/>} onClose={onClose} busy={busy} size="compact" className="server-connection-modal">
     <form className="server-connection-form" onSubmit={(event) => void submit(event)}>
       <label className="recipient-field" htmlFor="server-connection-address"><span>Адреса сервера</span><input id="server-connection-address" type="text" inputMode="url" autoComplete="url" spellCheck={false} disabled={!state?.editable || busy} readOnly={state?.editable === false} value={address} placeholder="https://server.example" aria-describedby="server-connection-hint" onChange={(event) => { setAddress(event.target.value); setResult(null); setError('') }}/></label>

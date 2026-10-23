@@ -8,7 +8,7 @@ import ServerBackupPanel from './ServerBackupPanel'
 
 const date = (value?: string | null) => value ? new Date(value).toLocaleString('uk-UA') : 'Ще немає'
 
-export default function BackupSettings({ user }: { user: AuthenticatedUser | null }) {
+export default function BackupSettings({ user }: { user: AuthenticatedUser }) {
   const administrator = !!user?.permissions.includes('backups.manage')
   const userId = user?.id
   const [state, setState] = useState<ClientBackupState>({ status: 'checking' })
@@ -51,7 +51,7 @@ export default function BackupSettings({ user }: { user: AuthenticatedUser | nul
   return <div className="backup-settings">
     <section className="dashboard-panel settings-account">
       <div className="settings-card-heading"><span className="settings-icon"><HardDriveDownload size={20} aria-hidden="true"/></span><div><h2>Резервне копіювання</h2><p>Зашифровані копії центральної бази на дозволених комп’ютерах.</p></div></div>
-      <p role="status">{!user ? 'У локальному режимі розподілене резервування не використовується.' : state.message ?? (state.status === 'checking' ? 'Перевірка резервування…' : 'Стан резервування визначається після входу.')}</p>
+      <p role="status">{state.message ?? (state.status === 'checking' ? 'Перевірка резервування…' : 'Стан резервування визначається після входу.')}</p>
       {user && <><dl className="settings-profile-grid"><div><dt>Цей комп’ютер</dt><dd>{state.status === 'disabled' ? 'Заборонено' : state.status === 'enabled' ? 'Дозволено' : state.status === 'checking' ? 'Перевірка…' : 'Тимчасово недоступно'}</dd></div><div><dt>Остання успішна копія</dt><dd>{date(state.lastBackupAt)}</dd></div></dl><p className="settings-profile-note">Зберігаються останні 7 перевірених копій. Після відкликання дозволу наявні архіви залишаються на комп’ютері.</p><div className="backup-settings-actions"><button className="secondary-button" type="button" onClick={() => void openFolder()}><FolderOpen size={17}/>Відкрити папку копій</button><button className="secondary-button" type="button" disabled={busy} onClick={() => void refresh()}><RefreshCw size={17}/>Оновити стан</button></div></>}
     </section>
     {error && <Alert variant="error">{error}</Alert>}

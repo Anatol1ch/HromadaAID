@@ -6,7 +6,7 @@
   "description": "Візуальний прототип обліку матеріальної допомоги громади",
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "build": "tsc -b && tsc -p tsconfig.electron.json && node electron/copy-assets.mjs && vite build",
+    "build": "tsc -b && node scripts/clean-electron-build.mjs && tsc -p tsconfig.electron.json && node electron/copy-assets.mjs && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "server:dev": "pnpm server:build && concurrently -k \"pnpm exec tsc -p server/tsconfig.json --watch\" \"node --watch dist-server/server/src/index.js\"",
     "server:build": "tsc -p server/tsconfig.json",

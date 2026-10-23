@@ -58,7 +58,7 @@ export default function StatementFormation() {
         setAssignments(result.assignments)
         const availableIds = new Set(result.assignments.map((row) => row.id))
         setSelectedIds((current) => new Set([...current].filter((id) => availableIds.has(id))))
-      }).catch(() => { if (mounted && request === sequence) setLoadError('Не вдалося завантажити призначення з локальної бази.') })
+      }).catch(() => { if (mounted && request === sequence) setLoadError('Не вдалося завантажити призначення із сервера.') })
         .finally(() => { if (mounted && request === sequence) setLoading(false) })
     }
     load()

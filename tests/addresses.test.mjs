@@ -9,8 +9,8 @@ import { ADDRESS_TEMPLATES, SETTLEMENT_TYPES, STREET_TYPES, applyAddressTemplate
 import { migrateAddresses } from '../electron/migration-addresses.ts'
 import { migrateAssignmentStatuses } from '../electron/migration-assignment-statuses.ts'
 import { migrateBanks } from '../electron/migration-banks.ts'
-import { openAppDatabase } from '../electron/database.ts'
-import { registerRecipientIpc } from '../electron/recipient-ipc.ts'
+import { openTestDatabase } from './fakes/database.mjs'
+import { registerRecipientFixture } from './fakes/recipient-fixture.ts'
 import { readStatementRows } from '../electron/statement-data.ts'
 import { handlers } from './fakes/ipc-security.mjs'
 import { testAddress, testAddressInput } from './fakes/address.mjs'
@@ -39,7 +39,7 @@ function createV16(db) {
 function fixture(t, legacy = false) {
   const root = mkdtempSync(join(tmpdir(), 'hromada-aid-address-test-'))
   const connections = []
-  const open = () => { const connection = openAppDatabase(root); connections.push(connection); return connection }
+  const open = () => { const connection = openTestDatabase(root); connections.push(connection); return connection }
   const db = legacy ? new DatabaseSync(join(root, 'hromada-aid.sqlite')) : open()
   if (legacy) { connections.push(db); createV16(db) }
   t.after(() => {
@@ -51,7 +51,7 @@ function fixture(t, legacy = false) {
   db.prepare('INSERT INTO banks(id,name) VALUES(?,?)').run('test-bank', 'Вигаданий банк')
   db.prepare('INSERT INTO bank_details(id,bank_id,mfo,edrpou) VALUES(?,?,?,?)').run('test-detail', 'test-bank', '000001', '00000001')
   const input = () => ({ lastName: 'Вигаданий', firstName: 'Тестовий', patronymic: 'Прикладович', rnokpp: '0000000001', passport: 'ТТ000001', sex: 'Чоловік', isVpo: false, phone: '', email: '', bankAccount: 'UA620000000000000000000000001', bankDetailsId: 'test-detail', ...testAddressInput() })
-  const call = (channel, ...args) => { registerRecipientIpc(db); return handlers.get(channel)({}, ...args) }
+  const call = (channel, ...args) => { registerRecipientFixture(db); return handlers.get(channel)({}, ...args) }
   return { db, open, input, call }
 }
 
@@ -138,7 +138,7 @@ test('IPC stores components, ignores forged display text and restores both addre
   assert.equal(row.registered_address, null); assert.equal(row.address, null)
   assert.equal(row.registration_postal_code, '52151'); assert.equal(row.residence_building, '105')
   db.close()
-  const reopened = open(); registerRecipientIpc(reopened)
+  const reopened = open(); registerRecipientFixture(reopened)
   const read = handlers.get('recipients:get')({}, result.recipient.id)
   assert.equal(read.registeredAddress, expected); assert.deepEqual(read.registeredAddressParts, full())
   const edited = { ...value, addressParts: { ...read.addressParts, building: '15/2', apartment: '' } }
@@ -186,7 +186,7 @@ test('Migration 16 → 19 preserves legacy address strings and exposes them with
   db.prepare('INSERT INTO recipients(id,last_name,first_name,address,registered_address,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run('legacy', 'Вигаданий', 'Тест', 'Стара адреса проживання', 'Стара адреса реєстрації', stamp, stamp)
   const before = db.prepare('SELECT * FROM recipients').get()
   db.close()
-  const current = open(); registerRecipientIpc(current)
+  const current = open(); registerRecipientFixture(current)
   assert.equal(current.prepare('PRAGMA user_version').get().user_version, 19)
   const read = handlers.get('recipients:get')({}, 'legacy')
   assert.equal(read.registeredAddress, 'Стара адреса реєстрації'); assert.equal(read.address, 'Стара адреса проживання')

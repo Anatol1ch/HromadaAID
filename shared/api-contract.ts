@@ -289,7 +289,6 @@ export type ManagedUserSaveResult = { ok: true; user: ManagedUser } | { ok: fals
 export type ManagedUserRemoveResult = { ok: true } | { ok: false; reason: 'conflict' | 'not-found'; message: string }
 
 export type ServerConnectionState = {
-  mode: 'local' | 'remote'
   apiUrl: string | null
   active: boolean
   source: 'environment' | 'saved' | 'none' | 'invalid'

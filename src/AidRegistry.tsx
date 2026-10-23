@@ -92,7 +92,7 @@ export default function AidRegistry({ createOnOpen = false }: { createOnOpen?: b
       if (sequence !== refreshSequence.current) return
       setRows(list.assignments)
       setRecipients(people); setDecisions(decisionsList); setCatalogs(catalogData)
-    } catch { if (sequence === refreshSequence.current) setLoadError('Не вдалося завантажити реєстр допомог із локального сховища.') }
+    } catch { if (sequence === refreshSequence.current) setLoadError('Не вдалося завантажити реєстр допомог ііз сервера.') }
     finally { if (sequence === refreshSequence.current) setLoading(false) }
   }
   useConnectionRefresh(() => { void refresh(year) })

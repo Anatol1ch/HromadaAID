@@ -51,25 +51,25 @@ function App() {
     let receivedEvent = false
     void window.hromadaAid.auth.getState().then(async (state) => {
       if (!active || receivedEvent) return
-      if (state.mode === 'remote' && (state.status === 'unavailable' || state.status === 'unauthenticated')) {
+      if ((state.status === 'unavailable' || state.status === 'unauthenticated')) {
         try {
           const connection = await window.hromadaAid.connection.getState()
           if (!active || receivedEvent) return
-          if (connection.status === 'available') { setAuth({ mode: 'remote', status: 'unauthenticated', user: null }); return }
-          if (connection.status === 'unavailable' || connection.status === 'maintenance') { setAuth({ mode: 'remote', status: 'unavailable', user: null, message: connection.message ?? state.message }); return }
+          if (connection.status === 'available') { setAuth({ status: 'unauthenticated', user: null }); return }
+          if (connection.status === 'unavailable' || connection.status === 'maintenance') { setAuth({ status: 'unavailable', user: null, message: connection.message ?? state.message }); return }
         } catch { /* Keep the auth state when no connection snapshot is available. */ }
       }
       if (active && !receivedEvent) setAuth(state)
-    }, () => { if (active && !receivedEvent) setAuth({ mode: 'remote', status: 'unavailable', user: null, message: 'Не вдалося отримати стан авторизації.' }) })
+    }, () => { if (active && !receivedEvent) setAuth({ status: 'unavailable', user: null, message: 'Не вдалося отримати стан авторизації.' }) })
     const unsubscribe = window.hromadaAid.auth.onStateChange((state) => { receivedEvent = true; if (active) setAuth(state) })
     void window.hromadaAid.connection.getState().then(value => { if (active) setConnection(value) }).catch(() => undefined)
     const unsubscribeConnection = window.hromadaAid.connection.onStateChange((connection) => {
-      if (!active || connection.mode !== 'remote') return
+      if (!active) return
       setConnection(connection)
       setAuth(current => {
-        if (!current || current.mode !== 'remote' || current.status === 'authenticated' || current.status === 'password-change-required') return current
-        if (connection.status === 'available' && current.status === 'unavailable') return { mode: 'remote', status: 'unauthenticated', user: null }
-        if (connection.status === 'unavailable' || connection.status === 'maintenance') return { mode: 'remote', status: 'unavailable', user: null, message: connection.message ?? 'Сервер тимчасово недоступний.' }
+        if (!current || current.status === 'authenticated' || current.status === 'password-change-required') return current
+        if (connection.status === 'available' && current.status === 'unavailable') return { status: 'unauthenticated', user: null }
+        if (connection.status === 'unavailable' || connection.status === 'maintenance') return { status: 'unavailable', user: null, message: connection.message ?? 'Сервер тимчасово недоступний.' }
         return current
       })
     })
@@ -80,8 +80,8 @@ function App() {
     recoveryInFlight.current = true
     try {
       const current = authRef.current
-      if (current?.mode !== 'remote' || current.status === 'unauthenticated' || current.status === 'unavailable') {
-        setAuth({ mode: 'remote', status: 'unauthenticated', user: null })
+      if (!current || current.status === 'unauthenticated' || current.status === 'unavailable') {
+        setAuth({ status: 'unauthenticated', user: null })
         setConnectionOverlayStatus(null)
         return
       }
@@ -94,7 +94,7 @@ function App() {
     } finally { recoveryInFlight.current = false; wasDisconnected.current = false }
   }, [])
   useEffect(() => {
-    const hasRemoteState = auth?.mode === 'remote'
+    const hasRemoteState = !!auth
     if (hasRemoteState && connection?.active && (connection.status === 'unavailable' || connection.status === 'maintenance')) {
       wasDisconnected.current = true
       setConnectionOverlayStatus(connection.status)
@@ -112,9 +112,9 @@ function App() {
     return { ok: result.ok, message: 'message' in result ? result.message : undefined }
   }
   if (!auth) return <StartupScreen/>
-  if (auth.mode === 'remote' && auth.status === 'password-change-required') return <><TemporaryPasswordScreen state={auth} onChangePassword={changePassword}/>{connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
-  if (auth.mode === 'remote' && auth.status !== 'authenticated') return <><LoginScreen state={auth} onLogin={login} connectionActions={connectionActions}/>{connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
-  return <><Workspace key={auth.mode === 'remote' ? auth.user.id : 'local'} auth={auth} onChangePassword={changePassword} connectionActions={connectionActions}/>{auth.mode === 'remote' && connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay key="server-connection-overlay" status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
+  if (auth.status === 'password-change-required') return <><TemporaryPasswordScreen state={auth} onChangePassword={changePassword}/>{connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
+  if (auth.status !== 'authenticated') return <><LoginScreen state={auth} onLogin={login} connectionActions={connectionActions}/>{connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
+  return <><Workspace key={auth.user.id} auth={auth} onChangePassword={changePassword} connectionActions={connectionActions}/>{connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay key="server-connection-overlay" status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
 }
 
 function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extract<ClientAuthState, { status: 'authenticated' }>; onChangePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; message?: string }>; connectionActions: { getState: () => Promise<import('../shared/api-contract').ServerConnectionState>; check: (apiUrl: string) => Promise<import('../shared/api-contract').ServerConnectionCheckResult>; save: (apiUrl: string) => Promise<import('../shared/api-contract').ServerConnectionSaveResult> } }) {
@@ -124,14 +124,11 @@ function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extrac
   const [accessDeniedRevision, setAccessDeniedRevision] = useState(0)
   const [year, setYear] = useState(initialAccountingYear)
   const [logoutBusy, setLogoutBusy] = useState(false)
-  const permissions = useMemo(() => new Set(auth.mode === 'local' ? nav.map((item) => item.permission).concat(['catalogs.manage', 'program_approvals.manage', 'personal_data.read', 'recipients.manage', 'banks.manage', 'decisions.read', 'decisions.manage', 'assignments.manage', 'assignments.change_financial_status', 'planning.read', 'planning.manage', 'reports.export', 'protected_entities.delete', 'users.manage'] as Permission[]) : auth.user.permissions), [auth])
+  const permissions = useMemo(() => new Set(auth.user.permissions), [auth.user.permissions])
   const can = (permission: Permission) => permissions.has(permission)
-  const visibleNav = nav.filter((item) => item.label !== 'Користувачі' || (auth.mode === 'remote' && can('users.manage')))
-  const dictionarySections = useMemo(() => auth.mode === 'local'
-    ? ['people', 'programs', 'decisions', 'banks', 'plans'] as DictionarySection[]
-    : dictionarySectionsForRoles(auth.user.roles) as DictionarySection[], [auth])
-  const canOpenPage = (page: WorkspacePage, permission: Permission) => auth.mode === 'local'
-    || (page === 'dictionaries' ? dictionarySections.length > 0 : hasWorkspacePage(auth.user.roles, page) && can(permission))
+  const visibleNav = nav.filter((item) => item.label !== 'Користувачі' || (can('users.manage')))
+  const dictionarySections = useMemo(() => dictionarySectionsForRoles(auth.user.roles) as DictionarySection[], [auth.user.roles])
+  const canOpenPage = (page: WorkspacePage, permission: Permission) => (page === 'dictionaries' ? dictionarySections.length > 0 : hasWorkspacePage(auth.user.roles, page) && can(permission))
   const showAccessDenied = useCallback(() => setAccessDeniedRevision((revision) => revision + 1), [])
   const closeAccessDenied = useCallback(() => setAccessDeniedRevision(0), [])
   useEffect(() => { rememberAccountingYear(year) }, [year])
@@ -148,9 +145,9 @@ function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extrac
     try { const result = await window.hromadaAid.auth.logout(); if (!result.ok) setNotice(result.message ?? 'Локальну сесію видалено.') }
     finally { setLogoutBusy(false) }
   }
-  const user = auth.mode === 'remote' ? auth.user : null
-  const displayName = user?.displayName || user?.username || 'Локальний режим'
-  const roles = user ? user.roles.map((role) => USER_ROLE_LABELS[role]).join(', ') : 'Автономна робота'
+  const user = auth.user
+  const displayName = user.displayName || user.username
+  const roles = user.roles.map((role) => USER_ROLE_LABELS[role]).join(', ')
   return <YearContext.Provider value={{ year, setYear }}><div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark"><HeartHandshake size={22} strokeWidth={2.1}/></div><div className="brand-copy"><div className="brand-name">Hromada<span>Aid</span></div><div className="brand-caption">Автоматизована система обліку матеріальних допомог</div></div></div>
@@ -174,12 +171,12 @@ function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extrac
           'Реєстр допомог': canOpenPage('assignments', 'assignments.read'),
           'Формування відомостей': canOpenPage('statements', 'statements.generate'),
           'Звітність': canOpenPage('reports', 'reports.read'),
-          'Довідники': auth.mode === 'local' || dictionarySections.some((section) => section === 'programs' || section === 'plans'),
+          'Довідники': dictionarySections.some((section) => section === 'programs' || section === 'plans'),
         }}/> :
           activeNav === 'Реєстр допомог' ? <AidRegistry createOnOpen={createAssignment}/> :
           activeNav === 'Формування відомостей' ? <StatementFormation/> :
           activeNav === 'Довідники' ? <Dictionaries allowedSections={dictionarySections} onAccessDenied={showAccessDenied} canManageCatalogs={can('catalogs.manage')} canManagePlans={can('planning.manage')} canManageDecisions={can('decisions.manage')} canManagePersonal={can('recipients.manage') || can('banks.manage')}/> :
-          activeNav === 'Огляд' ? <Dashboard/> : activeNav === 'Користувачі' && auth.mode === 'remote' ? <UsersAdmin currentUserId={auth.user.id}/> : activeNav === 'Налаштування' ? <SettingsPage user={user} onChangePassword={onChangePassword} connectionActions={connectionActions}/> : <Reports/>}</div>
+          activeNav === 'Огляд' ? <Dashboard/> : activeNav === 'Користувачі' ? <UsersAdmin currentUserId={auth.user.id}/> : activeNav === 'Налаштування' ? <SettingsPage user={user} onChangePassword={onChangePassword} connectionActions={connectionActions}/> : <Reports/>}</div>
       </div>
     </main>
     {accessDeniedRevision > 0 && <AccessDeniedToast key={accessDeniedRevision} onClose={closeAccessDenied}/>}

@@ -123,6 +123,7 @@ try {
   })
   await preparePort()
   console.log('[HromadaAid] Підготовка Electron…')
+  await start(process.execPath, [join(root, 'scripts', 'clean-electron-build.mjs')], 'Очищення клієнтської збірки')
   await start(process.execPath, [require.resolve('typescript/bin/tsc'), '-p', join(root, 'tsconfig.electron.json')], 'TypeScript')
   await start(process.execPath, [join(root, 'electron', 'copy-assets.mjs')], 'Копіювання ресурсів')
   // Resolve the installed executable without invoking Electron's automatic downloader.

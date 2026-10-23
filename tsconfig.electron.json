@@ -10,5 +10,5 @@
     "types": ["node", "electron"],
     "esModuleInterop": true
   },
-  "include": ["electron/**/*.ts", "electron/**/*.mts", "electron/**/*.cts", "shared/**/*.ts"]
+  "include": ["electron/main.ts", "electron/preload.cts", "electron/*.test.ts", "shared/**/*.ts"]
 }

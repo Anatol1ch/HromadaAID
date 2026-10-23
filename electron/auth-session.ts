@@ -5,7 +5,7 @@ import { isAuthenticatedUser, isLoginResult } from '../shared/auth-contract.js'
 import { HttpClient, HttpClientError } from './http-client.js'
 
 const sessionFileName = 'remote-session.dat'
-const signedOut = (message?: string): ClientAuthState => ({ mode: 'remote', status: 'unauthenticated', user: null, ...(message ? { message } : {}) })
+const signedOut = (message?: string): ClientAuthState => ({ status: 'unauthenticated', user: null, ...(message ? { message } : {}) })
 
 /** Owns a remote bearer token exclusively for this Electron process lifetime. */
 export class RemoteAuthSession {
@@ -48,7 +48,7 @@ export class RemoteAuthSession {
         return { ok: false, state: this.state, message: 'Підключення змінилося. Повторіть вхід.' }
       }
       this.token = result.token
-      const state = this.publish({ mode: 'remote', status: result.user.mustChangePassword ? 'password-change-required' : 'authenticated', user: result.user })
+      const state = this.publish({ status: result.user.mustChangePassword ? 'password-change-required' : 'authenticated', user: result.user })
       return { ok: true, state }
     } catch (error) {
       const message = error instanceof HttpClientError ? error.message : 'Не вдалося виконати вхід.'
@@ -93,13 +93,13 @@ export class RemoteAuthSession {
     try {
       const user = await this.http.getJson('/auth/me', isAuthenticatedUser)
       if (token !== this.token) return { ok: false, state: this.state, message: 'Стан сеансу змінився.' }
-      const state = this.publish({ mode: 'remote', status: user.mustChangePassword ? 'password-change-required' : 'authenticated', user })
+      const state = this.publish({ status: user.mustChangePassword ? 'password-change-required' : 'authenticated', user })
       return { ok: true, state }
     } catch (error) {
       if (error instanceof HttpClientError && error.status === 401) {
         await this.expired(token)
         const state = this.currentState as ClientAuthState
-        const message = state.mode === 'remote' && (state.status === 'unauthenticated' || state.status === 'unavailable') ? state.message : undefined
+        const message = (state.status === 'unauthenticated' || state.status === 'unavailable') ? state.message : undefined
         return { ok: false, state, message: message ?? 'Час вашого сеансу минув.', failureKind: 'session-expired' }
       }
       const failureKind = error instanceof HttpClientError && error.status === 403 ? 'permission' : error instanceof HttpClientError && error.status !== undefined ? 'server' : 'connection'
@@ -118,7 +118,7 @@ export class RemoteAuthSession {
 
   setNotice(message: string): void { this.publish(signedOut(message)) }
 
-  setUnavailable(message: string): void { this.publish({ mode: 'remote', status: 'unavailable', user: null, message }) }
+  setUnavailable(message: string): void { this.publish({ status: 'unavailable', user: null, message }) }
 
   /** Best-effort server revocation during process shutdown; never blocks exit indefinitely. */
   async close(): Promise<void> {
@@ -136,8 +136,4 @@ export class RemoteAuthSession {
     this.token = undefined
     return this.publish(signedOut(message))
   }
-}
-
-export function localAuthState(): ClientAuthState {
-  return { mode: 'local', status: 'authenticated', user: null }
 }

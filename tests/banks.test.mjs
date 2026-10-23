@@ -6,12 +6,12 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import ts from 'typescript'
-import { openAppDatabase } from '../electron/database.ts'
+import { openTestDatabase } from './fakes/database.mjs'
 import { migrateAssignmentStatuses } from '../electron/migration-assignment-statuses.ts'
 import { migrateBanks } from '../electron/migration-banks.ts'
-import { registerBankIpc } from '../electron/bank-ipc.ts'
+import { registerBankFixture } from './fakes/bank-fixture.ts'
 import { getBank, removeBank } from '../electron/bank-store.ts'
-import { registerRecipientIpc } from '../electron/recipient-ipc.ts'
+import { registerRecipientFixture } from './fakes/recipient-fixture.ts'
 import { readStatementRows } from '../electron/statement-data.ts'
 import { bankForDetail, bankSearchText, onlyBankDetail } from '../src/lib/bankSelection.ts'
 import { handlers } from './fakes/ipc-security.mjs'
@@ -22,7 +22,7 @@ const person = detailId => ({ lastName: 'Вигаданий', firstName: 'При
 function fixture(t, legacy = false) {
   const root = mkdtempSync(join(tmpdir(), 'hromada-aid-banks-test-'))
   const connections = []
-  const open = () => { const db = openAppDatabase(root); connections.push(db); return db }
+  const open = () => { const db = openTestDatabase(root); connections.push(db); return db }
   const db = legacy ? new DatabaseSync(join(root, 'hromada-aid.sqlite')) : open()
   if (legacy) { connections.push(db); createV15(db) }
   t.after(() => {
@@ -32,7 +32,7 @@ function fixture(t, legacy = false) {
     rmSync(resolve(root), { recursive: true, force: true })
   })
   const call = (channel, ...args) => {
-    registerBankIpc(db); registerRecipientIpc(db)
+    registerBankFixture(db); registerRecipientFixture(db)
     return handlers.get(channel)({}, ...args)
   }
   const bank = (details = [pair], name = 'Вигаданий банк') => {

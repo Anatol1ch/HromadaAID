@@ -22,7 +22,7 @@ test('Unsafe numbers are rejected consistently, never silently rewritten',()=>{
 test('Bank filename follows local midnight rather than UTC, in either offset direction',()=>{
  for(const [timezone,instant,expected] of [['Europe/Kyiv','2026-10-17T21:30:00Z','2026-10-18'],['America/Los_Angeles','2026-10-19T01:30:00Z','2026-10-18']]) {
   const source='import { bankStatementFileName } from '+JSON.stringify(new URL('../electron/statement-filenames.ts',import.meta.url).href)+';process.stdout.write(bankStatementFileName(new Date('+JSON.stringify(instant)+')))'
-  const result=spawnSync(process.execPath,['--input-type=module','-e',source],{encoding:'utf8',env:{...process.env,TZ:timezone},windowsHide:true})
+  const result=spawnSync(process.execPath,['--import',new URL('./source-loader.mjs',import.meta.url).href,'--input-type=module','-e',source],{encoding:'utf8',env:{...process.env,TZ:timezone},windowsHide:true})
   assert.equal(result.status,0,result.stderr)
   assert.equal(result.stdout,'('+expected+') – ВІДОМІСТЬ ДЛЯ ПРИВАТБАНКУ.xlsx')
  }

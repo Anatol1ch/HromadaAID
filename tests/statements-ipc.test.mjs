@@ -7,31 +7,34 @@ import { join, resolve, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { openInitializedDatabase } from '../dist-server/electron/database.js'
+import { createApp } from '../dist-server/server/src/app.js'
+import { createFirstAdministrator } from '../dist-server/server/src/auth.js'
+import { HttpClient } from '../dist-electron/electron/http-client.js'
 
 test('Statements IPC: isolated SQLite, independent parameters, actual Excel/PDF and exports', {skip:process.env.HROMADA_TEST_EXCEL!=='1',timeout:180000},async t=>{
  const root=mkdtempSync(join(tmpdir(),'hromada-statements-ipc-'))
- const output=join(root,'runtime'),profile=join(root,'profile')
+ const output=join(root,'build'),profile=join(root,'profile'),runtime=join(output,'electron')
  mkdirSync(output);mkdirSync(profile)
  writeFileSync(join(output,'package.json'),'{"type":"module"}')
  const build=spawnSync(process.execPath,['node_modules/typescript/bin/tsc','-p','tsconfig.electron.json','--outDir',output],{encoding:'utf8',windowsHide:true})
  assert.equal(build.status,0,build.stdout+build.stderr)
- mkdirSync(join(output,'reference'))
+ mkdirSync(join(runtime,'reference'))
  for(const name of ['Список.xlsx','Зведений список.xlsx','ПриватБанк.xlsx'])copyFileSync(join('reference',name),join(output,'reference',name))
- copyFileSync('electron/excel-templates.ps1',join(output,'excel-templates.ps1'))
- copyFileSync('electron/excel-privatbank.ps1',join(output,'excel-privatbank.ps1'))
+ copyFileSync('electron/excel-templates.ps1',join(runtime,'excel-templates.ps1'))
+ copyFileSync('electron/excel-privatbank.ps1',join(runtime,'excel-privatbank.ps1'))
  globalThis.__statementHandlers=new Map()
  globalThis.__statementDialogs=[]
  globalThis.__statementProfile=profile
  const security='data:text/javascript,'+encodeURIComponent('export const trustedIpcMain={handle:(channel,handler)=>globalThis.__statementHandlers.set(channel,handler)}')
  const electron='data:text/javascript,'+encodeURIComponent('export const app={getPath:()=>globalThis.__statementProfile};export const dialog={showSaveDialog:async(options)=>{globalThis.__statementDialogs.push(options);return {canceled:false,filePath:globalThis.__statementExport}}}')
  const hooks=registerHooks({resolve(specifier,context,next){if(specifier==='electron')return {url:electron,shortCircuit:true};if(specifier==='./ipc-security.js')return {url:security,shortCircuit:true};return next(specifier,context)}})
- let db,cleanup
- t.after(async()=>{await cleanup?.();db?.close();hooks.deregister();assert.equal(dirname(resolve(root)),resolve(tmpdir()));rmSync(root,{recursive:true,force:true})})
- const {openAppDatabase}=await import(pathToFileURL(join(output,'database.js')))
- db=openAppDatabase(profile)
- const {registerStatementsIpc,cleanupGeneratedStatements}=await import(pathToFileURL(join(output,'statements-ipc.js')))
+ let db,cleanup,server
+ t.after(async()=>{await cleanup?.();await server?.close();db?.close();hooks.deregister();assert.equal(dirname(resolve(root)),resolve(tmpdir()));rmSync(root,{recursive:true,force:true})})
+ db=openInitializedDatabase(join(root,'synthetic-server.sqlite'))
+ const {registerStatementsIpc,cleanupGeneratedStatements}=await import(pathToFileURL(join(runtime,'statements-ipc.js')))
  cleanup=cleanupGeneratedStatements
- const {statementPlan}=await import(pathToFileURL(join(output,'statement-parameters.js')))
+ const {statementPlan}=await import(pathToFileURL(join(runtime,'statement-parameters.js')))
  db.prepare('INSERT INTO banks(id,name) VALUES(?,?)').run('bank','Вигаданий банк')
  db.prepare('INSERT INTO bank_details(id,bank_id,mfo,edrpou) VALUES(?,?,?,?)').run('detail','bank','000001','00000001')
  db.prepare('INSERT INTO recipients(id,last_name,first_name,patronymic,rnokpp,passport,bank_details_id,bank_account,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)').run('person','Вигаданий','Отримувач','Тестович','0000000001','ТТ000001','detail','UA000000000000000000000000001','2026-01-01','2026-01-01')
@@ -44,7 +47,12 @@ test('Statements IPC: isolated SQLite, independent parameters, actual Excel/PDF 
   db.prepare('INSERT INTO assignments(id,recipient_id,decision_id,aid_type_id,amount_minor,status,created_at) VALUES(?,?,?,?,?,?,?)').run(id,'person',i%2?'decision-2':'decision',type.id,100000,'Призначено','2026-01-03T10:00:00.000Z')
   ids.push(id);selected.push({aidTypeId:type.id,aidTypeName:type.short_name})
  }
- registerStatementsIpc(db)
+ await createFirstAdministrator(db,{username:'synthetic-admin',password:'synthetic password'})
+ server=createApp(db);server.log.level='silent';await server.listen({host:'127.0.0.1',port:0})
+ const http=new HttpClient(new URL(`http://127.0.0.1:${server.server.address().port}`))
+ const login=await http.postJson('/auth/login',{username:'synthetic-admin',password:'synthetic password'},undefined,{authorize:false})
+ const authenticated=new HttpClient(new URL(http.serverOrigin),5000,{getAccessToken:()=>login.token})
+ registerStatementsIpc({readRows:(ids,year)=>authenticated.postJson('/api/statements/snapshot',{ids,year:Number(year)}),readBankRows:(ids,year)=>authenticated.postJson('/api/statements/bank-snapshot',{ids,year})})
  const call=(channel,...args)=>globalThis.__statementHandlers.get(channel)({},...args)
  assert.equal((await call('statements:generate','personal',ids,2026,[])).ok,false)
  assert.equal(readdirSync(join(profile,'generated-documents-temp')).filter(name=>!name.startsWith('.')).length,0)
@@ -115,7 +123,7 @@ with zipfile.ZipFile(base+'.xlsx') as z:
  assert.equal(readFileSync(globalThis.__statementExport).subarray(0,2).toString(),'PK','PrivatBank stays XLSX')
  const tempRoot=join(profile,'generated-documents-temp')
  const jobCount=readdirSync(tempRoot).length
- writeFileSync(join(output,'excel-templates.ps1'),"$ErrorActionPreference='Stop';throw 'Synthetic conversion failure'")
+ writeFileSync(join(runtime,'excel-templates.ps1'),"$ErrorActionPreference='Stop';throw 'Synthetic conversion failure'")
  const failed=await call('statements:generate','personal',ids.slice(0,1),2026,[{aidTypeId:selected[0].aidTypeId,partIndex:0,documentNumber:'FAIL',documentDate:'2028-02-29',periodStart:'2025-01-01',periodEnd:'2025-12-31'}])
  assert.equal(failed.ok,false)
  assert.equal(readdirSync(tempRoot).length,jobCount,'failed job removed without touching successful previews')

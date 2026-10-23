@@ -31,9 +31,9 @@ export default function LoginScreen({ state, onLogin, connectionActions }: { sta
       if (!result.ok) setError(result.message ?? 'Не вдалося виконати вхід.')
     } finally { setBusy(false) }
   }
-  const unavailable = state.mode === 'remote' && state.status === 'unavailable'
-  const message = state.mode === 'remote' && 'message' in state ? state.message : undefined
-  const sessionExpired = state.mode === 'remote' && state.status === 'unauthenticated' && message === 'Час вашого сеансу минув. Увійдіть повторно, щоб продовжити роботу.'
+  const unavailable = state.status === 'unavailable'
+  const message = 'message' in state ? state.message : undefined
+  const sessionExpired = state.status === 'unauthenticated' && message === 'Час вашого сеансу минув. Увійдіть повторно, щоб продовжити роботу.'
   return <main className="auth-screen" aria-busy={busy || undefined}>
     <section className="auth-card" aria-labelledby="auth-title">
       <div className="auth-identity">

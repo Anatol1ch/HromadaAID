@@ -88,7 +88,6 @@ $serverEnvironment = @{
   HROMADA_AID_API_DATABASE = $resolvedDatabase
 }
 $electronEnvironment = @{
-  HROMADAAID_MODE = 'remote'
   HROMADAAID_API_URL = $apiUrl
   HROMADA_AID_TEST_DATA_DIR = [System.IO.Path]::GetFullPath($profilePath)
 }

@@ -143,7 +143,7 @@ test('real loopback HTTP: user session + allowed credential, no ID spoofing, adm
     const identity = new BackupInstallationIdentity(join(directory, 'identity'), protector())
     const credential = identity.credential(base.origin)
     client = new RemoteBackupClient(http, identity, join(directory, 'replicas'), 'SYNTHETIC-COMPUTER')
-    client.authChanged({ mode: 'remote', status: 'authenticated', user: viewer.value.user }); await settled(client)
+    client.authChanged({ status: 'authenticated', user: viewer.value.user }); await settled(client)
     assert.equal(client.currentState.status, 'disabled')
     const list = await (await request('/api/backup-clients', administrator.value.token)).json() as BackupInstallation[]
     assert.equal(list.length, 1); assert.equal('credential_hash' in list[0], false)
@@ -186,7 +186,7 @@ test('real loopback HTTP: user session + allowed credential, no ID spoofing, adm
     assert.equal((await request(`/api/backups/archives/${catalog[0].id}`, viewer.value.token, 'GET', undefined, headers)).status, 403)
     client.wake(); await settled(client); assert.equal(client.currentState.status, 'disabled')
     assert.equal((await hashFile(join(client.archiveDirectory!, latestSeven[0].fileName))).sha256, latestSeven[0].sha256)
-    client.authChanged({ mode: 'remote', status: 'unauthenticated', user: null }); assert.equal(client.currentState.status, 'signed-out')
+    client.authChanged({ status: 'unauthenticated', user: null }); assert.equal(client.currentState.status, 'signed-out')
     assert.equal(db.prepare('PRAGMA quick_check').get()?.quick_check, 'ok')
     assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0)
   } finally { await client?.stop(); await app?.close(); await archives.stop(); db.close(); await cleanup(directory) }

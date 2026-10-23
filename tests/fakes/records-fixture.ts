@@ -1,22 +1,23 @@
-import { listAnnualPlans, saveAnnualPlan, syncLegacyPlan } from './annual-plans.js'
-import { listCatalogs } from './catalog-data.js'
-import { reorderCatalog } from './catalog-order.js'
-import { saveCatalog } from './catalog-store.js'
-import { saveProgramApproval } from './program-approval-store.js'
-import { saveAssignment } from './assignment-store.js'
-import { addDecisionAssignments, saveDecision } from './decision-store.js'
+// Test-only compatibility harness for server business-rule fixtures; never shipped to Electron.
+import { listAnnualPlans, saveAnnualPlan, syncLegacyPlan } from '../../electron/annual-plans.js'
+import { listCatalogs } from '../../electron/catalog-data.js'
+import { reorderCatalog } from '../../electron/catalog-order.js'
+import { saveCatalog } from '../../electron/catalog-store.js'
+import { saveProgramApproval } from '../../electron/program-approval-store.js'
+import { saveAssignment } from '../../electron/assignment-store.js'
+import { addDecisionAssignments, saveDecision } from '../../electron/decision-store.js'
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import { trustedIpcMain as ipcMain } from './ipc-security.js'
-import { changeAssignmentStatuses } from './assignment-status.js'
-import { dashboardSummary, reportSummary } from './financial-summary.js'
-import { resolveAccountingYear } from './accounting-year.js'
-import { getDecision, listAssignments, listDecisions, listRecipientAssignmentHistory, type AssignmentRow } from './assignment-data.js'
-import { listAnnualPlanEntries, listProgramApprovals, listReportSourceRows } from './report-read-data.js'
+import { trustedIpcMain as ipcMain } from './ipc-security.mjs'
+import { changeAssignmentStatuses } from '../../electron/assignment-status.js'
+import { dashboardSummary, reportSummary } from '../../electron/financial-summary.js'
+import { resolveAccountingYear } from '../../electron/accounting-year.js'
+import { getDecision, listAssignments, listDecisions, listRecipientAssignmentHistory, type AssignmentRow } from '../../electron/assignment-data.js'
+import { listAnnualPlanEntries, listProgramApprovals, listReportSourceRows } from '../../electron/report-read-data.js'
 import type {
   AssignmentChangeResult, AssignmentInput, AssignmentListResult, AssignmentRecord, AssignmentStatus,
   DecisionRecord, DecisionSummary, AnnualPlanInput,
-} from './api-contract.js'
+} from '../../electron/api-contract.js'
 
 type Row = AssignmentRow
 
@@ -26,7 +27,7 @@ export function isIsoDate(value: string) {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
 }
 
-export function registerRecordsIpc(database: DatabaseSync) {
+export function registerRecordsFixture(database: DatabaseSync) {
   ipcMain.handle('assignments:change-statuses', (_event, value: unknown, requestId?: unknown) => changeAssignmentStatuses(database, value, requestId))
   ipcMain.handle('assignments:list', (_event, yearValue: unknown): AssignmentListResult => listAssignments(database, yearValue))
 
@@ -131,4 +132,4 @@ export function registerRecordsIpc(database: DatabaseSync) {
     addDecisionAssignments(database, decisionIdValue, value, requestId))
 }
 
-export { listAssignments } from './assignment-data.js'
+export { listAssignments } from '../../electron/assignment-data.js'

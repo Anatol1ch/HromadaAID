@@ -185,7 +185,7 @@ function DecisionRegistry() {
 
     <section className="dashboard-panel registry-panel decision-list-panel">
       <div className="registry-toolbar"><div><h2>Рішення виконкому</h2><p>{loading ? 'Завантаження…' : `${sorted.length} ${pluralize(sorted.length)}`}</p></div><span className="decision-list-hint"><ClipboardList size={18}/> Відкрийте рішення, щоб переглянути призначення</span></div>
-      {loading ? <div className="registry-empty">Завантажуємо рішення з локального сховища…</div> : sorted.length ? <div className="registry-table-wrap"><table className="registry-table decision-table"><thead><tr><th>Номер і дата</th><th>Призначень</th><th>Загальна призначена сума</th><th><span className="visually-hidden">Дії</span></th></tr></thead><tbody>{sorted.map((decision) => <tr key={decision.id}>
+      {loading ? <div className="registry-empty">Завантажуємо рішення із сервера…</div> : sorted.length ? <div className="registry-table-wrap"><table className="registry-table decision-table"><thead><tr><th>Номер і дата</th><th>Призначень</th><th>Загальна призначена сума</th><th><span className="visually-hidden">Дії</span></th></tr></thead><tbody>{sorted.map((decision) => <tr key={decision.id}>
         <td><span className="registry-name">№ {decision.decisionNumber}</span><span className="decision-date-cell">{formatDate(decision.decisionDate)}</span></td>
         <td>{decision.assignmentCount}</td><td className="assignment-amount">{formatMoneyMinor(decision.assignedTotalMinor)}</td>
         <td><button type="button" className="table-action" onClick={() => void openDecision(decision.id)}><Eye size={17}/><span>Відкрити</span></button></td>
