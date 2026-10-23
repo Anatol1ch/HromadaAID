@@ -319,6 +319,7 @@ export type HromadaAidApi = {
   appInfo: { getVersion: () => Promise<string> }
   auth: {
     getState: () => Promise<ClientAuthState>
+    getLastLogin: () => Promise<string | null>
     validateSession: () => Promise<AuthActionResult>
     login: (username: string, password: string) => Promise<AuthActionResult>
     logout: () => Promise<AuthActionResult>

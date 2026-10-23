@@ -22,6 +22,7 @@ const api: HromadaAidApi = {
   },
   auth: {
     getState: () => invoke('auth:get-state'),
+    getLastLogin: () => invoke('auth:get-last-login'),
     validateSession: () => invoke('auth:validate-session'),
     login: (username, password) => invoke('auth:login', username, password),
     logout: () => invoke('auth:logout'),

@@ -1,5 +1,5 @@
 import { Eye, EyeOff, HeartHandshake, LogIn, Server } from 'lucide-react'
-import { useCallback, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import type { ClientAuthState } from '../../shared/auth-contract'
 import type { ServerConnectionCheckResult, ServerConnectionSaveResult } from '../../shared/api-contract'
 import ServerConnectionDialog from './ServerConnectionDialog'
@@ -17,7 +17,15 @@ export default function LoginScreen({ state, onLogin, connectionActions }: { sta
   const [passwordError, setPasswordError] = useState('')
   const [connectionModalOpen, setConnectionModalOpen] = useState(false)
   const [showSessionNotice, setShowSessionNotice] = useState(true)
+  const loginEdited = useRef(false)
   const closeSessionNotice = useCallback(() => setShowSessionNotice(false), [])
+  useEffect(() => {
+    let active = true
+    void window.hromadaAid.auth.getLastLogin().then(value => {
+      if (active && !loginEdited.current && value) setUsername(value)
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [])
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (busy) return
@@ -45,7 +53,7 @@ export default function LoginScreen({ state, onLogin, connectionActions }: { sta
       <p className="auth-description">Використайте облікові дані, надані адміністратором.</p>
       {sessionExpired && showSessionNotice ? <SystemToast kind="warning" title="Сеанс завершено" message={message!} onClose={closeSessionNotice} duration={5_000}/> : !sessionExpired && (error || message) && <div className="auth-message" role="alert">{error || message}</div>}
       <form onSubmit={(event) => void submit(event)} noValidate>
-        <label><span>Логін</span><input id="login-username" autoComplete="username" autoFocus disabled={busy || unavailable} value={username} onChange={(event) => { setUsername(event.target.value); setUsernameError('') }} onBlur={() => setUsernameError(!username ? 'Введіть логін.' : username.length < 3 ? 'Логін має містити щонайменше 3 символи.' : '')} aria-invalid={!!usernameError} aria-describedby={usernameError ? 'login-username-error' : undefined} required minLength={3}/>{usernameError && <small className="recipient-field-error" id="login-username-error" role="alert">{usernameError}</small>}</label>
+        <label><span>Логін</span><input id="login-username" autoComplete="username" autoFocus disabled={busy || unavailable} value={username} onChange={(event) => { loginEdited.current = true; setUsername(event.target.value); setUsernameError('') }} onBlur={() => setUsernameError(!username ? 'Введіть логін.' : username.length < 3 ? 'Логін має містити щонайменше 3 символи.' : '')} aria-invalid={!!usernameError} aria-describedby={usernameError ? 'login-username-error' : undefined} required minLength={3}/>{usernameError && <small className="recipient-field-error" id="login-username-error" role="alert">{usernameError}</small>}</label>
         <label><span>Пароль</span><div className="auth-password"><input id="login-password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" disabled={busy || unavailable} value={password} onChange={(event) => { setPassword(event.target.value); setPasswordError('') }} onBlur={() => setPasswordError(password ? '' : 'Введіть пароль.')} aria-invalid={!!passwordError} aria-describedby={passwordError ? 'login-password-error' : undefined} required/><button type="button" className="icon-button" disabled={busy || unavailable} aria-label={showPassword ? 'Приховати пароль' : 'Показати пароль'} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={18}/> : <Eye size={18}/>}</button></div>{passwordError && <small className="recipient-field-error" id="login-password-error" role="alert">{passwordError}</small>}</label>
         <button type="submit" className="primary-button auth-submit" disabled={busy || unavailable}><LogIn size={18} aria-hidden="true"/>{busy ? 'Входимо…' : 'Увійти'}</button>
       </form>

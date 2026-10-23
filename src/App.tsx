@@ -1,10 +1,12 @@
 import Alert from './components/Alert'
 import DataState from './components/DataState'
 import LoginScreen from './components/LoginScreen'
+import WelcomeScreen from './components/WelcomeScreen'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { waitForStartupGate } from './lib/startup-timing'
 import { initialAccountingYear, rememberAccountingYear } from './lib/accountingYear'
 import { Activity, ChevronRight, CircleHelp, Code2, Plus, ArrowUpRight, CalendarDays, FileText, HandCoins, HeartHandshake, Home, LogOut, Settings, BookOpen, ChartNoAxesCombined, UsersRound, Lock, LockKeyhole } from 'lucide-react'
-import type { ClientAuthState } from '../shared/auth-contract'
+import type { AuthenticatedUser, ClientAuthState } from '../shared/auth-contract'
 import { allowedDictionarySections as dictionarySectionsForRoles, hasWorkspacePage, USER_ROLE_LABELS, USER_ROLES, type Permission, type WorkspacePage } from '../shared/authorization'
 import StatementFormation from './StatementFormation'
 import Dictionaries, { type DictionarySection } from './Dictionaries'
@@ -35,10 +37,13 @@ const nav = [
 ]
 function App() {
   const [auth, setAuth] = useState<ClientAuthState | null>(null)
+  const [startupReady, setStartupReady] = useState(false)
+  const [welcome, setWelcome] = useState<{ user: AuthenticatedUser; loading: boolean; error?: string } | null>(null)
   const [connection, setConnection] = useState<import('../shared/api-contract').ServerConnectionState | null>(null)
   const [connectionOverlayStatus, setConnectionOverlayStatus] = useState<'unavailable' | 'maintenance' | null>(null)
   const wasDisconnected = useRef(false)
   const recoveryInFlight = useRef(false)
+  const welcomeAttempt = useRef(0)
   const authRef = useRef(auth)
   authRef.current = auth
   const connectionActions = useMemo(() => ({
@@ -49,20 +54,14 @@ function App() {
   useEffect(() => {
     let active = true
     let receivedEvent = false
-    void window.hromadaAid.auth.getState().then(async (state) => {
-      if (!active || receivedEvent) return
-      if ((state.status === 'unavailable' || state.status === 'unauthenticated')) {
-        try {
-          const connection = await window.hromadaAid.connection.getState()
-          if (!active || receivedEvent) return
-          if (connection.status === 'available') { setAuth({ status: 'unauthenticated', user: null }); return }
-          if (connection.status === 'unavailable' || connection.status === 'maintenance') { setAuth({ status: 'unavailable', user: null, message: connection.message ?? state.message }); return }
-        } catch { /* Keep the auth state when no connection snapshot is available. */ }
+    const unsubscribe = window.hromadaAid.auth.onStateChange((state) => {
+      receivedEvent = true
+      if (active) setAuth(state)
+      if (state.status === 'unauthenticated' || state.status === 'unavailable') {
+        welcomeAttempt.current += 1
+        setWelcome(null)
       }
-      if (active && !receivedEvent) setAuth(state)
-    }, () => { if (active && !receivedEvent) setAuth({ status: 'unavailable', user: null, message: 'Не вдалося отримати стан авторизації.' }) })
-    const unsubscribe = window.hromadaAid.auth.onStateChange((state) => { receivedEvent = true; if (active) setAuth(state) })
-    void window.hromadaAid.connection.getState().then(value => { if (active) setConnection(value) }).catch(() => undefined)
+    })
     const unsubscribeConnection = window.hromadaAid.connection.onStateChange((connection) => {
       if (!active) return
       setConnection(connection)
@@ -73,7 +72,50 @@ function App() {
         return current
       })
     })
+    const startupAt = Date.now()
+    void (async () => {
+      try {
+        const [state, initialConnection] = await waitForStartupGate(startupAt, 2_000, () => Promise.all([
+          window.hromadaAid.auth.getState(),
+          window.hromadaAid.connection.getState(),
+        ]))
+        if (!active) return
+        setConnection(initialConnection)
+        if (!receivedEvent) {
+          let initialState = state
+          if (state.status === 'unavailable' || state.status === 'unauthenticated') {
+            if (initialConnection.status === 'available') initialState = { status: 'unauthenticated', user: null }
+            else if (initialConnection.status === 'unavailable' || initialConnection.status === 'maintenance') initialState = { status: 'unavailable', user: null, message: initialConnection.message ?? state.message }
+          }
+          setAuth(initialState)
+        }
+      } catch {
+        if (active && !receivedEvent) setAuth({ status: 'unavailable', user: null, message: 'Не вдалося підготувати підключення до сервера. Спробуйте перевірити його ще раз.' })
+      } finally {
+        if (active) setStartupReady(true)
+      }
+    })()
     return () => { active = false; unsubscribe(); unsubscribeConnection() }
+  }, [])
+  const initializeWelcome = useCallback(async (user: AuthenticatedUser, startedAt: number) => {
+    const attempt = ++welcomeAttempt.current
+    setWelcome({ user, loading: true })
+    let result: Awaited<ReturnType<typeof window.hromadaAid.auth.validateSession>>
+    try {
+      result = await waitForStartupGate(startedAt, 1_500, () => window.hromadaAid.auth.validateSession())
+    } catch {
+      if (attempt === welcomeAttempt.current) setWelcome({ user, loading: false, error: 'Не вдалося перевірити сеанс. Перевірте підключення та спробуйте ще раз.' })
+      return
+    }
+    if (attempt !== welcomeAttempt.current) return
+    setAuth(result.state)
+    if (result.ok) {
+      setWelcome(null)
+    } else if (result.failureKind === 'session-expired' || result.state.status === 'unauthenticated' || result.state.status === 'unavailable') {
+      setWelcome(null)
+    } else {
+      setWelcome({ user: result.state.status === 'authenticated' || result.state.status === 'password-change-required' ? result.state.user : user, loading: false, error: result.message ?? 'Не вдалося підготувати робоче середовище.' })
+    }
   }, [])
   const onConnectionRestored = useCallback(async () => {
     if (recoveryInFlight.current || !wasDisconnected.current) return
@@ -88,11 +130,12 @@ function App() {
       const result = await window.hromadaAid.auth.validateSession()
       setAuth(result.state)
       if (result.ok || result.failureKind !== 'connection') {
+        if (result.ok && welcome) { welcomeAttempt.current += 1; setWelcome(null) }
         if (result.ok || result.failureKind === 'permission' || result.failureKind === 'server') notifyConnectionRestored()
         setConnectionOverlayStatus(null)
       }
     } finally { recoveryInFlight.current = false; wasDisconnected.current = false }
-  }, [])
+  }, [welcome])
   useEffect(() => {
     const hasRemoteState = !!auth
     if (hasRemoteState && connection?.active && (connection.status === 'unavailable' || connection.status === 'maintenance')) {
@@ -104,6 +147,7 @@ function App() {
   const login = async (username: string, password: string) => {
     const result = await window.hromadaAid.auth.login(username, password)
     setAuth(result.state)
+    if (result.ok && (result.state.status === 'authenticated' || result.state.status === 'password-change-required')) void initializeWelcome(result.state.user, Date.now())
     return { ok: result.ok, message: 'message' in result ? result.message : undefined }
   }
   const changePassword = async (currentPassword: string, newPassword: string) => {
@@ -111,7 +155,8 @@ function App() {
     setAuth(result.state)
     return { ok: result.ok, message: 'message' in result ? result.message : undefined }
   }
-  if (!auth) return <StartupScreen/>
+  if (!startupReady || !auth) return <StartupScreen/>
+  if (welcome) return <><WelcomeScreen user={welcome.user} loading={welcome.loading} error={welcome.error} onRetry={() => void initializeWelcome(welcome.user, Date.now() - 1_500)} onSignOut={() => { void window.hromadaAid.auth.logout().then(result => { setAuth(result.state); setWelcome(null) }) }}/>{connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
   if (auth.status === 'password-change-required') return <><TemporaryPasswordScreen state={auth} onChangePassword={changePassword}/>{connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
   if (auth.status !== 'authenticated') return <><LoginScreen state={auth} onLogin={login} connectionActions={connectionActions}/>{connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>
   return <><Workspace key={auth.user.id} auth={auth} onChangePassword={changePassword} connectionActions={connectionActions}/>{connectionOverlayStatus && connection?.apiUrl && <ConnectionStateOverlay key="server-connection-overlay" status={connectionOverlayStatus} failureReason={connection.failureReason} apiUrl={connection.apiUrl} check={connectionActions.check} onRestored={onConnectionRestored}/>}</>

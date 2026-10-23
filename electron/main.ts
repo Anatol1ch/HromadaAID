@@ -4,6 +4,7 @@ import { RemoteBackupClient } from './backup-client.js'
 import { BackupInstallationIdentity } from './backup-storage.js'
 import { isBackupInstallation, isBackupInstallationList, isRestorePreview, isServerBackupList } from '../shared/backup-contract.js'
 import { RemoteAuthSession } from './auth-session.js'
+import { readLastLogin, saveLastLoginAfterSuccessfulLogin } from './client-preferences.js'
 import type { AuthActionResult, ClientAuthState } from '../shared/auth-contract.js'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -279,11 +280,14 @@ if (!hasSingleInstanceLock) {
         })
       }
       trustedIpcMain.handle('auth:get-state', async () => session.currentState)
+      trustedIpcMain.handle('auth:get-last-login', async () => readLastLogin(userDataPath))
       trustedIpcMain.handle('auth:validate-session', async (): Promise<AuthActionResult> => session.validateSession())
       trustedIpcMain.handle('auth:login', async (_event, username: unknown, password: unknown): Promise<AuthActionResult> => {
         if (savingConnection) return { ok: false, state: session.currentState, message: 'Зачекайте завершення зміни адреси сервера.' }
         if (!runtimeConfig?.apiUrl) return { ok: false, state: session.currentState, message: runtimeConfig?.configurationError ?? 'Налаштуйте адресу сервера перед входом.' }
-        return session.login(typeof username === 'string' ? username : '', typeof password === 'string' ? password : '')
+        const result = await session.login(typeof username === 'string' ? username : '', typeof password === 'string' ? password : '')
+        await saveLastLoginAfterSuccessfulLogin(userDataPath, result).catch(() => console.warn('[HromadaAid] Не вдалося зберегти локальне налаштування останнього логіна.'))
+        return result
       })
       trustedIpcMain.handle('auth:logout', async (): Promise<AuthActionResult> => session.logout())
       trustedIpcMain.handle('auth:change-password', async (_event, currentPassword: unknown, newPassword: unknown): Promise<AuthActionResult> =>
