@@ -1,0 +1,29 @@
+<service>
+  <id>HromadaAIDApi</id>
+  <name>HromadaAID API</name>
+  <description>Центральний HTTP API HromadaAID</description>
+
+  <executable>__PROGRAM_DIRECTORY__\runtime\node.exe</executable>
+  <arguments>"__PROGRAM_DIRECTORY__\server\src\installed.js" --config "__DATA_DIRECTORY__\server.json"</arguments>
+  <workingdirectory>__PROGRAM_DIRECTORY__</workingdirectory>
+
+  <startmode>Automatic</startmode>
+  <delayedAutoStart/>
+  <stoptimeout>5 min</stoptimeout>
+
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="30 sec" />
+  <onfailure action="none" />
+  <resetfailure>1 day</resetfailure>
+
+  <serviceaccount>
+    <domain>NT AUTHORITY</domain>
+    <user>LocalService</user>
+  </serviceaccount>
+
+  <logpath>__DATA_DIRECTORY__\Logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+</service>

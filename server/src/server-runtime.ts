@@ -7,18 +7,24 @@ import { acquireDatabaseOwnership } from './restore-safety.js'
 import { BackupAdministration, assertNoPendingRestore } from './backup-admin.js'
 import { readInstalledTlsOptions, type InstalledServerConfig, type ServerConfig } from './config.js'
 import { lstatSync } from 'node:fs'
+import { createGracefulShutdown } from './server-lifecycle.js'
 
-export async function startServer(config: ServerConfig | InstalledServerConfig, installed: boolean): Promise<void> {
+export type RunningServer = { stop(signal: string): Promise<void> }
+
+export async function startServer(config: ServerConfig | InstalledServerConfig, installed: boolean): Promise<RunningServer> {
   const https = installed ? readInstalledTlsOptions(config as InstalledServerConfig) : undefined
   assertNoPendingRestore(config.databasePath)
-  const key = loadBackupKey(config.backupDirectory, installed)
-  const releaseOwnership = acquireDatabaseOwnership(config.databasePath)
+  let key: Buffer | undefined
+  let releaseOwnership: (() => void) | undefined
   let database: ReturnType<typeof openServerDatabase> | undefined
   let scheduler: ReturnType<typeof startDailyBackupScheduler> | undefined
   let archives: BackupArchives | undefined
   let app: ReturnType<typeof createApp> | undefined
-  let stopping = false
+  let databaseClosed = false
+  let detachSignalHandlers: () => void = () => {}
   try {
+    key = loadBackupKey(config.backupDirectory, installed)
+    releaseOwnership = acquireDatabaseOwnership(config.databasePath)
     database = installed ? openInstalledServerDatabase(config.databasePath) : openServerDatabase(config.databasePath)
     archives = new BackupArchives(config.backupDirectory, () => {
       if (!key) throw new Error('Ключ зашифрованного резервування не налаштовано.')
@@ -28,26 +34,46 @@ export async function startServer(config: ServerConfig | InstalledServerConfig, 
     const service = new SqliteBackupService(database, config.backupDirectory, logger, !installed)
     const administration = new BackupAdministration(config.databasePath, archives, service, async () => { await scheduler?.stop() }, !installed)
     app = createApp(database, archives, administration, https)
-    const stop = async (signal: string) => {
-      if (stopping) return
-      stopping = true
-      app?.log.info({ signal }, 'Завершуємо HromadaAID API')
-      try { await app?.close() }
-      finally { await scheduler?.stop(); await archives?.stop(); database?.close(); releaseOwnership(); key?.fill(0) }
+    const shutdown = createGracefulShutdown([
+      { name: 'HTTP-запити Fastify', close: () => app?.close() },
+      { name: 'планувальник резервування', close: () => scheduler?.stop() },
+      { name: 'архіви резервування', close: () => archives?.stop() },
+      { name: 'SQLite', close: () => { database?.close(); databaseClosed = true } },
+      { name: 'блокування екземпляра', close: () => {
+        if (!databaseClosed) throw new Error('SQLite remains open; ownership lock must be retained.')
+        releaseOwnership?.()
+      } },
+      { name: 'очищення ключа з пам’яті', close: () => { key?.fill(0) } },
+    ], {
+      info: message => app?.log.info(message),
+      warn: message => app?.log.warn(message),
+      error: message => app?.log.error(message),
+    }, { onCleanupFailure: () => { process.exitCode = 1 } })
+    const stop = (signal: string) => {
+      detachSignalHandlers()
+      return shutdown(signal)
     }
-    process.once('SIGINT', () => { void stop('SIGINT') })
-    process.once('SIGTERM', () => { void stop('SIGTERM') })
+    const onSigint = () => { void stop('SIGINT') }
+    const onSigterm = () => { void stop('SIGTERM') }
+    process.once('SIGINT', onSigint)
+    process.once('SIGTERM', onSigterm)
+    detachSignalHandlers = () => {
+      process.off('SIGINT', onSigint)
+      process.off('SIGTERM', onSigterm)
+    }
     await app.listen({ host: config.host, port: config.port })
     if (!key) logger.warn('Ключ розподіленого резервування не налаштовано. Локальні SQLite-копії працюють незалежно.')
     scheduler = startDailyBackupScheduler(service, logger, { onBackupCreated: () => { if (key) void archives?.list().catch(() => logger.error('Не вдалося підготувати зашифровані резервні архіви.')) } })
     app.log.info({ host: config.host, port: config.port }, 'HromadaAID API готовий')
+    return { stop }
   } catch (error) {
+    detachSignalHandlers()
     app?.log.error('Не вдалося запустити HromadaAID API')
     await app?.close().catch(() => undefined)
-    await scheduler?.stop()
-    await archives?.stop()
-    database?.close()
-    releaseOwnership()
+    await scheduler?.stop().catch(() => undefined)
+    await archives?.stop().catch(() => undefined)
+    try { database?.close() } catch { /* startup is already failing */ }
+    try { releaseOwnership?.() } catch { /* startup is already failing */ }
     key?.fill(0)
     throw error
   }
