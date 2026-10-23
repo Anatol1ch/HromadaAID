@@ -49,8 +49,8 @@ export default function SettingsPage({ user, onChangePassword, connectionActions
     <nav className="settings-section-nav" aria-label="Розділи налаштувань">
       <button type="button" className={`settings-section-current${activeSection === 'account' ? ' is-selected' : ''}`} aria-current={activeSection === 'account' ? 'page' : undefined} onClick={() => setActiveSection('account')}><CircleUserRound size={17} aria-hidden="true"/>Мій обліковий запис</button>
       <button type="button" className={`settings-section-current${activeSection === 'connection' ? ' is-selected' : ''}`} aria-current={activeSection === 'connection' ? 'page' : undefined} onClick={() => setActiveSection('connection')}><Server size={16} aria-hidden="true"/><span>Підключення до сервера</span></button>
-      <button type="button" className={`settings-section-current${activeSection === 'about' ? ' is-selected' : ''}`} aria-current={activeSection === 'about' ? 'page' : undefined} onClick={() => setActiveSection('about')}><Info size={16} aria-hidden="true"/><span>Про застосунок</span></button>
       <button type="button" className={`settings-section-current${activeSection === 'backup' ? ' is-selected' : ''}`} aria-current={activeSection === 'backup' ? 'page' : undefined} onClick={() => setActiveSection('backup')}><HardDriveDownload size={16} aria-hidden="true"/><span>Резервне копіювання</span></button>
+      <button type="button" className={`settings-section-current${activeSection === 'about' ? ' is-selected' : ''}`} aria-current={activeSection === 'about' ? 'page' : undefined} onClick={() => setActiveSection('about')}><Info size={16} aria-hidden="true"/><span>Про програму</span></button>
     </nav>
     {activeSection === 'backup' && <BackupSettings user={user}/>}
     {activeSection === 'account' && <>
