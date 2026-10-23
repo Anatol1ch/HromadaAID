@@ -16,17 +16,23 @@ test('login connection action is an accessible icon-only button', () => {
 })
 
 test('home year remains horizontal while analytics stay behind the overview permission gate', () => {
-  assert.match(app, /Обраний обліковий рік:<\/span><strong>\{year\}<\/strong>/)
+  assert.match(app, /workspace-year-label"><CalendarDays[^>]*\/><strong><span>\{year\}<\/span> рік<\/strong>/)
   assert.match(app, /canViewOverview \? <>\s*<OverviewHomeSummary year=\{year\}\/>/)
-  assert.match(styles, /\.workspace-year-label > div \{ display: flex; align-items: baseline/)
-  assert.match(styles, /\.workspace-year-label strong \{[^}]*color: #2f7546/)
+  assert.match(styles, /\.workspace-year-label \{ display: flex; flex: none; align-items: center/)
+  assert.match(styles, /\.workspace-year-label > strong span \{[^}]*color: #2f7546/)
+  assert.match(app, /workspace-year-neutral"><span>Робочий простір громади<\/span>/)
+  assert.match(app, /data \? <strong>\{`Призначено допомог:/)
+  assert.doesNotMatch(app, /Показники та стан виконання доступні в огляді/)
 })
 
 test('SystemToast uses one five-second card treatment and access-denied shares it', () => {
   assert.match(toast, /duration = 5_000/)
-  assert.match(toast, /window\.setTimeout\(onClose, duration\)/)
+  assert.match(toast, /window\.setTimeout\(\(\) => setClosing\(true\), duration\)/)
+  assert.match(toast, /createPortal\(<aside className=\{`system-toast/)
+  assert.match(toast, /setTimeout\(\(\) => closeRef\.current\(\), 180\)/)
   assert.match(accessDenied, /<SystemToast kind="access-denied"/)
-  assert.match(styles, /\.system-toast \{[^}]*var\(--radius-modal\)[^}]*var\(--shadow-modal\)/)
+  assert.match(styles, /\.system-toast \{[^}]*left: 50%;[^}]*var\(--radius-modal\)[^}]*var\(--shadow-modal\)[^}]*transform: translateX\(-50%\)/)
+  assert.match(styles, /\.system-toast.is-closing/)
   assert.match(styles, /\.system-toast-access-denied/)
 })
 
@@ -43,8 +49,8 @@ test('support contacts keep safe Electron links and have visible labels', () => 
 })
 
 test('planning table constrains numeric columns and preserves a separate actions column', () => {
-  assert(planning.includes('return <colgroup><col/><col style={{width:150}}/><col style={{width:190}}/><col style={{width:165}}/></colgroup>'))
-  assert.match(planning, /col style=\{\{width:165\}\}/)
+  assert(planning.includes('return <colgroup><col/><col style={{width:150}}/><col style={{width:190}}/><col style={{width:185}}/></colgroup>'))
+  assert.match(styles, /\.planning-table th:nth-child\(3\), \.planning-table td:nth-child\(3\) \{ padding-right: 26px; \}/)
   assert.match(styles, /\.planning-table \{ width: 100%; min-width: 680px; table-layout: fixed;/)
 })
 
