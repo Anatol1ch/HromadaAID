@@ -45,6 +45,10 @@ app.on('browser-window-created', (_event, window) => {
         check(typeof window.require === 'undefined' && typeof window.hromadaAid === 'undefined', 'No Node or client bridge')
         check(typeof window.hromadaManager?.inspectEnvironment === 'function', 'Narrow read-only inspection bridge')
         check(Object.keys(window.hromadaManager).join(',') === 'inspectEnvironment', 'Only the explicit inspection method is exposed')
+        check(document.querySelector('#real-state-title')?.textContent === 'Стан сервера ще не перевірено', 'Initial inspection state is clear')
+        const initialStatuses = [...document.querySelectorAll('.sm-health-summary .sm-status')]
+        check(initialStatuses.length === 3 && initialStatuses.every(status => status.classList.contains('sm-status-info')), 'Unchecked installation, service and API use neutral information status')
+        check(document.querySelector('.sm-health-summary .sm-status-error') === null, 'Initial state does not imply an error')
         const buttons = [...document.querySelectorAll('nav button')]
         check(buttons.length === 4, 'Four navigation items')
         const expectedHeadings = ['Стан сервера', 'Конфігурація', 'Діагностика', 'Оновлення сервера']
@@ -78,10 +82,24 @@ app.on('browser-window-created', (_event, window) => {
           check([...document.querySelectorAll('button')].some(button => button.textContent.includes('Перевірити зараз')), 'Real inspection action is available')
         }
         buttons[2].click(); await pause()
+        if (canDemo) {
+          const toggles = [...document.querySelectorAll('.sm-event-details-toggle')]
+          check(toggles.length === 3, 'Diagnostic event details are independently expandable')
+          toggles[0].focus()
+          check(document.activeElement === toggles[0] && toggles[0].tagName === 'BUTTON', 'Details control is keyboard focusable')
+          toggles[0].click(); await pause()
+          const controlledId = toggles[0].getAttribute('aria-controls')
+          const details = document.getElementById(controlledId)
+          check(toggles[0].getAttribute('aria-expanded') === 'true' && details && !details.closest('tr').hidden, 'Expanded details are linked to their button')
+          check(details.closest('td').colSpan === 4 && details.textContent.includes('Код') && details.textContent.includes('Ідентифікатор'), 'Details occupy a full-width row')
+          toggles[1].click(); await pause()
+          toggles[0].click(); await pause()
+          check(toggles[0].getAttribute('aria-expanded') === 'false' && toggles[1].getAttribute('aria-expanded') === 'true', 'Event details expand and collapse independently')
+        }
         const filter = document.querySelector('.sm-filter select')
         Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(filter, 'issues')
         filter.dispatchEvent(new Event('change', { bubbles: true })); await pause()
-        check(document.querySelectorAll('.sm-events tbody tr').length === 1, 'Diagnostics filter')
+        check(document.querySelectorAll('.sm-events tbody tr:not(.sm-event-details-row)').length === 1, 'Diagnostics filter')
         check([...document.querySelectorAll('button')].every(button => button.textContent.trim() || button.getAttribute('aria-label')), 'Named buttons')
         let blocked = false
         try { await fetch('http://127.0.0.1:3000/health') } catch { blocked = true }
