@@ -27,7 +27,7 @@ app.on('browser-window-created', (_event, window) => {
         check(typeof window.require === 'undefined' && typeof window.hromadaAid === 'undefined', 'No Node or client bridge')
         const buttons = [...document.querySelectorAll('nav button')]
         check(buttons.length === 4, 'Four navigation items')
-        const expectedHeadings = ['Огляд сервера', 'Конфігурація', 'Діагностика', 'Оновлення сервера']
+        const expectedHeadings = ['Стан сервера', 'Конфігурація', 'Діагностика', 'Оновлення сервера']
         for (let i = 0; i < buttons.length; i++) {
           buttons[i].click(); await pause()
           check(buttons[i].getAttribute('aria-current') === 'page', 'Navigation current page')
@@ -53,7 +53,7 @@ app.on('browser-window-created', (_event, window) => {
         const filter = document.querySelector('.sm-filter select')
         Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(filter, 'issues')
         filter.dispatchEvent(new Event('change', { bubbles: true })); await pause()
-        check(document.querySelectorAll('.sm-events > li').length === 1, 'Diagnostics filter')
+        check(document.querySelectorAll('.sm-events tbody tr').length === 1, 'Diagnostics filter')
         check([...document.querySelectorAll('button')].every(button => button.textContent.trim() || button.getAttribute('aria-label')), 'Named buttons')
         let blocked = false
         try { await fetch('http://127.0.0.1:3000/health') } catch { blocked = true }

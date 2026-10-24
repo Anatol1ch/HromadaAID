@@ -12,10 +12,13 @@ const devOrigin = 'http://127.0.0.1:5176'
 let window: BrowserWindow | null = null
 
 async function openWindow() {
-  const area = screen.getPrimaryDisplay().workAreaSize
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
+  const width = Math.min(1180, area.width), height = Math.min(780, area.height)
   window = new BrowserWindow({
     title: 'HromadaAID Server Manager',
-    width: Math.min(1180, area.width), height: Math.min(780, area.height),
+    width, height,
+    x: area.x + Math.floor((area.width - width) / 2),
+    y: area.y + Math.floor((area.height - height) / 2),
     minWidth: Math.min(900, area.width), minHeight: Math.min(640, area.height),
     backgroundColor: '#f5f6f8', show: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, partition: 'persist:server-manager' },
