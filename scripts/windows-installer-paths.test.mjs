@@ -118,6 +118,33 @@ test('NSIS registers and verifies the LocalService WinSW wrapper, preserves user
   assert.doesNotMatch(script, /RMDir\s+\/r\s+"\$DataDirectory|RMDir\s+\/r\s+"\$BackupDirectory/)
 })
 
+test('service path validation uses APIs available in Windows PowerShell 5.1 and accepts only absolute local drive paths', { skip: process.platform !== 'win32' }, async () => {
+  const installer = await readFile(new URL('../packaging/install-server-service.ps1', import.meta.url), 'utf8')
+  assert.doesNotMatch(installer, /IsPathFullyQualified/)
+  assert.match(installer, /Test-AbsoluteLocalPath \$path/)
+  const helper = installer.match(/function Test-AbsoluteLocalPath\([\s\S]*?(?=\r?\nfunction Save-Acl)/)?.[0]
+  assert.ok(helper, 'the actual installer path-validation function must be present')
+
+  const root = mkdtempSync(join(tmpdir(), 'HromadaAID PowerShell 5.1 path validation '))
+  const harness = join(root, 'validate-paths.ps1')
+  const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const script = [
+    helper,
+    "$pathApi = [IO.Path].GetMethod('IsPathFullyQualified')",
+    "if ($null -ne $pathApi) { throw 'Harness must run on the Windows PowerShell 5.1 .NET Framework API surface.' }",
+    "$cases = @(@{ path = 'C:\\'; expected = $true }, @{ path = 'C:\\Program Files\\HromadaAID'; expected = $true }, @{ path = 'D:\\Дані HromadaAID\\База'; expected = $true }, @{ path = 'relative\\folder'; expected = $false }, @{ path = 'C:drive-relative'; expected = $false }, @{ path = '\\root-relative'; expected = $false }, @{ path = '\\\\server\\share'; expected = $false })",
+    'foreach ($case in $cases) { $actual = Test-AbsoluteLocalPath $case.path; if ($actual -ne $case.expected) { throw "Unexpected validation result for [$($case.path)]: $actual" } }',
+    "[Console]::Out.WriteLine('PASS: Windows PowerShell 5.1 local absolute path cases')",
+  ].join('\r\n') + '\r\n'
+
+  try {
+    writeFileSync(harness, '\uFEFF' + script, 'utf8')
+    const run = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', harness], { windowsHide: true, encoding: 'utf8', timeout: 30_000 })
+    assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`)
+    assert.match(run.stdout, /PASS: Windows PowerShell 5\.1 local absolute path cases/)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
 test('retry cleanup removes only an interrupted Server.next package and preserves synthetic server data', { skip: process.platform !== 'win32' }, (t) => {
   const root = mkdtempSync(join(tmpdir(), 'HromadaAID retry cleanup '))
   const program = join(root, 'Program Files', 'HromadaAID')

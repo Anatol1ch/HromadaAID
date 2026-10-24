@@ -73,6 +73,17 @@ function Invoke-Checked([string]$File, [string[]]$Arguments, [string]$Failure) {
   if ($exitCode -ne 0) { $script:LastChildExitCode = $exitCode; throw $Failure }
   $script:LastChildExitCode = $null
 }
+function Test-AbsoluteLocalPath([string]$Path) {
+  if ([string]::IsNullOrWhiteSpace($Path) -or $Path.StartsWith('\\')) { return $false }
+  $root = [IO.Path]::GetPathRoot($Path)
+  if ($root -notmatch '^[A-Za-z]:\\$') { return $false }
+  try {
+    [void][IO.Path]::GetFullPath($Path)
+    return $true
+  } catch {
+    return $false
+  }
+}
 function Save-Acl([string]$Path) {
   if ([IO.Directory]::Exists($Path) -or [IO.File]::Exists($Path)) { $aclSnapshots[$Path] = (Get-Acl -LiteralPath $Path).Sddl }
 }
@@ -183,7 +194,7 @@ try {
   $principal = [Security.Principal.WindowsPrincipal]::new($identity)
   if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Для встановлення серверної служби потрібні права адміністратора.' }
   foreach ($path in @($ProgramDirectory, $DataDirectory, $BackupDirectory)) {
-    if (-not [IO.Path]::IsPathFullyQualified($path) -or $path.StartsWith('\\')) { throw 'Усі каталоги сервера мають бути абсолютними локальними шляхами.' }
+    if (-not (Test-AbsoluteLocalPath $path)) { throw 'Усі каталоги сервера мають бути абсолютними локальними шляхами.' }
   }
   foreach ($path in @($stagedServer, (Join-Path $DataDirectory 'Database'), (Join-Path $DataDirectory 'Logs'), $BackupDirectory)) {
     if (-not [IO.Directory]::Exists($path)) { throw "Каталог недоступний: $path" }
