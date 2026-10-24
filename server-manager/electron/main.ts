@@ -50,12 +50,17 @@ async function openWindow() {
     backgroundColor: '#f5f6f8', show: false,
     webPreferences: { preload: join(dirname(fileURLToPath(import.meta.url)), 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, partition: 'persist:server-manager' },
   })
+  // Keep a normal, centered restore size while opening maximized on the work area
+  // of the display nearest the cursor. Maximized windows retain the taskbar.
+  window.maximize()
   window.setMenuBarVisibility(false)
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event, url) => {
     if (url !== (development ? `${devOrigin}/` : page)) event.preventDefault()
   })
   window.webContents.on('will-redirect', event => event.preventDefault())
+  // The window stays hidden until Chromium has painted the maximized layout,
+  // avoiding a visible small-window-to-maximized transition.
   window.once('ready-to-show', () => window?.show())
   window.on('closed', () => { window = null })
   if (development) await window.loadURL(devOrigin)

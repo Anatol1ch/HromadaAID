@@ -1,5 +1,5 @@
 // Functional checks of the actual isolated window. No system services or database access.
-import { app } from 'electron'
+import { app, screen } from 'electron'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -16,6 +16,22 @@ app.on('browser-window-created', (_event, window) => {
   window.webContents.once('did-finish-load', async () => {
     try {
       console.log('Manager smoke: isolated renderer loaded.')
+      assert.equal(window.isMaximized(), true, 'Window opens maximized')
+      assert.equal(window.isFullScreen(), false, 'Window is not fullscreen')
+      window.restore()
+      assert.equal(window.isMaximized(), false, 'Native restore returns to normal size')
+      assert.equal(window.isFullScreen(), false, 'Restored window remains non-fullscreen')
+      const bounds = window.getBounds()
+      const workArea = screen.getDisplayMatching(bounds).workArea
+      assert.ok(bounds.x >= workArea.x && bounds.y >= workArea.y, 'Restored window starts inside display work area')
+      assert.ok(bounds.x + bounds.width <= workArea.x + workArea.width && bounds.y + bounds.height <= workArea.y + workArea.height, 'Restored window fits display work area')
+      window.maximize()
+      assert.equal(window.isMaximized(), true, 'Window can be maximized again')
+      window.minimize()
+      assert.equal(window.isMinimized(), true, 'Window can be minimized')
+      window.restore()
+      assert.equal(window.isMinimized(), false, 'Window can be restored after minimizing')
+      assert.equal(window.isMaximized(), true, 'Maximized state survives minimize and restore')
       const preferences = window.webContents.getLastWebPreferences()
       assert.equal(preferences.nodeIntegration, false)
       assert.equal(preferences.contextIsolation, true)
