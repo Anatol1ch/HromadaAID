@@ -165,9 +165,19 @@ function Get-SupportedSchemaMaximum([string]$PackageRoot) {
 function Get-DatabaseStatus([string]$Node, [string]$PackageRoot, [string]$DatabasePath) {
   $cli = Join-Path $PackageRoot 'app\dist\server\src\create-admin.js'
   if (-not [IO.File]::Exists($cli)) { throw 'Пакет не містить перевірки стану облікових записів.' }
-  $output = & $Node $cli --database $DatabasePath --status 2>$null
-  $exitCode = $LASTEXITCODE
-  if ($exitCode -ne 0) { $script:LastChildExitCode = $exitCode; throw 'Не вдалося безпечно прочитати стан серверної бази.' }
+  $output = @()
+  Push-Location (Join-Path $PackageRoot 'app')
+  try {
+    $output = @(& $Node $cli --database $DatabasePath --status 2>&1)
+    $exitCode = $LASTEXITCODE
+  } finally { Pop-Location }
+  if ($exitCode -ne 0) {
+    $script:LastChildExitCode = $exitCode
+    $details = Protect-InstallDiagnosticText (($output | ForEach-Object { [string]$_ }) -join "`n")
+    if ($details.Length -gt 2500) { $details = $details.Substring(0, 2500) }
+    if ($details) { throw "Не вдалося безпечно прочитати стан серверної бази. Дочірній процес: $details" }
+    throw 'Не вдалося безпечно прочитати стан серверної бази; дочірній процес не повернув діагностики.'
+  }
   $script:LastChildExitCode = $null
   try { return ($output | Select-Object -Last 1 | ConvertFrom-Json) }
   catch { throw 'Перевірка стану серверної бази повернула неочікуваний результат.' }

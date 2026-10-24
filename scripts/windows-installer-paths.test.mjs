@@ -247,12 +247,24 @@ test('server production dependencies deploy only in a disposable isolated worksp
   assert.match(deployScript, /pnpm\.cmd/)
 })
 
+test('database status preserves child stderr in safe installer diagnostics', async () => {
+  const serviceInstaller = await readFile(new URL('../packaging/install-server-service.ps1', import.meta.url), 'utf8')
+  const match = serviceInstaller.match(/function Get-DatabaseStatus\([\s\S]*?\n}\n/)
+  assert.ok(match, 'Get-DatabaseStatus should exist')
+  assert.match(match[0], /--status 2>&1/)
+  assert.match(match[0], /\$LASTEXITCODE/)
+  assert.match(match[0], /Protect-InstallDiagnosticText/)
+  assert.doesNotMatch(match[0], /2>\$null/)
+})
+
 test('package manifest records measured payload and support sizes for pre-copy disk checks', async () => {
   const packager = await readFile(new URL('./package-windows.mjs', import.meta.url), 'utf8')
   const installerBuilder = await readFile(new URL('./build-windows-installer.mjs', import.meta.url), 'utf8')
   assert.match(packager, /const clientBytes = await sumBytes\(clientTarget, clientFiles\)/)
   assert.match(packager, /const serverBytes = await sumBytes\(serverTarget, completeServerFiles\)/)
   assert.match(packager, /cp\(serverSource, join\(serverTarget, 'app'\), \{ recursive: true \}\)/)
+  const deployer = await readFile(new URL('./deploy-server-package.mjs', import.meta.url), 'utf8')
+  assert.match(deployer, /config\.node-linker=hoisted/)
   assert.match(packager, /if \(entry\.isSymbolicLink\(\)\)/)
   assert.match(packager, /sizeBytes: clientBytes/)
   assert.match(packager, /sizeBytes: serverBytes/)

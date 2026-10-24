@@ -3,6 +3,7 @@ import { copyFile, cp, lstat, mkdir, readFile, readdir, realpath, rm, stat, writ
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
+import { verifyServerRuntime } from '../packaging/server-runtime-check.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const release = join(root, 'release')
@@ -83,18 +84,6 @@ async function stripNonRuntimeTestFiles(directory) {
   await walk(directory)
 }
 
-async function removePnpmRootLinks(appDirectory) {
-  const modules = join(appDirectory, 'node_modules')
-  // Keep runtime links into .pnpm: NSIS expands them into the installed tree.
-  // Remove only the workspace link, which points back into the source tree.
-  const workspaceLink = join(modules, '.pnpm', 'node_modules', '@hromadaaid', 'server')
-  const workspaceMetadata = await lstat(workspaceLink).catch(() => undefined)
-  if (workspaceMetadata?.isSymbolicLink()) await rm(workspaceLink, { force: true })
-  for (const item of ['.bin', '.modules.yaml', '.package-map.json']) {
-    await rm(join(modules, item), { recursive: true, force: true })
-  }
-}
-
 async function main() {
   const clientSource = join(release, 'win-unpacked')
   const serverSource = join(root, 'dist-package', 'server')
@@ -113,7 +102,6 @@ async function main() {
   await mkdir(join(serverTarget, 'installer'), { recursive: true })
   await cp(clientSource, clientTarget, { recursive: true })
   await cp(serverSource, join(serverTarget, 'app'), { recursive: true })
-  await removePnpmRootLinks(join(serverTarget, 'app'))
 
   const temporary = join(release, '.toolchain-' + process.pid)
   await mkdir(temporary, { recursive: false })
@@ -145,11 +133,11 @@ async function main() {
   await copyFile(join(root, 'packaging', 'verify-server-package.mjs'), join(serverTarget, 'installer', 'verify-server-package.mjs'))
   await copyFile(join(root, 'packaging', 'server-package-transaction.mjs'), join(serverTarget, 'installer', 'server-package-transaction.mjs'))
   await copyFile(join(root, 'packaging', 'windows-service-control.ps1'), join(serverTarget, 'installer', 'windows-service-control.ps1'))
-  await stripNonRuntimeTestFiles(join(serverTarget, 'app', 'node_modules', '.pnpm'))
+  await stripNonRuntimeTestFiles(join(serverTarget, 'app', 'node_modules'))
 
   const clientFiles = await assertPackage(clientTarget)
   const serverFiles = await assertPackage(serverTarget)
-  if (!serverFiles.includes('runtime/node.exe') || !serverFiles.includes('service/HromadaAIDService.exe') || !serverFiles.includes('service/HromadaAIDService.xml.template') || !serverFiles.includes('app/node_modules/.pnpm/argon2@0.45.1/node_modules/argon2/package.json')) {
+  if (!serverFiles.includes('runtime/node.exe') || !serverFiles.includes('service/HromadaAIDService.exe') || !serverFiles.includes('service/HromadaAIDService.xml.template') || !serverFiles.includes('app/node_modules/argon2/package.json') || !serverFiles.includes('app/node_modules/@phc/format/package.json')) {
     throw new Error('Серверний пакет не має повного runtime/WinSW набору.')
   }
   const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
@@ -159,6 +147,8 @@ async function main() {
     integrityFiles.push({ path: relativePath, sizeBytes: bytes.byteLength, sha256: hash(bytes) })
   }
   await writeFile(join(serverTarget, 'package-integrity.json'), JSON.stringify({ formatVersion: 1, files: integrityFiles }, null, 2) + '\n', 'utf8')
+  const runtimeCheck = verifyServerRuntime(serverTarget)
+  console.log('Production runtime перевірено: ' + runtimeCheck.nodeVersion + '; create-admin.js --status працює із синтетичною SQLite.')
   const completeServerFiles = await assertPackage(serverTarget)
   const sumBytes = async (directory, files) => (await Promise.all(files.map(path => stat(join(directory, ...path.split('/')))))).reduce((total, info) => total + info.size, 0)
   const clientBytes = await sumBytes(clientTarget, clientFiles)

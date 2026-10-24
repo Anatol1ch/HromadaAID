@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, rename, rm } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -18,6 +18,15 @@ async function copyRequired(source, target) {
   await cp(source, target, { recursive: true, errorOnExist: true, force: false })
 }
 
+async function assertNoLinks(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name)
+    const info = await lstat(path)
+    if (info.isSymbolicLink()) throw new Error('У production-залежностях залишилося зовнішнє посилання: ' + path)
+    if (info.isDirectory()) await assertNoLinks(path)
+  }
+}
+
 try {
   await mkdir(join(workspace, 'server'), { recursive: true })
   for (const file of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml']) {
@@ -26,17 +35,29 @@ try {
   await copyRequired(join(root, 'server', 'package.json'), join(workspace, 'server', 'package.json'))
   await copyRequired(join(root, 'server', 'dist'), join(workspace, 'server', 'dist'))
 
-  // `deploy` runs only inside a disposable workspace. It can create a production
-  // node_modules tree there, but never installs/removes dependencies in the repo.
+  // Install only server production dependencies in the disposable workspace.
+  // The hoisted linker creates a self-contained physical tree suitable for NSIS;
+  // frozen-lockfile keeps its transitive versions reproducible.
   if (process.platform === 'win32') {
-    const script = "$ErrorActionPreference='Stop'; $pnpm=(Get-Command pnpm.cmd -ErrorAction Stop).Source; & $pnpm '--filter' '@hromadaaid/server' 'deploy' '--prod' '--legacy' $env:HROMADAAID_SERVER_DEPLOY_TARGET; exit $LASTEXITCODE"
+    const script = "$ErrorActionPreference='Stop'; $pnpm=(Get-Command pnpm.cmd -ErrorAction Stop).Source; & $pnpm 'install' '--filter' '@hromadaaid/server' '--prod' '--config.node-linker=hoisted' '--frozen-lockfile'; exit $LASTEXITCODE"
     execFileSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
       cwd: workspace,
-      env: { ...process.env, HROMADAAID_SERVER_DEPLOY_TARGET: deployed },
       stdio: 'inherit',
     })
   } else {
-    execFileSync('pnpm', ['--filter', '@hromadaaid/server', 'deploy', '--prod', '--legacy', deployed], { cwd: workspace, stdio: 'inherit' })
+    execFileSync('pnpm', ['install', '--filter', '@hromadaaid/server', '--prod', '--config.node-linker=hoisted', '--frozen-lockfile'], { cwd: workspace, stdio: 'inherit' })
+  }
+
+  const workspaceModules = join(workspace, 'node_modules')
+  for (const entry of ['.bin', '.modules.yaml', '.package-map.json', '.pnpm', '.pnpm-workspace-state-v1.json']) {
+    await rm(join(workspaceModules, entry), { recursive: true, force: true })
+  }
+  await copyRequired(join(workspace, 'server'), deployed)
+  await copyRequired(workspaceModules, join(deployed, 'node_modules'))
+  await assertNoLinks(deployed)
+  for (const modulePath of ['argon2/package.json', '@phc/format/package.json', 'fastify/package.json']) {
+    try { await lstat(join(deployed, 'node_modules', ...modulePath.split('/'))) }
+    catch { throw new Error('У production-пакеті відсутня обов’язкова залежність: ' + modulePath) }
   }
 
   await mkdir(packageRoot, { recursive: true })
