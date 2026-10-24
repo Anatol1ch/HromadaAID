@@ -7,7 +7,7 @@ import { createFirstAdministrator } from './auth.js'
 import { openInstalledServerDatabase } from './database.js'
 import { maximumSupportedSchemaVersion } from '../../electron/database.js'
 
-type AdminInput = { username: string; password: string; confirmation: string }
+type AdminInput = { displayName: string; username: string; password: string; confirmation: string }
 
 function readArguments(args: string[]): { databasePath: string; mode: 'interactive' | 'installer' | 'status' } {
   if (args[0] === '--') args = args.slice(1)
@@ -42,14 +42,15 @@ async function readInstallerInput(): Promise<AdminInput> {
   try {
     const line = inputBytes.toString('utf8').split(/\r?\n/, 1)[0]
     value = JSON.parse(line) as Partial<AdminInput>
+    if (typeof value.displayName !== 'string' || !value.displayName.trim() || value.displayName.trim().length > 150) throw new Error('Вкажіть ім’я користувача (до 150 символів).')
     if (typeof value.username !== 'string' || typeof value.password !== 'string' || typeof value.confirmation !== 'string') throw new Error('Заповніть логін, пароль і підтвердження пароля.')
     if (value.password !== value.confirmation) throw new Error('Паролі не збігаються.')
-    return { username: value.username, password: value.password, confirmation: value.confirmation }
+    return { displayName: value.displayName.trim(), username: value.username, password: value.password, confirmation: value.confirmation }
   } catch (error) {
     if (error instanceof SyntaxError) throw new Error('Не вдалося прочитати введені дані адміністратора.')
     throw error
   } finally {
-    if (value) { value.password = ''; value.confirmation = ''; value.username = '' }
+    if (value) { value.password = ''; value.confirmation = ''; value.username = ''; value.displayName = '' }
     inputBytes.fill(0)
   }
 }
@@ -75,12 +76,12 @@ async function main(): Promise<void> {
       input = await readInstallerInput()
       const database = openInstalledServerDatabase(databasePath)
       try {
-        const result = await createFirstAdministrator(database, { username: input.username, password: input.password })
+        const result = await createFirstAdministrator(database, { displayName: input.displayName, username: input.username, password: input.password })
         if (!result.ok) throw new Error(result.message)
       } finally { database.close() }
       stdout.write('admin-created\n')
     } finally {
-      if (input) { input.password = ''; input.confirmation = ''; input.username = '' }
+      if (input) { input.password = ''; input.confirmation = ''; input.username = ''; input.displayName = '' }
     }
     return
   }
@@ -88,21 +89,25 @@ async function main(): Promise<void> {
   const readline = createInterface({ input: stdin, output: stdout })
   let password = ''
   let repeatPassword = ''
+  let displayName = ''
   try {
+    displayName = await readline.question('Ім’я першого адміністратора: ')
     const username = await readline.question('Логін першого адміністратора: ')
     readline.close()
+    if (!displayName.trim() || displayName.trim().length > 150) throw new Error('Вкажіть ім’я адміністратора (до 150 символів).')
     password = await readHiddenPassword('Пароль (від 8 до 256 символів): ')
     repeatPassword = await readHiddenPassword('Повторіть пароль: ')
     if (password !== repeatPassword) throw new Error('Паролі не збігаються.')
     const database = openInstalledServerDatabase(databasePath)
     try {
-      const result = await createFirstAdministrator(database, { username, password })
+      const result = await createFirstAdministrator(database, { displayName, username, password })
       if (!result.ok) throw new Error(result.message)
     } finally { database.close() }
     stdout.write('Початкового адміністратора створено.\n')
   } finally {
     password = ''
     repeatPassword = ''
+    displayName = ''
     readline.close()
   }
 }

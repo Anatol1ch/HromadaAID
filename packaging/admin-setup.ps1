@@ -14,7 +14,7 @@ function Invoke-FirstAdministratorForm {
   $form.FormBorderStyle = 'FixedDialog'
   $form.MaximizeBox = $false
   $form.MinimizeBox = $false
-  $form.ClientSize = [Drawing.Size]::new(470, 300)
+  $form.ClientSize = [Drawing.Size]::new(470, 342)
   $form.Font = [Drawing.Font]::new('Segoe UI', 9)
 
   $title = New-Object Windows.Forms.Label
@@ -25,7 +25,7 @@ function Invoke-FirstAdministratorForm {
   $note.Text = 'Ці дані потрібні для першого входу. Пароль не зберігатиметься в інсталяторі.'
   $note.Location = [Drawing.Point]::new(20, 48); $note.Size = [Drawing.Size]::new(430, 34)
   $controls = @{}
-  $rows = @(@('Логін адміністратора', 88, $false), @('Пароль (8–256 символів)', 133, $true), @('Підтвердження пароля', 178, $true))
+  $rows = @(@('Ім''я користувача', 86, $false), @('Логін адміністратора', 126, $false), @('Пароль (8–256 символів)', 166, $true), @('Підтвердження пароля', 206, $true))
   foreach ($row in $rows) {
     $label = New-Object Windows.Forms.Label
     $label.Text = $row[0]; $label.Location = [Drawing.Point]::new(20, [int]$row[1]); $label.Size = [Drawing.Size]::new(190, 24)
@@ -35,20 +35,21 @@ function Invoke-FirstAdministratorForm {
     $form.Controls.Add($label); $form.Controls.Add($box); $controls[$row[0]] = $box
   }
   $errorLabel = New-Object Windows.Forms.Label
-  $errorLabel.ForeColor = [Drawing.Color]::Firebrick; $errorLabel.Location = [Drawing.Point]::new(20, 212); $errorLabel.Size = [Drawing.Size]::new(430, 28)
+  $errorLabel.ForeColor = [Drawing.Color]::Firebrick; $errorLabel.Location = [Drawing.Point]::new(20, 240); $errorLabel.Size = [Drawing.Size]::new(430, 30)
   $submit = New-Object Windows.Forms.Button
-  $submit.Text = 'Створити адміністратора'; $submit.Location = [Drawing.Point]::new(255, 253); $submit.Size = [Drawing.Size]::new(193, 30); $submit.DialogResult = [Windows.Forms.DialogResult]::None
+  $submit.Text = 'Створити адміністратора'; $submit.Location = [Drawing.Point]::new(255, 292); $submit.Size = [Drawing.Size]::new(193, 30); $submit.DialogResult = [Windows.Forms.DialogResult]::None
   $cancel = New-Object Windows.Forms.Button
-  $cancel.Text = 'Скасувати'; $cancel.Location = [Drawing.Point]::new(150, 253); $cancel.Size = [Drawing.Size]::new(95, 30); $cancel.DialogResult = [Windows.Forms.DialogResult]::Cancel
+  $cancel.Text = 'Скасувати'; $cancel.Location = [Drawing.Point]::new(150, 292); $cancel.Size = [Drawing.Size]::new(95, 30); $cancel.DialogResult = [Windows.Forms.DialogResult]::Cancel
   $form.Controls.AddRange(@($title, $note, $errorLabel, $submit, $cancel))
   $form.AcceptButton = $submit; $form.CancelButton = $cancel
   $result = @{ Success = $false }
   $submit.Add_Click({
+    $displayName = [string]$controls["Ім'я користувача"].Text
     $username = [string]$controls['Логін адміністратора'].Text
     $password = [string]$controls['Пароль (8–256 символів)'].Text
     $confirmation = [string]$controls['Підтвердження пароля'].Text
     if ($password -cne $confirmation) { $errorLabel.Text = 'Паролі не збігаються.'; return }
-    if ([string]::IsNullOrWhiteSpace($username) -or $password.Length -lt 8 -or $password.Length -gt 256) { $errorLabel.Text = 'Перевірте логін і довжину пароля (8–256 символів).'; return }
+    if ([string]::IsNullOrWhiteSpace($displayName) -or $displayName.Trim().Length -gt 150 -or [string]::IsNullOrWhiteSpace($username) -or $password.Length -lt 8 -or $password.Length -gt 256) { $errorLabel.Text = 'Заповніть ім''я (до 150 символів), логін і пароль довжиною 8–256 символів.'; return }
     $submit.Enabled = $false
     $process = $null
     try {
@@ -63,10 +64,10 @@ function Invoke-FirstAdministratorForm {
       if (-not $process.Start()) { throw 'Не вдалося запустити перевірку адміністратора.' }
       $stdoutTask = $process.StandardOutput.ReadToEndAsync()
       $stderrTask = $process.StandardError.ReadToEndAsync()
-      $payload = ConvertTo-Json -InputObject @{ username = $username; password = $password; confirmation = $confirmation } -Compress
+      $payload = ConvertTo-Json -InputObject @{ displayName = $displayName.Trim(); username = $username; password = $password; confirmation = $confirmation } -Compress
       $process.StandardInput.WriteLine($payload)
       $process.StandardInput.Close()
-      $payload = $null; $password = ''; $confirmation = ''; $username = ''
+      $payload = $null; $password = ''; $confirmation = ''; $username = ''; $displayName = ''
       $controls['Пароль (8–256 символів)'].Clear(); $controls['Підтвердження пароля'].Clear()
       $process.WaitForExit()
       $outText = $stdoutTask.Result.Trim()
@@ -84,7 +85,7 @@ function Invoke-FirstAdministratorForm {
       $submit.Enabled = $true
     } finally {
       if ($process) { $process.Dispose() }
-      $password = ''; $confirmation = ''; $payload = $null
+      $password = ''; $confirmation = ''; $username = ''; $displayName = ''; $payload = $null
     }
   })
   $dialogResult = $form.ShowDialog()
