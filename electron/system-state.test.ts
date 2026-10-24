@@ -6,6 +6,9 @@ import { checkServerAddress } from './connection-config.js'
 
 test('system status distinguishes maintenance from connectivity and ordinary HTTP errors', () => {
   assert.equal(classifyHealthResponse(200, { status: 'ok', service: 'hromada-aid-api' }), 'available')
+  assert.equal(classifyHealthResponse(200, { status: 'ok', service: 'hromada-aid-api', apiContractVersion: 1 }), 'available')
+  assert.equal(classifyHealthFailure(200, { status: 'ok', service: 'hromada-aid-api', apiContractVersion: 2 }), 'incompatible')
+  assert.equal(classifyHealthFailure(200, { status: 'ok', service: 'hromada-aid-api', apiContractVersion: null }), 'incompatible')
   assert.equal(classifyHealthResponse(503, { code: RESTORE_MAINTENANCE_CODE, message: 'Сервер у режимі відновлення.' }), 'maintenance')
   assert.equal(classifyHealthResponse(503, { message: 'Інша помилка сервера.' }), 'unavailable')
   assert.equal(classifyHealthFailure(500, { message: 'failure' }), 'http')

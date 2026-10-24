@@ -55,8 +55,13 @@ export function verifyServerRuntime(packageRoot, options = {}) {
     const record = status.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1)
     let result
     try { result = JSON.parse(record ?? '') } catch { throw new Error('create-admin.js --status повернув некоректний результат у production payload.') }
-    if (result.users !== 0 || !Number.isInteger(result.schemaVersion)) throw new Error('create-admin.js --status повернув неочікуваний стан синтетичної бази.')
-    return { nodeVersion: runChecked(node, ['--version'], appDirectory, 'Не вдалося визначити версію комплектного Node.js').stdout.trim(), users: result.users }
+    if (result.users !== 0 || !Number.isInteger(result.schemaVersion) || !Number.isInteger(result.maximumSupportedSchemaVersion) || result.maximumSupportedSchemaVersion < result.schemaVersion) throw new Error('create-admin.js --status повернув неочікуваний стан синтетичної бази.')
+    return {
+      nodeVersion: runChecked(node, ['--version'], appDirectory, 'Не вдалося визначити версію комплектного Node.js').stdout.trim(),
+      users: result.users,
+      schemaVersion: result.schemaVersion,
+      maximumSupportedSchemaVersion: result.maximumSupportedSchemaVersion,
+    }
   } finally {
     rmSync(tempDirectory, { recursive: true, force: true })
   }

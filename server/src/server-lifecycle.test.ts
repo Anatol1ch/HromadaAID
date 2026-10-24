@@ -164,7 +164,7 @@ test('server starts from absolute synthetic paths while CWD is unrelated, serves
     running = await startServer(config, true)
     const response = await fetch(`http://127.0.0.1:${address.port}/health`)
     assert.equal(response.status, 200)
-    assert.deepEqual(await response.json(), { status: 'ok', service: 'hromada-aid-api' })
+    assert.deepEqual(await response.json(), { status: 'ok', service: 'hromada-aid-api', apiContractVersion: 1 })
   } finally {
     if (changedWorkingDirectory) process.chdir(previousWorkingDirectory)
     await running?.stop('TEST')

@@ -2,10 +2,12 @@ import type { AddressParts } from './address.js'
 import type { AuthActionResult, ClientAuthState } from './auth-contract.js'
 import type { UserRole } from './authorization.js'
 import { ASSIGNMENT_STATUSES, type AssignmentStatus } from './assignment-model.js'
+import { HROMADAAID_API_CONTRACT_VERSION } from './api-compatibility.js'
 export type { AssignmentStatus } from './assignment-model.js'
+export { HROMADAAID_API_CONTRACT_VERSION } from './api-compatibility.js'
 
 export type ReportPdfKind = 'month' | 'quarter' | 'annual' | 'cumulative'
-export type HealthResponse = { status: 'ok'; service: 'hromada-aid-api' }
+export type HealthResponse = { status: 'ok'; service: 'hromada-aid-api'; apiContractVersion: typeof HROMADAAID_API_CONTRACT_VERSION }
 export type BankDetailInput = { id?: string; mfo: string; edrpou: string }
 export type BankInput = { name: string; details: BankDetailInput[] }
 export type BankDetail = { id: string; bankId: string; mfo: string; edrpou: string; recipientCount: number }

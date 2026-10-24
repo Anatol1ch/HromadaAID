@@ -1,3 +1,5 @@
+import { HROMADAAID_API_CONTRACT_VERSION } from './api-compatibility.js'
+
 export const RESTORE_MAINTENANCE_CODE = 'RESTORE_MAINTENANCE'
 
 export type ConnectionStatus = 'unknown' | 'checking' | 'available' | 'unavailable' | 'maintenance'
@@ -19,7 +21,8 @@ export function classifyHealthResponse(status: number, body: unknown): 'availabl
   if (isMaintenanceResponse(status, body)) return 'maintenance'
   if (status !== 200 || !body || typeof body !== 'object') return 'unavailable'
   const value = body as Record<string, unknown>
-  return value.status === 'ok' && value.service === 'hromada-aid-api' ? 'available' : 'unavailable'
+  const contractVersion = Object.hasOwn(value, 'apiContractVersion') ? value.apiContractVersion : HROMADAAID_API_CONTRACT_VERSION
+  return value.status === 'ok' && value.service === 'hromada-aid-api' && contractVersion === HROMADAAID_API_CONTRACT_VERSION ? 'available' : 'unavailable'
 }
 
 export function classifyHealthFailure(status: number, body: unknown): Exclude<ConnectionFailureReason, 'network' | 'timeout'> {

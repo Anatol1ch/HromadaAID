@@ -57,7 +57,7 @@ test('packaged runtime smoke test detects a missing scoped transitive dependency
     await writeFile(join(argon, 'index.js'), "const phc = require('@phc/format'); module.exports = { hash: async () => phc.value, verify: async hash => hash === phc.value }\n")
     await writeFile(join(fastify, 'package.json'), JSON.stringify({ main: 'index.js' }))
     await writeFile(join(fastify, 'index.js'), "module.exports = () => ({ get() {}, ready: async () => {}, close: async () => {} })\n")
-    await writeFile(join(app, 'dist', 'server', 'src', 'create-admin.js'), "console.log(JSON.stringify({users:0,schemaVersion:1}))\n")
+    await writeFile(join(app, 'dist', 'server', 'src', 'create-admin.js'), "console.log(JSON.stringify({users:0,schemaVersion:1,maximumSupportedSchemaVersion:28}))\n")
 
     assert.throws(() => verifyServerRuntime(root, { nodeExecutable: process.execPath }), /@phc\/format/)
     const phc = join(argon, 'node_modules', '@phc', 'format')

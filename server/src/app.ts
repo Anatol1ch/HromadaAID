@@ -19,6 +19,7 @@ import { changeAssignmentStatuses } from '../../electron/assignment-status.js'
 import { listStatementAssignments } from '../../electron/statement-list-data.js'
 import { readStatementRows } from '../../electron/statement-data.js'
 import { executeDeletion, isDeleteEntity, previewDeletion } from '../../electron/deletion-service.js'
+import { HROMADAAID_API_CONTRACT_VERSION } from '../../shared/api-compatibility.js'
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, BankSaveResult, CatalogList, DashboardData, DecisionRecord, DecisionSummary, HealthResponse, ProgramApproval, RecipientRecord, RecipientSaveResult, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from '../../shared/api-contract.js'
 import type { ChangePasswordInput, LoginInput } from '../../shared/auth-contract.js'
 import { hasPermission } from '../../shared/authorization.js'
@@ -93,7 +94,7 @@ export function createApp(database: DatabaseSync, backupArchives?: BackupArchive
 
   app.get('/health', async (): Promise<HealthResponse> => {
     database.prepare('SELECT 1 AS ready').get()
-    return { status: 'ok', service: 'hromada-aid-api' }
+    return { status: 'ok', service: 'hromada-aid-api', apiContractVersion: HROMADAAID_API_CONTRACT_VERSION }
   })
 
   installApiAuthorization(app, database)
