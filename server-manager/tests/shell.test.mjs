@@ -23,18 +23,24 @@ test('six synthetic scenarios keep service/API independent and provide safe oper
   assert.deepEqual(sections.map(section => section.id), ['overview', 'configuration', 'diagnostics', 'updates'])
 })
 
-test('production manager entry has no client, database, IPC, engine or process execution imports', () => {
+test('renderer remains isolated and main exposes only the read-only inspection engine', () => {
   const main = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8')
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   const contract = readFileSync(new URL('../../shared/installation-contract.ts', import.meta.url), 'utf8')
-  for (const text of [main, app, source, contract]) {
-    assert.doesNotMatch(text, /from ['"][^'"]*(?:node:sqlite|child_process|node:fs|server\/src|electron\/main|auth-session|http-client|backup-client)/)
-    assert.doesNotMatch(text, /\b(?:fetch|execFile|spawn|ipcMain|ipcRenderer)\s*[.(]/)
-  }
+  for (const text of [main, app, source, contract]) assert.doesNotMatch(text, /from ['"][^'"]*(?:node:sqlite|server\/src|electron\/main|auth-session|http-client|backup-client)/)
+  assert.doesNotMatch(app, /\b(?:fetch|execFile|spawn|ipcMain|ipcRenderer)\s*[.(]/)
+  assert.doesNotMatch(source, /\b(?:fetch|execFile|spawn|ipcMain|ipcRenderer)\s*[.(]/)
   assert.match(main, /nodeIntegration: false/)
   assert.match(main, /sandbox: true/)
   assert.match(main, /contextIsolation: true/)
-  assert.doesNotMatch(main, /preload:/)
+  assert.match(main, /preload:.*preload\.cjs/)
+  assert.match(main, /manager:inspect-environment/)
+  assert.match(main, /isTrustedRenderer/)
+  assert.doesNotMatch(main, /ipcMain\.handle\([^,]+,\s*\([^)]*\)\s*=>\s*[^)]*exec/i)
+  const preload = readFileSync(new URL('../electron/preload.cjs', import.meta.url), 'utf8')
+  assert.match(preload, /contextBridge\.exposeInMainWorld/)
+  assert.match(preload, /inspectEnvironment:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('manager:inspect-environment'\)/)
+  assert.doesNotMatch(preload, /send\(|execFile|spawn|require\((?!'electron'\))/)
   assert.match(main, /callback\(\{ cancel: !allowed \}\)/)
   assert.doesNotMatch(contract, /^import /m)
 })

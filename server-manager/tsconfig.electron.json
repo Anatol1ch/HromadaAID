@@ -7,7 +7,8 @@
     "outDir": "../dist-server-manager/main",
     "strict": true,
     "skipLibCheck": true,
+    "allowJs": true,
     "types": ["node", "electron"]
   },
-  "include": ["electron/main.ts"]
+  "include": ["electron/*.ts", "electron/*.cjs"]
 }

@@ -4,5 +4,5 @@
     "tsBuildInfoFile": "../node_modules/.tmp/server-manager.tsbuildinfo",
     "types": ["vite/client"]
   },
-  "include": ["src", "../shared/installation-contract.ts", "../src/components/Alert.tsx"]
+  "include": ["src", "electron/inspection-types.ts", "../shared/installation-contract.ts", "../src/components/Alert.tsx"]
 }

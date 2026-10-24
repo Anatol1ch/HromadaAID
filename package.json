@@ -7,9 +7,9 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "manager:dev": "node scripts/server-manager.mjs dev",
-    "manager:build": "tsc -p server-manager/tsconfig.json && tsc -p server-manager/tsconfig.electron.json && vite build --config server-manager/vite.config.ts",
+    "manager:build": "node scripts/clean-server-manager-main.mjs && tsc -p server-manager/tsconfig.json && tsc -p server-manager/tsconfig.electron.json && vite build --config server-manager/vite.config.ts",
     "manager:start": "pnpm manager:build && node scripts/server-manager.mjs start",
-    "manager:test": "pnpm manager:build && node --test server-manager/tests/shell.test.mjs && node scripts/server-manager.mjs smoke && node scripts/server-manager.mjs smoke-dev",
+    "manager:test": "pnpm manager:build && node --test server-manager/tests/shell.test.mjs server-manager/tests/inspection.test.mjs && node scripts/server-manager.mjs smoke && node scripts/server-manager.mjs smoke-dev",
     "build": "tsc -b && node scripts/clean-electron-build.mjs && tsc -p tsconfig.electron.json && node electron/copy-assets.mjs && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "server:dev": "pnpm server:build && concurrently -k \"pnpm exec tsc -p server/tsconfig.json --watch\" \"node --watch dist-server/server/src/index.js\"",

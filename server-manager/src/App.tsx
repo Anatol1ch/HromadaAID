@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Activity, ArrowRight, ChevronRight, CircleAlert, CircleCheck, Clock3, Cog, Download, FileText, Folder, HeartHandshake, House, Info, Package, RefreshCw, Server, Settings2, ShieldCheck, Wifi } from 'lucide-react'
 import Alert from '../../src/components/Alert'
 import { DEMO_CHECKED_AT, demoPaths, scenarioIds, scenarios, sections, type ScenarioId, type Section } from './demo'
+import type { InspectionSnapshot } from '../electron/inspection-types'
 
 const navIcons = { overview: House, configuration: Settings2, diagnostics: Activity, updates: Download }
 const headings = {
@@ -23,29 +24,123 @@ function Status({ children, tone, plain = false }: { children: ReactNode; tone: 
 }
 
 type DemoEvent = { id: string; time: string; title: string; detail: string; level: string; code: string }
-function EventTable({ events, compact = false }: { events: DemoEvent[]; compact?: boolean }) {
+function EventTable({ events, compact = false, caption = 'Демонстраційні діагностичні події' }: { events: DemoEvent[]; compact?: boolean; caption?: string }) {
   return <div className="sm-table-wrap"><table className="sm-events">
-    <caption className="visually-hidden">Демонстраційні діагностичні події</caption>
+    <caption className="visually-hidden">{caption}</caption>
     <thead><tr><th scope="col">Час</th><th scope="col">Рівень</th><th scope="col">Подія</th><th scope="col">Деталі</th></tr></thead>
     <tbody>{events.map(event => <tr key={event.id}>
       <td><time>{event.time}</time></td>
-      <td><Status tone={event.level}>{event.level === 'error' ? 'Помилка' : event.level === 'success' ? 'Успіх' : 'Інформація'}</Status></td>
+      <td><Status tone={event.level === 'success' || event.level === 'warning' || event.level === 'error' ? event.level : 'info'}>{event.level === 'error' ? 'Помилка' : event.level === 'success' ? 'Успіх' : event.level === 'warning' ? 'Увага' : 'Інформація'}</Status></td>
       <td>{event.title}</td>
       <td>{event.detail}{!compact && <details><summary>Технічні відомості</summary><dl className="sm-details"><div><dt>Код</dt><dd>{event.code}</dd></div><div><dt>Ідентифікатор</dt><dd>{event.id}</dd></div></dl></details>}</td>
     </tr>)}{events.length === 0 && <tr><td colSpan={4} className="sm-empty">У вибраному сценарії немає демонстраційних помилок.</td></tr>}</tbody>
   </table></div>
 }
 
+function realStatus(value: string): { label: string; tone: string } {
+  const states: Record<string, { label: string; tone: string }> = {
+    running: { label: 'Працює', tone: 'success' }, stopped: { label: 'Зупинена', tone: 'warning' }, other: { label: 'Проміжний стан', tone: 'warning' }, missing: { label: 'Не встановлена', tone: 'info' }, unknown: { label: 'Невідомо', tone: 'error' },
+    available: { label: 'Доступний', tone: 'success' }, unavailable: { label: 'Недоступний', tone: 'warning' }, invalid_response: { label: 'Некоректна відповідь', tone: 'error' }, not_configured: { label: 'Не визначено', tone: 'info' },
+    installed: { label: 'Встановлено', tone: 'success' }, not_installed: { label: 'Не встановлено', tone: 'info' }, partial_installation: { label: 'Частково встановлено', tone: 'warning' },
+    passed: { label: 'Успішно', tone: 'success' }, warning: { label: 'Увага', tone: 'warning' }, failed: { label: 'Помилка', tone: 'error' }, not_checked: { label: 'Не перевірено', tone: 'info' },
+  }
+  return states[value] ?? { label: 'Невідомо', tone: 'error' }
+}
+
+function RealContent({ section, inspection, checking, refresh, filter, setFilter }: { section: Section; inspection: InspectionSnapshot | null; checking: boolean; refresh: () => void; filter: 'all' | 'issues'; setFilter: (value: 'all' | 'issues') => void }) {
+  const snapshot = inspection
+  const install = realStatus(snapshot?.installation.status ?? 'unknown')
+  const service = realStatus(snapshot?.service.status ?? 'unknown')
+  const api = realStatus(snapshot?.api.status ?? 'unknown')
+  const checks = snapshot?.checks ?? []
+  const events: DemoEvent[] = checks.map(item => ({
+    id: item.id,
+    time: new Date(item.checkedAt).toLocaleString('uk-UA'),
+    title: item.title,
+    detail: item.message,
+    level: item.status === 'passed' ? 'success' : item.status === 'failed' ? 'error' : item.status === 'warning' ? 'warning' : 'info',
+    code: item.details ?? item.status,
+  }))
+  const value = (item: string | null | undefined, reason = 'Значення не знайдено у конфігурації служби.') => item ?? `Не визначено · ${reason}`
+  const config = snapshot?.configuration
+  const directoryRows = [
+    ['Каталог програми', config?.programDirectory ?? null, 'Визначено зі шляху WinSW-служби.'],
+    ['Каталог серверних даних', config?.dataDirectory ?? null, 'Каталог, що містить server.json.'],
+    ['Каталог резервних копій', config?.backupDirectory ?? null, 'Шлях із дозволеного поля server.json.'],
+  ] as const
+  const settings = [
+    ['Адреса API', config?.apiAddress ?? null], ['Порт', config?.port === null || config?.port === undefined ? null : String(config.port)],
+    ['Транспорт', config?.transport ?? null], ['Файл SQLite', config?.databasePath ?? null], ['Журнали WinSW', config?.logDirectory ?? null],
+    ['Обліковий запис служби', config?.serviceAccount ?? null], ['Тип запуску', config?.startMode ?? null],
+  ] as const
+  const overall = realStatus(snapshot?.installation.status ?? 'unknown')
+
+  if (section === 'overview') return <>
+    <section className="sm-health-summary" aria-labelledby="real-state-title">
+      <div className={`sm-scenario-notice sm-scenario-${overall.tone}`}><h2 id="real-state-title">{snapshot?.installation.message ?? (checking ? 'Перевіряється середовище Windows…' : 'Перевірку ще не запущено')}</h2><p>Перевірка читає стан служби, метадані інсталяції та стандартний health endpoint. Вміст SQLite і секрети не відкриваються.</p></div>
+      <div className="sm-state-grid">
+        <div className="sm-state-card"><span className="sm-card-icon"><Cog size={25} aria-hidden="true"/></span><div className="sm-state-content"><h3>Windows Service · HromadaAIDApi</h3><Status tone={service.tone} plain>{service.label}</Status><p>{snapshot?.service.message ?? 'Очікується перевірка диспетчера служб.'}</p></div></div>
+        <div className="sm-state-card"><span className="sm-card-icon"><Wifi size={25} aria-hidden="true"/></span><div className="sm-state-content"><h3>Health endpoint API</h3><Status tone={api.tone} plain>{api.label}</Status><p>{snapshot?.api.message ?? 'Адреса буде визначена з конфігурації служби.'}</p></div></div>
+        <div className="sm-state-card"><span className="sm-card-icon"><Package size={25} aria-hidden="true"/></span><div className="sm-state-content"><h3>Серверний пакет</h3><strong>{config?.serverVersion ?? 'Не визначено'}</strong><p>{snapshot?.installation.status === 'installed' ? 'Версія прочитана з app/package.json.' : 'Фактичну версію пакета не підтверджено.'}</p></div></div>
+      </div>
+      <div className="sm-health-footer"><span><Clock3 size={16} aria-hidden="true"/>Остання перевірка: {snapshot ? new Date(snapshot.checkedAt).toLocaleString('uk-UA') : 'Не виконувалась'}</span><Status tone={overall.tone}>{install.label}</Status></div>
+    </section>
+    <div className="sm-two-columns">
+      <Panel title="Виявлена конфігурація" icon={<Settings2 size={21} aria-hidden="true"/>} action={<span className="sm-readonly-label">Лише читання</span>}><dl className="sm-details sm-summary-rows">{([['Адреса API', config?.apiAddress ?? null], ...directoryRows.map(([label, path]) => [label, path] as const)] as const).map(([label, item]) => <div key={label}><dt>{label}</dt><dd>{item ?? 'Не визначено'}</dd></div>)}</dl></Panel>
+      <Panel title="Серверний пакет" icon={<Download size={21} aria-hidden="true"/>} action={<span className="sm-readonly-label">Без оновлень</span>}><p className="sm-card-lead">Встановлена версія</p><strong className="sm-real-version">{config?.serverVersion ?? 'Не визначено'}</strong><p className="sm-card-note">Перевірку GitHub Releases і встановлення оновлень не виконано.</p><p className="sm-card-note">API health contract: {snapshot?.api.contractVersion ?? 'Не отримано'}.</p></Panel>
+    </div>
+    <Panel title="Результати останньої перевірки" icon={<Activity size={21} aria-hidden="true"/>}><EventTable events={events.slice(0, 3)} compact caption="Останні результати перевірки серверного середовища"/></Panel>
+  </>
+
+  if (section === 'configuration') return <>
+    <Panel title="Виявлені каталоги" icon={<Folder size={21} aria-hidden="true"/>} action={<span className="sm-readonly-label">Лише читання</span>}><dl className="sm-directory-list">{directoryRows.map(([label, path, hint]) => <div key={label}><span className="sm-card-icon"><Folder size={21} aria-hidden="true"/></span><div><dt>{label}</dt><small>{hint}</small></div><dd>{value(path)}</dd></div>)}</dl></Panel>
+    <Panel title="Параметри сервера" icon={<Settings2 size={21} aria-hidden="true"/>} action={<span className="sm-readonly-label">Лише читання</span>}><dl className="sm-details sm-setting-rows">{settings.map(([label, item]) => <div key={label}><dt>{label}</dt><dd>{value(item)}</dd></div>)}</dl></Panel>
+    <Alert variant="info">Показано лише дозволені технічні метадані. Файли SQLite, резервні копії, приватні ключі та секрети не читаються.</Alert>
+  </>
+
+  if (section === 'diagnostics') return <>
+    <Panel title="Остання перевірка середовища" icon={<Activity size={21} aria-hidden="true"/>} action={<Status tone={overall.tone}>{install.label}</Status>}>
+      <p className="sm-operation-message"><Info size={19} aria-hidden="true"/>{snapshot?.installation.message ?? 'Очікується запуск перевірки.'}</p>
+      <dl className="sm-details sm-operation-grid"><div><dt>Час</dt><dd>{snapshot ? new Date(snapshot.checkedAt).toLocaleString('uk-UA') : 'Не перевірено'}</dd></div><div><dt>Служба</dt><dd>{snapshot?.configuration.serviceName ?? 'HromadaAIDApi'}</dd></div><div><dt>Обліковий запис</dt><dd>{value(config?.serviceAccount)}</dd></div><div><dt>Версія сервера</dt><dd>{value(config?.serverVersion)}</dd></div></dl>
+      <div className="sm-future-action"><button className="secondary-button" type="button" onClick={refresh} disabled={checking}><RefreshCw size={16} aria-hidden="true"/>{checking ? 'Перевірка…' : 'Запустити перевірку'}</button><span>Лише читання; системні налаштування не змінюються.</span></div>
+    </Panel>
+    <Panel title="Структуровані результати" icon={<Clock3 size={21} aria-hidden="true"/>} action={<label className="sm-filter">Показати<select value={filter} onChange={event => setFilter(event.target.value as 'all' | 'issues')}><option value="all">Усі перевірки</option><option value="issues">Проблеми й застереження</option></select></label>}><EventTable events={events.filter((_event, index) => filter === 'all' || snapshot?.checks[index]?.status === 'failed' || snapshot?.checks[index]?.status === 'warning' || snapshot?.checks[index]?.status === 'unknown')} caption="Структуровані результати перевірок Windows та API"/></Panel>
+  </>
+
+  return <>
+    <Panel title="Встановлений серверний пакет" icon={<Package size={21} aria-hidden="true"/>} action={<Status tone={install.tone}>{install.label}</Status>}>
+      <div className="sm-update-versions"><div><span>Фактична встановлена версія</span><strong>{config?.serverVersion ?? 'Не визначено'}</strong></div><span className="sm-update-arrow"><ArrowRight size={23} aria-hidden="true"/></span><div><span>Версія API health contract</span><strong>{snapshot?.api.contractVersion ?? 'Не визначено'}</strong></div></div>
+      <dl className="sm-details sm-summary-rows"><div><dt>Стан Windows Service</dt><dd>{service.label}</dd></div><div><dt>Доступність API</dt><dd>{api.label}</dd></div></dl>
+    </Panel>
+    <Alert variant="info">Перевірка GitHub Releases, завантаження пакетів і встановлення оновлень ще не реалізовані.</Alert>
+  </>
+}
+
 export default function App() {
   const [section, setSection] = useState<Section>('overview')
+  const [mode, setMode] = useState<'real' | 'demo'>('real')
   const [scenarioId, setScenarioId] = useState<ScenarioId>('running')
   const [checkedAt, setCheckedAt] = useState(DEMO_CHECKED_AT)
+  const [inspection, setInspection] = useState<InspectionSnapshot | null>(null)
+  const [checking, setChecking] = useState(false)
   const [filter, setFilter] = useState<'all' | 'issues'>('all')
   const [notice, setNotice] = useState('')
   const heading = useRef<HTMLHeadingElement>(null)
   const previousSection = useRef(section)
   const scenario = scenarios[scenarioId]
   const operation = scenario.operation
+  const isDevelopment = import.meta.env.DEV
+  const inspectReal = useCallback(async () => {
+    setChecking(true)
+    setNotice('')
+    try {
+      const result = await window.hromadaManager.inspectEnvironment()
+      setInspection(result)
+    } catch {
+      setInspection(null)
+      setNotice('Не вдалося запустити перевірку Server Manager. Перезапустіть програму та повторіть спробу.')
+    } finally { setChecking(false) }
+  }, [])
   useEffect(() => {
     if (previousSection.current !== section) heading.current?.focus()
     previousSection.current = section
@@ -64,22 +159,23 @@ export default function App() {
     setNotice('Демонстраційний результат оновлено локально. Запитів до служби чи API не виконано.')
   }
   const viewButton = (target: Section, label = 'Переглянути') => <button className="sm-view-button" type="button" onClick={() => setSection(target)}>{label}<ArrowRight size={16} aria-hidden="true"/></button>
-  const scenarioPicker = <div className="sm-scenario"><label htmlFor="demo-scenario">Демонстраційний стан</label><select id="demo-scenario" value={scenarioId} onChange={event => { setScenarioId(event.target.value as ScenarioId); setCheckedAt(DEMO_CHECKED_AT); setNotice('') }}>{scenarioIds.map(id => <option key={id} value={id}>{scenarios[id].label}</option>)}</select></div>
+  const scenarioPicker = isDevelopment && mode === 'demo' && <div className="sm-scenario"><label htmlFor="demo-scenario">Демонстраційний стан</label><select id="demo-scenario" value={scenarioId} onChange={event => { setScenarioId(event.target.value as ScenarioId); setCheckedAt(DEMO_CHECKED_AT); setNotice('') }}>{scenarioIds.map(id => <option key={id} value={id}>{scenarios[id].label}</option>)}</select></div>
 
   return <div className="sm-app">
     <a className="sm-skip" href="#manager-content">Перейти до вмісту</a>
     <aside className="sm-sidebar">
       <div className="sm-brand"><span className="sm-brand-mark"><HeartHandshake size={25} aria-hidden="true"/></span><div><strong>Hromada<span>AID</span></strong><small>Server Manager</small></div></div>
       <nav aria-label="Розділи Server Manager">{sections.map(item => { const Icon = navIcons[item.id]; return <button key={item.id} type="button" aria-current={section === item.id ? 'page' : undefined} onClick={() => setSection(item.id)}><Icon size={19} aria-hidden="true"/>{item.label}</button> })}</nav>
-      <div className="sm-sidebar-footer"><ShieldCheck size={20} aria-hidden="true"/><div><strong>Ізольована оболонка</strong><span>Лише демонстраційні дані</span></div></div>
+      <div className="sm-sidebar-footer"><ShieldCheck size={20} aria-hidden="true"/><div><strong>{mode === 'real' ? 'Режим лише читання' : 'Демонстраційні дані'}</strong><span>{mode === 'real' ? 'Без системних змін' : 'Стан можна перемикати'}</span></div></div>
     </aside>
     <div className="sm-workspace">
-      <header className="sm-topbar"><div><strong>HromadaAID Server Manager</strong><span>Керування серверною службою та технічна діагностика</span></div><div className="sm-topbar-meta"><span className="sm-version">Версія {__MANAGER_VERSION__}</span><Status tone="success">Демонстраційний режим</Status></div></header>
+      <header className="sm-topbar"><div><strong>HromadaAID Server Manager</strong><span>Керування серверною службою та технічна діагностика</span></div><div className="sm-topbar-meta"><span className="sm-version">Версія {__MANAGER_VERSION__}</span><Status tone={mode === 'real' ? 'success' : 'info'}>{mode === 'real' ? 'Реальний стан' : 'Демонстраційний режим'}</Status>{isDevelopment && <button className="sm-mode-toggle" type="button" onClick={() => { setMode(current => current === 'real' ? 'demo' : 'real'); setNotice('') }}>{mode === 'real' ? 'Показати демо' : 'Повернути реальний стан'}</button>}</div></header>
       <main id="manager-content" className="sm-main" tabIndex={-1}>
-        <div className="sm-demo-banner"><Info size={17} aria-hidden="true"/><span><strong>Демонстраційний режим.</strong> Усі стани, шляхи й події тестові. Системні операції недоступні.</span></div>
-        <div className="sm-page-heading"><div><h1 ref={heading} tabIndex={-1}>{headings[section][0]}</h1><p>{headings[section][1]}</p></div><div className="sm-heading-controls">{scenarioPicker}{section === 'overview' && <button className="secondary-button" type="button" onClick={inspect}><RefreshCw size={16} aria-hidden="true"/>Демоперевірка</button>}</div></div>
+        {mode === 'demo' ? <div className="sm-demo-banner"><Info size={17} aria-hidden="true"/><span><strong>Демонстраційний режим.</strong> Усі стани, шляхи й події тестові. Системні операції недоступні.</span></div> : <div className="sm-demo-banner sm-real-banner"><ShieldCheck size={17} aria-hidden="true"/><span><strong>Реальний стан системи.</strong> Перевірка лише читає метадані Windows і конфігурації та виконує запит до налаштованого health endpoint. Робочі дані не відкриваються.</span></div>}
+        <div className="sm-page-heading"><div><h1 ref={heading} tabIndex={-1}>{headings[section][0]}</h1><p>{headings[section][1]}</p></div><div className="sm-heading-controls">{scenarioPicker}{section === 'overview' && (mode === 'demo' ? <button className="secondary-button" type="button" onClick={inspect}><RefreshCw size={16} aria-hidden="true"/>Демоперевірка</button> : <button className="secondary-button" type="button" onClick={() => void inspectReal()} disabled={checking}><RefreshCw size={16} aria-hidden="true"/>{checking ? 'Перевірка…' : 'Перевірити зараз'}</button>)}</div></div>
         {notice && <p className="sm-local-notice" role="status">{notice}</p>}
 
+        {mode === 'real' ? <RealContent section={section} inspection={inspection} checking={checking} refresh={() => void inspectReal()} filter={filter} setFilter={setFilter}/> : <>
         {section === 'overview' && <>
           <section className="sm-health-summary" aria-labelledby="server-state-title">
             <div className={scenarioId === 'running' ? 'visually-hidden' : `sm-scenario-notice sm-scenario-${scenario.tone}`}><h2 id="server-state-title">{scenario.title}</h2><p>{scenario.message}</p></div>
@@ -122,6 +218,7 @@ export default function App() {
           </Panel>
           <Alert variant="warning">Приклад майбутнього оновлення. Перевірка релізів, завантаження та встановлення не виконуються.</Alert>
           <Panel title="Як працюватиме оновлення" icon={<ShieldCheck size={21} aria-hidden="true"/>}><ol className="sm-update-steps"><li><span>1</span><div><strong>Перевірка пакета та сумісності</strong><p>Перевірка підпису й підтримуваної схеми SQLite.</p></div></li><li><span>2</span><div><strong>Підтвердження адміністратора</strong><p>Застосування після явного підтвердження.</p></div></li><li><span>3</span><div><strong>Контрольоване оновлення файлів</strong><p>Зупинення служби та заміна серверного пакета.</p></div></li><li><span>4</span><div><strong>Перевірка працездатності</strong><p>Запуск служби та перевірка доступності API.</p></div></li></ol><p className="sm-muted">Дані, ключі й резервні копії зберігаються незалежно від виконуваних файлів. Суми SHA-256 самі по собі не підтверджують походження пакета. Оновлення клієнта керується в самому клієнті.</p></Panel>
+        </>}
         </>}
       </main>
     </div>
