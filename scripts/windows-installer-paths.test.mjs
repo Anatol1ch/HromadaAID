@@ -100,7 +100,9 @@ test('NSIS registers and verifies the LocalService WinSW wrapper, preserves user
   assert.match(installer, /function Grant-LocalServiceConfigRead[\s\S]*?\*S-1-5-19:\(X\)[\s\S]*?\*S-1-5-19:R/)
   assert.match(installer, /\$script:serviceSid = Get-ServiceSid \$serviceName/)
   assert.match(installer, /Register-Service \$wrapper\s+Set-InstallStage 'grant-service-acl'\s+Configure-ServiceAccess[\s\S]*?Set-InstallStage 'start-service'/)
+  assert.match(installer, /Configure-ServiceAccess\s+\$settings = Get-Content[\s\S]*?Set-InstallStage 'verify-service-acl'\s+Assert-ServiceAccess\s+Set-InstallStage 'start-service'/)
   assert.match(installer, /function Configure-ServiceAccess\s*\{[\s\S]*?Protect-ServiceFile \$config\s+Grant-LocalServiceConfigRead/)
+  for (const read of installer.matchAll(/Get-Content[^\r\n|]+/g)) assert.match(read[0], /-Encoding UTF8/, 'Node-generated installation JSON is UTF-8, not the Windows PowerShell 5.1 default ANSI')
   assert.doesNotMatch(installer, /SYSTEM:|BUILTIN\\Administrators:|NT SERVICE\\HromadaAIDApi:/)
   assert.match(installer, /\*S-1-5-18/)
   assert.match(installer, /\*S-1-5-32-544/)
@@ -123,22 +125,26 @@ test('NSIS registers and verifies the LocalService WinSW wrapper, preserves user
   assert.match(installer, /& \$scPath showsid \$Name/)
   assert.match(installer, /function Configure-ServiceAccess[\s\S]*?Protect-ServiceFile \$config/)
   assert.match(installer, /Restore-Acls[\s\S]*?Register-Service \$oldWrapper/)
-  assert.doesNotMatch(installer, /LocalSystem|Everyone:|S-1-1-0/)
+  assert.doesNotMatch(installer, /LocalSystem|Everyone:|\*S-1-1-0:/)
   assert.match(script, /-Action uninstall/)
   assert.match(serviceControl, /\$Action -eq 'uninstall'/)
   assert.doesNotMatch(script, /RMDir\s+\/r\s+"\$DataDirectory|RMDir\s+\/r\s+"\$BackupDirectory/)
 })
 
-test('installer ACL rules use SIDs and actual icacls on isolated Unicode paths', { skip: process.platform !== 'win32' }, async () => {
+test('final configuration ACL lifecycle preserves synchronous reads, blocks writes and validates before service start', { skip: process.platform !== 'win32' }, async () => {
   const installer = await readFile(new URL('../packaging/install-server-service.ps1', import.meta.url), 'utf8')
   const invokeChecked = installer.match(/function Invoke-Checked\([\s\S]*?(?=\r?\nfunction Test-AbsoluteLocalPath)/)?.[0]
   const getServiceSid = installer.match(/function Get-ServiceSid\([\s\S]*?(?=\r?\nfunction Save-Acl)/)?.[0]
+  const snapshots = installer.match(/function Save-Acl\([\s\S]*?(?=\r?\nfunction Set-AclChecked)/)?.[0]
   const aclFunctions = installer.match(/function Set-AclChecked\([\s\S]*?(?=\r?\nfunction Invoke-PackageTransaction)/)?.[0]
   assert.ok(invokeChecked && getServiceSid && aclFunctions, 'extract the actual installer ACL functions')
 
   const root = mkdtempSync(join(tmpdir(), 'HromadaAID ACL test '))
   const harness = join(root, 'test-acls.ps1')
   const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  // Use the real preparation step before applying the real installer ACL functions.
+  const prepared = prepareServerInstall({ mode: 'server', programDirectory: join(root, 'Program Files'), dataDirectory: join(root, 'Дані HromadaAID'), backupDirectory: join(root, 'Резервні копії') })
+  const configBefore = readFileSync(prepared.configPath, 'utf8')
   const script = [
     "$ErrorActionPreference = 'Stop'",
     'try {',
@@ -147,40 +153,65 @@ test('installer ACL rules use SIDs and actual icacls on isolated Unicode paths',
     "if ($script:serviceSid -notmatch '^S-1-5-80-(?:\\d+-){4}\\d+$') { throw 'Invalid service SID returned by sc.exe.' }",
     "$data = Join-Path $Root 'Дані HromadaAID'",
     '$DataDirectory = $data',
-    "$database = Join-Path $data 'База даних'",
-    "$logs = Join-Path $data 'Журнали'",
+    "$database = Join-Path $data 'Database'",
+    "$logs = Join-Path $data 'Logs'",
     "$backups = Join-Path $Root 'Резервні копії'",
     "$program = Join-Path $Root 'Program Files\\Server'",
-    'foreach ($path in @($data, $database, $logs, $backups, $program)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }',
-    "$config = Join-Path $data 'server.json'; [IO.File]::WriteAllText($config, '{}')",
+    '$databaseRoot = $database; $BackupDirectory = $backups; $activeServer = $program',
+    "$config = Join-Path $data 'server.json'; $settings = Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json",
+    '$configBefore = [IO.File]::ReadAllText($config)',
     "$key = Join-Path $backups '.synthetic-dpapi'; [IO.File]::WriteAllText($key, 'synthetic')",
+    "$databaseMarker = [string]$settings.databasePath; [IO.File]::WriteAllText($databaseMarker, 'synthetic database marker')",
+    '$aclSnapshots = @{}; foreach ($path in @($data, $database, $logs, $backups, $program, $config, $key)) { Save-Acl $path }',
     "foreach ($path in @($data, $database, $logs, $backups, $program)) { Set-AclChecked $path @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F') }",
-    'Grant-ServiceAccess $data \'RX\' \'OI)(CI\'',
-    'Grant-ServiceAccess $database \'M\' \'OI)(CI\'',
-    'Grant-ServiceAccess $logs \'M\' \'OI)(CI\'',
-    'Grant-ServiceAccess $backups \'M\' \'OI)(CI\'',
-    'Grant-ServiceAccess $program \'RX\' \'OI)(CI\'',
     'Set-ReadOnlyServiceFile $config',
-    'Protect-ServiceFile $config',
     'Set-ReadOnlyServiceFile $key',
-    'Protect-ServiceFile $key',
-    'Grant-LocalServiceConfigRead',
+    'Configure-ServiceAccess',
+    'Assert-ServiceAccess',
     "foreach ($path in @($data, $database, $logs, $backups, $program, $config, $key)) { $acl = if ([IO.File]::Exists($path)) { [IO.File]::GetAccessControl($path) } else { [IO.Directory]::GetAccessControl($path) }; $sidRules = $acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]); $sids = @($sidRules | ForEach-Object { $_.IdentityReference.Value }); if ($sids -notcontains 'S-1-5-18' -or $sids -notcontains 'S-1-5-32-544' -or $sids -notcontains $script:serviceSid) { throw \"Missing expected SID ACL for [$path].\" }; if ($sids -contains 'S-1-5-32-545' -or $sids -contains 'S-1-1-0') { throw \"Unexpected Users/Everyone access on [$path].\" } }",
     "$configRules = ([IO.File]::GetAccessControl($config)).GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]); if (-not ($configRules | Where-Object { $_.IdentityReference.Value -eq $script:serviceSid -and $_.AccessControlType -eq 'Deny' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -ne 0 })) { throw 'Service write deny is missing from protected config.' }",
     "$localService = 'S-1-5-19'; $dataRules = ([IO.Directory]::GetAccessControl($data)).GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]); if (-not ($dataRules | Where-Object { $_.IdentityReference.Value -eq $localService -and $_.AccessControlType -eq 'Allow' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ExecuteFile) -ne 0 })) { throw 'LocalService traverse permission is missing on the data directory.' }",
     "if (-not ($configRules | Where-Object { $_.IdentityReference.Value -eq $localService -and $_.AccessControlType -eq 'Allow' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) -ne 0 })) { throw 'LocalService read permission is missing on server.json.' }",
     "$keyRules = ([IO.File]::GetAccessControl($key)).GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]); if ($keyRules | Where-Object { $_.IdentityReference.Value -eq $localService -and $_.AccessControlType -eq 'Allow' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) -ne 0 }) { throw 'LocalService received direct access to the protected key.' }",
+    // A missing Allow or a legacy Deny must prevent the simulated start immediately.
+    "Invoke-Checked \"$env:SystemRoot\\System32\\icacls.exe\" @($config, '/remove:g', '*S-1-5-19') 'Could not remove fixture allow.'",
+    "$started = $false; $blocked = $false; try { Assert-ServiceAccess; $started = $true } catch { $blocked = $_.Exception.Message -like '*SID S-1-5-19*' }; if ($started -or -not $blocked) { throw 'Missing LocalService allow did not prevent start.' }",
+    'Grant-LocalServiceConfigRead',
+    "Invoke-Checked \"$env:SystemRoot\\System32\\icacls.exe\" @($config, '/deny', (\"*$script:serviceSid`:(W,D)\")) 'Could not create legacy fixture deny.'",
+    "$started = $false; $blocked = $false; try { Assert-ServiceAccess; $started = $true } catch { $blocked = $_.Exception.Message -like 'ACL *' }; if ($started -or -not $blocked) { throw 'Legacy Synchronize deny did not prevent start despite LocalService allow.' }",
+    'Protect-ServiceFile $config; Assert-ServiceAccess',
+    // Reproduce the post-failure ACL reported in the VM, then safely reapply.
+    'Restore-Acls',
+    "$restored = (Get-Acl -LiteralPath $config).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]); if ($restored | Where-Object { $_.IdentityReference.Value -eq 'S-1-5-19' }) { throw 'Rollback did not restore the pre-install ACL.' }",
+    "foreach ($path in @($data, $database, $logs, $backups, $program)) { Set-AclChecked $path @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F') }",
+    'Set-ReadOnlyServiceFile $config; Set-ReadOnlyServiceFile $key; Configure-ServiceAccess; Assert-ServiceAccess',
+    "if ([IO.File]::ReadAllText($config) -cne $configBefore -or [IO.File]::ReadAllText($key) -cne 'synthetic' -or [IO.File]::ReadAllText($databaseMarker) -cne 'synthetic database marker') { throw 'Configuration, key or database fixture changed during retry.' }",
+    // Substitute the current token SID for the enabled service SID so Windows
+    // performs a real synchronous read/write access check without a real service.
+    '$script:serviceSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
+    "$probe = Join-Path $Root 'Синхронне читання.json'; [IO.File]::WriteAllText($probe, '{}')",
+    "Invoke-Checked \"$env:SystemRoot\\System32\\icacls.exe\" @($probe, '/deny', (\"*$script:serviceSid`:(W,D)\")) 'Could not reproduce legacy deny.'",
+    "$readBlocked = $false; try { [void][IO.File]::ReadAllText($probe) } catch [UnauthorizedAccessException] { $readBlocked = $true }; if (-not $readBlocked) { throw 'Legacy deny did not reproduce synchronous read failure.' }",
+    'Protect-ServiceFile $probe',
+    "if ([IO.File]::ReadAllText($probe) -cne '{}') { throw 'Protected file is not readable after replacing the legacy deny.' }",
+    "$writeBlocked = $false; try { [IO.File]::WriteAllText($probe, 'forbidden') } catch [UnauthorizedAccessException] { $writeBlocked = $true }; if (-not $writeBlocked) { throw 'The service token can modify a protected file.' }",
     "Write-Output 'PASS: SID ACLs applied with icacls and verified on temporary Unicode paths'",
     '} catch { [Console]::Error.WriteLine(($_ | Out-String)); $script:testFailure = $true } finally { & (Join-Path $env:SystemRoot \'System32\\icacls.exe\') $Root \'/reset\' \'/T\' \'/C\' 2>&1 | Out-Null }',
     'if ($script:testFailure) { exit 1 }',
   ].filter(Boolean).join('\r\n')
-  const wrapped = ['param([Parameter(Mandatory=$true)][string]$Root)', invokeChecked, getServiceSid, aclFunctions, script].join('\r\n')
+  const wrapped = ['param([Parameter(Mandatory=$true)][string]$Root)', invokeChecked, getServiceSid, snapshots, aclFunctions, script].join('\r\n')
 
   try {
     writeFileSync(harness, '\uFEFF' + wrapped, 'utf8')
-    const run = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', harness, '-Root', root], { windowsHide: true, encoding: 'utf8', timeout: 30_000 })
+    // Use Windows PowerShell's built-in modules, not modules inherited from a
+    // PowerShell 7 development shell (which can duplicate 5.1 type definitions).
+    const run = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', harness, '-Root', root], {
+      windowsHide: true, encoding: 'utf8', timeout: 30_000,
+      env: { ...process.env, PSModulePath: join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'Modules') },
+    })
     assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`)
     assert.match(run.stdout, /PASS: SID ACLs applied with icacls/)
+    assert.equal(readFileSync(prepared.configPath, 'utf8'), configBefore)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 

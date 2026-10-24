@@ -128,7 +128,10 @@ function Grant-ServiceAccess([string]$Path, [string]$Permissions, [string]$Inher
 function Protect-ServiceFile([string]$Path) {
   Grant-ServiceAccess $Path 'R'
   $servicePrincipal = "*$script:serviceSid"
-  Invoke-Checked "$env:SystemRoot\System32\icacls.exe" @($Path, '/deny', "$servicePrincipal`:(W,D)") 'Не вдалося захистити конфігураційний файл від змін службою.'
+  # Replace our legacy deny ACE: icacls W also denies SYNCHRONIZE and breaks
+  # synchronous reads, even when LocalService or the service SID has Allow R.
+  Invoke-Checked "$env:SystemRoot\System32\icacls.exe" @($Path, '/remove:d', $servicePrincipal) 'Не вдалося оновити захист конфігураційного файла служби.'
+  Invoke-Checked "$env:SystemRoot\System32\icacls.exe" @($Path, '/deny', "$servicePrincipal`:(WD,AD,WEA,WA,DE)") 'Не вдалося захистити конфігураційний файл від змін службою.'
 }
 function Grant-LocalServiceConfigRead {
   # LocalService needs to traverse the data directory and read the non-secret
@@ -153,6 +156,38 @@ function Configure-ServiceAccess {
     if ([IO.File]::Exists($tlsPrivateKey)) { Protect-ServiceFile $tlsPrivateKey }
   }
   if ([IO.File]::Exists($key)) { Protect-ServiceFile $key }
+}
+function Assert-ServiceAcl([string]$Path, [string]$Sid, [Security.AccessControl.FileSystemRights]$Rights) {
+  # Check both identities present in the service token. An Allow ACE for one
+  # cannot override a conflicting Deny for the other (or a common service group).
+  $tokenSids = @('S-1-5-19', $script:serviceSid, 'S-1-1-0', 'S-1-5-11', 'S-1-5-6')
+  $rules = (Get-Acl -LiteralPath $Path -ErrorAction Stop).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])
+  $granted = 0L
+  $denied = 0L
+  foreach ($rule in $rules) {
+    if (($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0) { continue }
+    $identity = $rule.IdentityReference.Value
+    if ($rule.AccessControlType -eq 'Allow' -and $identity -eq $Sid) { $granted = $granted -bor [long]$rule.FileSystemRights }
+    if ($rule.AccessControlType -eq 'Deny' -and $tokenSids -contains $identity) { $denied = $denied -bor [long]$rule.FileSystemRights }
+  }
+  $required = [long]$Rights
+  if (($denied -band $required) -ne 0) { throw "ACL забороняє необхідні права служби до '$Path' (SID $Sid). Запуск служби скасовано." }
+  if (($granted -band $required) -ne $required) { throw "Не підтверджено необхідні права служби до '$Path' (SID $Sid). Запуск служби скасовано." }
+}
+function Assert-ServiceAccess {
+  $read = [Security.AccessControl.FileSystemRights]::Read -bor [Security.AccessControl.FileSystemRights]::Synchronize
+  $execute = [Security.AccessControl.FileSystemRights]::ReadAndExecute -bor [Security.AccessControl.FileSystemRights]::Synchronize
+  $modify = [Security.AccessControl.FileSystemRights]::Modify -bor [Security.AccessControl.FileSystemRights]::Synchronize
+  Assert-ServiceAcl $DataDirectory 'S-1-5-19' ([Security.AccessControl.FileSystemRights]::Traverse)
+  Assert-ServiceAcl $DataDirectory $script:serviceSid $execute
+  Assert-ServiceAcl $config 'S-1-5-19' $read
+  Assert-ServiceAcl $config $script:serviceSid $read
+  foreach ($path in @($databaseRoot, (Join-Path $DataDirectory 'Logs'), $BackupDirectory)) { Assert-ServiceAcl $path $script:serviceSid $modify }
+  Assert-ServiceAcl ([string]$settings.databasePath) $script:serviceSid $modify
+  Assert-ServiceAcl $activeServer $script:serviceSid $execute
+  $protectedFiles = @($key)
+  if ($settings.tls) { $protectedFiles += @([string]$settings.tls.certificatePath, [string]$settings.tls.privateKeyPath) }
+  foreach ($path in $protectedFiles) { Assert-ServiceAcl $path $script:serviceSid $read }
 }
 function Invoke-PackageTransaction([string]$PackageRoot, [string]$Action, [string[]]$AdditionalArguments = @()) {
   $node = Join-Path $PackageRoot 'runtime\node.exe'
@@ -268,7 +303,7 @@ try {
   if ($exitCode -ne 0) { $script:LastChildExitCode = $exitCode; throw 'Новий серверний пакет неповний або пошкоджений; встановлену версію не перемикали.' }
   $script:LastChildExitCode = $null
   if ([IO.File]::Exists($journalPath)) {
-    try { $priorJournal = Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json }
+    try { $priorJournal = Get-Content -LiteralPath $journalPath -Raw -Encoding UTF8 | ConvertFrom-Json }
     catch { throw 'Журнал попереднього встановлення пошкоджений; автоматичне оновлення зупинено.' }
     $serviceExists = $null -ne (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)
     if ($priorJournal.phase -eq 'initial-install-needs-review' -and -not $priorJournal.hadPreviousPackage -and -not $serviceExists -and -not [IO.Directory]::Exists($previousServer)) {
@@ -282,7 +317,7 @@ try {
 
   Set-InstallStage 'validate-resume-state'
   Set-InstallStage 'validate-configuration-and-existing-data'
-  $settings = Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
+  $settings = Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json
   if ($settings.configVersion -notin @(1, 2)) { throw 'Версія server.json несумісна із встановленою версією HromadaAID.' }
   $database = [IO.Path]::GetFullPath([string]$settings.databasePath)
   if ([IO.Path]::GetFullPath([string]$settings.backupDirectory) -ine [IO.Path]::GetFullPath($BackupDirectory)) { throw 'Каталог резервних копій не відповідає server.json.' }
@@ -327,7 +362,7 @@ try {
   if (-not $databaseExists -and -not $keyExists) {
     if ($hasArchives) { throw 'У каталозі резервних копій уже є архіви. Чисту ініціалізацію зупинено.' }
     if ([IO.File]::Exists($pendingAdminPath)) {
-      try { $pending = Get-Content -LiteralPath $pendingAdminPath -Raw | ConvertFrom-Json }
+      try { $pending = Get-Content -LiteralPath $pendingAdminPath -Raw -Encoding UTF8 | ConvertFrom-Json }
       catch { throw 'Маркер незавершеного першого налаштування пошкоджений; наявні дані збережено.' }
       if ($pending.formatVersion -ne 1 -or [IO.Path]::GetFullPath([string]$pending.databasePath) -ine $database) { throw 'Маркер першого налаштування належить іншій базі; наявні дані збережено.' }
     } else {
@@ -360,7 +395,7 @@ try {
   if ($hadOldPackage -and [int]$databaseStatus.schemaVersion -gt $oldSchemaMaximum) { throw 'Попередній пакет не підтримує поточну версію SQLite. Оновлення з автоматичним відкатом небезпечне й зупинене.' }
   $pendingExists = [IO.File]::Exists($pendingAdminPath)
   if ($pendingExists) {
-    try { $pending = Get-Content -LiteralPath $pendingAdminPath -Raw | ConvertFrom-Json }
+    try { $pending = Get-Content -LiteralPath $pendingAdminPath -Raw -Encoding UTF8 | ConvertFrom-Json }
     catch { throw 'Маркер незавершеного першого налаштування пошкоджений; автоматичне створення облікового запису зупинено.' }
     if ([IO.Path]::GetFullPath([string]$pending.databasePath) -ine $database) { throw 'Маркер першого налаштування належить іншій SQLite; автоматичні зміни зупинено.' }
   }
@@ -398,8 +433,10 @@ try {
   Register-Service $wrapper
   Set-InstallStage 'grant-service-acl'
   Configure-ServiceAccess
-  $settings = Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
+  $settings = Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json
   $healthUrl = Get-HealthUrl $settings
+  Set-InstallStage 'verify-service-acl'
+  Assert-ServiceAccess
   Set-InstallStage 'start-service'
   Invoke-Checked $wrapper @('start') 'Windows Service не запустилася.'
   Set-InstallStage 'health-check'
@@ -430,7 +467,7 @@ try {
       if ($wasServiceRunning) {
         $currentService = Get-Service -Name $serviceName -ErrorAction Stop
         if ($currentService.Status -ne 'Running') { Invoke-Checked $oldWrapper @('start') 'Не вдалося повторно запустити встановлену службу.' }
-        Wait-ServiceHealthy (Get-HealthUrl (Get-Content -LiteralPath $config -Raw | ConvertFrom-Json))
+        Wait-ServiceHealthy (Get-HealthUrl (Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json))
       }
       if ([IO.File]::Exists($journalPath)) { Invoke-PackageTransaction $stagedServer 'discard-prepared' }
       [Console]::Error.WriteLine("Оновлення зупинено до перемикання пакета; попередній сервер залишено: $failure")
@@ -442,7 +479,7 @@ try {
     $canRollback = $false
     try {
       $statusRoot = if ([IO.Directory]::Exists($activeServer)) { $activeServer } else { $stagedServer }
-      $current = Get-DatabaseStatus (Join-Path $statusRoot 'runtime\node.exe') $statusRoot ([string]((Get-Content -LiteralPath $config -Raw | ConvertFrom-Json).databasePath))
+      $current = Get-DatabaseStatus (Join-Path $statusRoot 'runtime\node.exe') $statusRoot ([string]((Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json).databasePath))
       $canRollback = [int]$current.schemaVersion -le $oldSchemaMaximum
     } catch { $canRollback = $false }
     if ($canRollback -and -not [IO.Directory]::Exists($failedServer)) {
@@ -453,7 +490,7 @@ try {
         Register-Service $rollbackWrapper
         if ($wasServiceRunning) {
           Invoke-Checked $rollbackWrapper @('start') 'Не вдалося запустити попередній пакет після відкату.'
-          Wait-ServiceHealthy (Get-HealthUrl (Get-Content -LiteralPath $config -Raw | ConvertFrom-Json))
+          Wait-ServiceHealthy (Get-HealthUrl (Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json))
         }
         $rollbackToolRoot = if ([IO.Directory]::Exists($failedServer)) { $failedServer } elseif ([IO.Directory]::Exists($stagedServer)) { $stagedServer } else { $activeServer }
         Invoke-PackageTransaction $rollbackToolRoot 'finalize-rollback'

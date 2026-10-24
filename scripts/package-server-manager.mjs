@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
-import { dirname, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -117,6 +117,10 @@ const installerPowerShellFiles = [
   'windows-installer-paths.ps1', 'install-server-service.ps1', 'admin-setup.ps1',
   'windows-service-control.ps1', 'write-installation-locator.ps1',
 ].map(name => join(payloadDirectory, 'installer', name))
+for (const path of installerPowerShellFiles) {
+  const source = await readFile(join(root, 'packaging', basename(path)))
+  if (!source.equals(await readFile(path))) throw new Error(`Packaged installer script differs from current source: ${basename(path)}`)
+}
 if (process.platform === 'win32') {
   const powershell = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   const paths = Buffer.from(JSON.stringify(installerPowerShellFiles), 'utf8').toString('base64')

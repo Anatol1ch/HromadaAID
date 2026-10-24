@@ -228,6 +228,7 @@ export function createWindowsInstallationAdapters(): ServerInstallAdapters {
           'initialize-data': 'Перевірка SQLite та DPAPI', 'inspect-database-and-create-admin': 'Перевірка першого адміністратора',
           'prepare-package-journal': 'Підготовка перемикання пакета', 'activate-server-package': 'Активація серверного пакета',
           'register-service-and-sid': 'Реєстрація Windows Service', 'grant-service-acl': 'Надання службі доступу до ресурсів',
+          'verify-service-acl': 'Перевірка прав доступу служби',
           'start-service': 'Запуск Windows Service', 'health-check': 'Перевірка доступності API', 'finalize-update': 'Завершення встановлення',
         }
         await run(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', join(root, 'installer', 'install-server-service.ps1'),
