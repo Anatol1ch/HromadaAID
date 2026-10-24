@@ -9,7 +9,6 @@ const release = join(root, 'release')
 const source = join(release, 'win-unpacked')
 const output = join(release, 'HromadaAID-Client-portable')
 const archive = join(release, 'HromadaAID-Client-portable.zip')
-const appAsar = join(source, 'resources', 'app.asar')
 
 function assert(condition, message) { if (!condition) throw new Error(message) }
 
@@ -40,6 +39,14 @@ async function verifyRendererPayload(directory) {
       assert((await stat(resourcePath).catch(() => undefined))?.isFile(), `У app.asar відсутній renderer asset: ${reference}`)
     }
     assert(!(await stat(join(directory, 'resources', 'server-payload')).catch(() => undefined)), 'Client portable містить серверний payload.')
+    for (const name of ['excel-templates.ps1', 'excel-privatbank.ps1', 'excel-report.ps1']) {
+      const script = join(directory, 'resources', 'app.asar.unpacked', 'dist-electron', 'electron', name)
+      assert((await stat(script).catch(() => undefined))?.isFile(), `Для PowerShell не розпаковано ${name}`)
+      assert((await readFile(script)).equals(await readFile(join(root, 'electron', name))), `Застарілий Excel-скрипт у portable: ${name}`)
+    }
+    for (const name of ['Список.xlsx', 'Зведений список.xlsx', 'ПриватБанк.xlsx']) {
+      assert((await readFile(join(tempRoot, 'dist-electron', 'electron', 'reference', name))).equals(await readFile(join(root, 'reference', name))), `Шаблон у app.asar відсутній або змінений: ${name}`)
+    }
     return references
   } finally {
     await rm(tempRoot, { recursive: true, force: true })

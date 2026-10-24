@@ -54,6 +54,7 @@
   "productName": "HromadaAID",
   "build": {
     "appId": "local.hromadaaid",
+    "asarUnpack": ["dist-electron/electron/excel-*.ps1"],
     "directories": {
       "buildResources": "assets",
       "output": "release"

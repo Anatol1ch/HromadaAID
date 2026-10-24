@@ -1,8 +1,9 @@
 import { bankStatementFileName, statementFileName } from './statement-filenames.js'
 import { statementKey, statementPeriodText, statementPlan, validateStatementParameters } from './statement-parameters.js'
-import { dialog } from 'electron'
+import { app, dialog } from 'electron'
 import { trustedIpcMain as ipcMain } from './ipc-security.js'
-import { copyFileSync, readFileSync, unlinkSync } from 'node:fs'
+import { appendFileSync, mkdirSync, copyFileSync, readFileSync, unlinkSync } from 'node:fs'
+import { externalExcelScriptPath, StatementExcelError, statementExcelDiagnostic, statementFailure } from './excel-worker.js'
 import { spawn } from 'node:child_process'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -20,6 +21,18 @@ let shuttingDown = false
 function displayDate(iso: string) { return `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}` }
 function safeFileName(value: string) { return value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').replace(/\s+/g, '_').slice(0, 100) || 'Відомість' }
 function asMinor(value: unknown) { const number = Number(value); if (!Number.isSafeInteger(number) || number < 0) throw new Error('invalid amount'); return number }
+
+function generationFailure(error: unknown, stage: Parameters<typeof statementFailure>[1]) {
+  const failure = statementFailure(error, stage)
+  const entry = JSON.stringify({ at: new Date().toISOString(), ...failure.diagnostic })
+  console.error('[HromadaAid][statements]', entry)
+  try {
+    const logs = app.getPath('logs')
+    mkdirSync(logs, { recursive: true })
+    appendFileSync(join(logs, 'statement-export.log'), entry + '\n', 'utf8')
+  } catch { /* Diagnostics must never replace the original failure. */ }
+  return { ok: false as const, message: failure.message }
+}
 
 function socialAidText(shortName: string) {
   let detail = shortName.trim().replace(/\s+/gu, ' ').replace(/^(?:на\s+надання\s+)+/iu, '')
@@ -75,9 +88,9 @@ function invokeExcel(scriptPath: string, payload: object) {
     child.stderr.on('data', (chunk: string) => { stderr = (stderr + chunk).slice(-16_384) })
     child.on('error', () => stop(new Error('Excel engine unavailable')))
     child.stdin.on('error', () => stop(new Error('Excel input unavailable')))
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       try { setDocumentWorker(directory, null) } catch { /* Conservative stale marker is safe. */ }
-      finish(failure ?? (code === 0 && !shuttingDown ? undefined : new Error(stderr || `Excel script ended with ${code}`)))
+      finish(failure ?? (code === 0 && !shuttingDown ? undefined : new StatementExcelError(statementExcelDiagnostic(stderr, code, signal))))
     })
     try {
       if (child.pid) setDocumentWorker(directory, child.pid)
@@ -120,8 +133,9 @@ export function registerStatementsIpc(source: StatementDataSource) {
     if (!parameters) return { ok: false, message: 'Перевірте номер, дати та період кожної відомості. Якщо склад документів змінився, відкрийте параметри повторно.' }
     const parameterMap = new Map(parameters.map(value => [statementKey(value), value]))
     const templatePath = join(currentDirectory, 'reference', kind === 'personal' ? 'Список.xlsx' : 'Зведений список.xlsx')
-    const scriptPath = join(currentDirectory, 'excel-templates.ps1')
+    const scriptPath = externalExcelScriptPath(currentDirectory, 'excel-templates.ps1')
     let directory: string | undefined
+    let stage: 'temporary-directory' | 'template-copy' | 'worker' | 'pdf-read' = 'temporary-directory'
     const documents: GeneratedStatement[] = []
     try {
       directory = createDocumentDirectory()
@@ -138,7 +152,9 @@ export function registerStatementsIpc(source: StatementDataSource) {
           const excelExtension = kind === 'personal' ? 'xls' : 'xlsx'
           const excelPath = join(directory, `${baseName}.${excelExtension}`)
           const pdfPath = join(directory, `${baseName}.pdf`)
+          stage = 'template-copy'
           copyFileSync(templatePath, xlsxPath)
+          stage = 'worker'
           const common = { kind, templatePath: xlsxPath, excelPath, pdfPath, aidTypeName: socialAidText(aidTypeName), periodText: statementPeriodText(parameter), documentNumber: parameter.documentNumber, documentDateDisplay: displayDate(parameter.documentDate) }
           const records = batch.map((row) => ({
             dateDisplay: displayDate(parameter.documentDate),
@@ -161,6 +177,7 @@ export function registerStatementsIpc(source: StatementDataSource) {
           if (kind === 'personal') {
             try { unlinkSync(xlsxPath) } catch { /* A locked intermediate remains in the managed job directory until cleanup. */ }
           }
+          stage = 'pdf-read'
           const pdfBase64 = readFileSync(pdfPath).toString('base64')
           const excelName = statementFileName(kind, parameter)
           const pdfName = excelName.replace(/\.(?:xls|xlsx)$/, '.pdf')
@@ -172,13 +189,7 @@ export function registerStatementsIpc(source: StatementDataSource) {
     } catch (error) {
       for (const document of documents) savedDocuments.delete(document.id)
       if (directory) removeDocumentDirectory(directory)
-      const denied = error instanceof Error && /80070005|E_ACCESSDENIED|Access is denied/i.test(error.message)
-      const layoutTooTall = error instanceof Error && error.message.includes('HROMADA_LAYOUT_TOO_TALL')
-      return { ok: false, message: layoutTooTall
-        ? 'Повна назва або реквізити не вміщуються в рядок шаблону без обрізання. Документи не сформовано; перевірте довжину реквізитів або погодьте корекцію форми.'
-        : denied
-        ? 'Windows відмовила в доступі до автоматизації Microsoft Excel (E_ACCESSDENIED). Excel і PDF не сформовано. Запустіть застосунок у звичайному робочому сеансі Windows та перевірте доступність Excel.'
-        : 'Microsoft Excel не зміг заповнити шаблон або експортувати PDF. Перевірте, чи встановлений і доступний Excel, і повторіть спробу. Документи не збережено.' }
+      return generationFailure(error, stage)
     }
   })
 
@@ -207,12 +218,15 @@ export function registerStatementsIpc(source: StatementDataSource) {
     } catch { return { ok: false, message: 'Суми допомог у базі потребують перевірки.' } }
     const id = randomUUID()
     let directory: string | undefined
+    let stage: 'temporary-directory' | 'template-copy' | 'worker' = 'temporary-directory'
     const fileName = `ПриватБанк_${yearValue}_${id.slice(0, 8)}.xlsx`
     try {
       directory = createDocumentDirectory()
       const excelPath = join(directory, fileName)
+      stage = 'template-copy'
       copyFileSync(join(currentDirectory, 'reference', 'ПриватБанк.xlsx'), excelPath)
-      await invokeExcel(join(currentDirectory, 'excel-privatbank.ps1'), {
+      stage = 'worker'
+      await invokeExcel(externalExcelScriptPath(currentDirectory, 'excel-privatbank.ps1'), {
         templatePath: excelPath,
         paymentPurpose: 'Матеріальна допомога',
         records: rows.map((row) => ({ amount: Number(row.amount_minor) / 100, rnokpp: String(row.rnokpp).trim(), bankAccount: String(row.bank_account).trim() })),
@@ -221,12 +235,7 @@ export function registerStatementsIpc(source: StatementDataSource) {
       return { ok: true, document: { id, fileName: excelName, recordCount: rows.length, totalMinor } }
     } catch (error) {
       if (directory) removeDocumentDirectory(directory)
-      const denied = error instanceof Error && /80070005|E_ACCESSDENIED|Access is denied/i.test(error.message)
-      const invalidTemplate = error instanceof Error && error.message.includes('HROMADA_BANK_TEMPLATE_INVALID')
-      return { ok: false, message: invalidTemplate
-        ? 'Структура шаблону «ПриватБанк» не відповідає очікуваним колонкам. Файл не сформовано.'
-        : denied ? 'Windows відмовила в доступі до Microsoft Excel. Банківську відомість не сформовано.'
-        : 'Не вдалося сформувати Excel-файл «ПриватБанк». Перевірте наявність шаблону та доступність Microsoft Excel.' }
+      return generationFailure(error, stage)
     }
   })
 

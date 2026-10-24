@@ -1,13 +1,13 @@
 ﻿$ErrorActionPreference = 'Stop'
 [Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)
-$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$payload = $null
+$stage = 'input'
 $excel = $null
 $workbook = $null
 $sheet = $null
 function Assert-GenerationActive {
   if ($payload.cancelPath -and [System.IO.File]::Exists([string]$payload.cancelPath)) { throw 'HROMADA_GENERATION_CANCELLED' }
 }
-Add-Type -AssemblyName System.Drawing
 
 function Get-TextHeight($cell, [string]$text) {
   $bitmap = $null
@@ -48,14 +48,21 @@ function Set-PrintableTitle($sheet, [string]$address, [string]$text) {
   $sheet.Rows.Item($area.Row).RowHeight = $height
 }
 try {
+  $payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
   Assert-GenerationActive
+  $stage = 'template-check'
   if (-not (Test-Path -LiteralPath $payload.templatePath)) { throw 'Excel-шаблон не знайдено.' }
+  $stage = 'drawing-init'
+  Add-Type -AssemblyName System.Drawing
+  $stage = 'excel-start'
   $excel = New-Object -ComObject Excel.Application
   $excel.Visible = $false
   $excel.DisplayAlerts = $false
   Assert-GenerationActive
+  $stage = 'workbook-open'
   $workbook = $excel.Workbooks.Open($payload.templatePath, 0, $false)
   $sheet = $workbook.Worksheets.Item(1)
+  $stage = 'fill-template'
   if ($payload.kind -eq 'personal') {
     $templateRowHeights = @()
     for ($row = 13; $row -le 24; $row++) { $templateRowHeights += [double]$sheet.Rows.Item($row).RowHeight }
@@ -129,21 +136,30 @@ try {
   } else { throw 'Невідомий вид відомості.' }
   # Keep the updated template's orientation, margins, scale and print settings.
   Assert-GenerationActive
+  $stage = 'workbook-save'
   $workbook.Save()
   if ($payload.kind -eq 'personal') {
     if (-not $payload.excelPath -or [System.IO.Path]::GetExtension([string]$payload.excelPath) -ne '.xls') { throw 'HROMADA_PERSONAL_XLS_PATH_REQUIRED' }
     # Convert the filled copy to the real BIFF8 format, never rename an OOXML file.
     $workbook.CheckCompatibility = $false
     Assert-GenerationActive
+    $stage = 'xls-save'
     $workbook.SaveAs([string]$payload.excelPath, 56)
   }
   Assert-GenerationActive
+  $stage = 'pdf-export'
   $workbook.ExportAsFixedFormat(0, $payload.pdfPath)
+  $stage = 'workbook-close'
   $workbook.Close($false)
   [Console]::Out.Write((ConvertTo-Json -Compress @{ ok = $true }))
 } catch {
+  $failure = $_
   if ($workbook -ne $null) { try { $workbook.Close($false) } catch {} }
-  [Console]::Error.Write($_.Exception.Message)
+  $code = 'EXCEL_OPERATION_FAILED'
+  foreach ($known in @('HROMADA_LAYOUT_TOO_TALL', 'HROMADA_GENERATION_CANCELLED')) {
+    if ($failure.Exception.Message.Contains($known)) { $code = $known }
+  }
+  [Console]::Error.WriteLine((ConvertTo-Json -Compress @{ kind = 'HROMADA_STATEMENT_EXCEL_ERROR'; stage = $stage; code = $code; errorType = $failure.Exception.GetType().FullName; hresult = $failure.Exception.HResult; line = $failure.InvocationInfo.ScriptLineNumber }))
   exit 1
 } finally {
   if ($excel -ne $null) { try { $excel.Quit() } catch {} }

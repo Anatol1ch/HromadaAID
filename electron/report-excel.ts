@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { externalExcelScriptPath } from './excel-worker.js'
 import { cancelDocumentGeneration, setDocumentWorker } from './document-temp.js'
 import { reportBudgetCode, reportGroups, reportInstitution, reportNumbers, reportTitle, reportTotals } from './report-data.js'
 import type { ReportExportSnapshot } from './api-contract.js'
@@ -53,7 +54,7 @@ export function writeReportExcel(snapshot: ReportExportSnapshot, directory: stri
   const payload = { cumulative, institution: reportInstitution.toLocaleUpperCase('uk'), title: reportTitle(snapshot.kind).toLocaleUpperCase('uk'), code: reportBudgetCode.toLocaleUpperCase('uk'), period: snapshot.periodRange, rows, excelPath: join(directory, 'report.xlsx'), cancelPath: join(directory, '.cancel') }
   let cancel = () => {}
   const done = new Promise<void>((resolve, reject) => {
-    const child = spawn(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dirname(fileURLToPath(import.meta.url)), 'excel-report.ps1')], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', externalExcelScriptPath(dirname(fileURLToPath(import.meta.url)), 'excel-report.ps1')], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
     let stderr = '', failure: Error | undefined, settled = false
     let exitCode: number | null = null, exitSignal: string | null = null
     let forceTimer: ReturnType<typeof setTimeout> | undefined
