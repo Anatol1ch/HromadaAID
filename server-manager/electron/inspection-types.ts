@@ -2,6 +2,8 @@ export type CheckStatus = 'passed' | 'warning' | 'failed' | 'unknown' | 'not_che
 export type InstallationStatus = 'not_installed' | 'installed' | 'partial_installation' | 'unknown'
 export type ServiceStatus = 'running' | 'stopped' | 'other' | 'missing' | 'unknown'
 export type ApiStatus = 'available' | 'unavailable' | 'invalid_response' | 'not_configured' | 'unknown'
+export type DiscoverySource = 'windows_service' | 'installer_registry' | 'standard_locations' | 'none' | 'unknown'
+export type DiscoveryConfidence = 'confirmed' | 'corroborated' | 'stale' | 'untrusted' | 'unavailable'
 
 export type InspectionCheck = {
   id: 'installation' | 'service' | 'configuration' | 'package' | 'api'
@@ -34,6 +36,7 @@ export type InspectionSnapshot = {
   service: { status: ServiceStatus; message: string }
   api: { status: ApiStatus; message: string; contractVersion: number | null }
   configuration: InspectedConfiguration
+  discovery: { source: DiscoverySource; confidence: DiscoveryConfidence; message: string }
   checks: InspectionCheck[]
 }
 

@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { InspectionAdapters, ServiceMetadata } from './inspection-engine.js'
+import type { InspectionAdapters, InstallationLocator, ServiceMetadata } from './inspection-engine.js'
 
 const execFileAsync = promisify(execFile)
 const serviceQueryScript = String.raw`
@@ -22,6 +22,42 @@ try {
   $accessDenied = ($failure -is [System.UnauthorizedAccessException]) -or ($failure -is [System.Security.SecurityException]) -or ($failure.HResult -eq -2147024891)
   if ($accessDenied) { [Console]::Error.WriteLine('SERVICE_ACCESS_DENIED'); exit 13 }
   [Console]::Error.WriteLine('SERVICE_QUERY_FAILED')
+  exit 2
+}`
+
+// The installer already writes these non-secret paths under HKLM. Read them as
+// a locator only; the inspection engine still verifies every referenced item.
+const locatorQueryScript = String.raw`
+$ErrorActionPreference = 'Stop'
+$utf8 = New-Object System.Text.UTF8Encoding -ArgumentList $false
+[Console]::OutputEncoding = $utf8
+$keyPath = 'Registry::HKEY_LOCAL_MACHINE\Software\HromadaAID\Installer'
+try {
+  if (-not (Test-Path -LiteralPath $keyPath)) { [Console]::Out.WriteLine('{"status":"missing"}'); exit 0 }
+  $key = Get-Item -LiteralPath $keyPath -ErrorAction Stop
+  $item = Get-ItemProperty -LiteralPath $keyPath -ErrorAction Stop
+  $acl = Get-Acl -LiteralPath $keyPath -ErrorAction Stop
+  $trustedSids = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-0', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+  $writeMask = [System.Security.AccessControl.RegistryRights]::SetValue -bor [System.Security.AccessControl.RegistryRights]::CreateSubKey -bor [System.Security.AccessControl.RegistryRights]::WriteKey -bor [System.Security.AccessControl.RegistryRights]::FullControl
+  $writable = $false
+  foreach ($rule in $acl.Access) {
+    if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
+    $sid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+    if ($trustedSids -notcontains $sid -and (($rule.RegistryRights -band $writeMask) -ne 0)) { $writable = $true }
+  }
+  $result = [ordered]@{
+    status = 'available'
+    programDirectory = [string]$item.ProgramDirectory
+    dataDirectory = [string]$item.DataDirectory
+    backupDirectory = [string]$item.BackupDirectory
+    writableByUnprivileged = $writable
+  }
+  [Console]::Out.WriteLine((ConvertTo-Json -InputObject $result -Compress -Depth 3))
+} catch {
+  $failure = $_.Exception
+  $accessDenied = ($failure -is [System.UnauthorizedAccessException]) -or ($failure -is [System.Security.SecurityException]) -or ($failure.HResult -eq -2147024891)
+  if ($accessDenied) { [Console]::Error.WriteLine('LOCATOR_ACCESS_DENIED'); exit 13 }
+  [Console]::Error.WriteLine('LOCATOR_QUERY_FAILED')
   exit 2
 }`
 
@@ -50,6 +86,25 @@ async function queryWindowsService(): Promise<ServiceMetadata> {
   }
 }
 
+export type WindowsInstallationLocator = InstallationLocator
+async function queryWindowsLocator(): Promise<InstallationLocator> {
+  if (process.platform !== 'win32') return { status: 'query_failed' }
+  const executable = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  try {
+    const result = await execFileAsync(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', psEncodedCommand(locatorQueryScript)], {
+      windowsHide: true, timeout: 5_000, killSignal: 'SIGTERM', maxBuffer: 32 * 1024, encoding: 'utf8',
+    })
+    const value = JSON.parse(result.stdout.trim()) as Record<string, unknown>
+    if (value.status === 'missing') return { status: 'missing' }
+    if (value.status !== 'available' || typeof value.programDirectory !== 'string' || typeof value.dataDirectory !== 'string' || typeof value.backupDirectory !== 'string' || typeof value.writableByUnprivileged !== 'boolean') return { status: 'invalid' }
+    return { status: 'available', programDirectory: value.programDirectory, dataDirectory: value.dataDirectory, backupDirectory: value.backupDirectory, writableByUnprivileged: value.writableByUnprivileged }
+  } catch (error) {
+    const failure = error as NodeJS.ErrnoException & { stderr?: string }
+    const text = `${failure.message || ''} ${failure.stderr || ''}`
+    return /LOCATOR_ACCESS_DENIED|access is denied|access denied|unauthorized|0x80070005/i.test(text) ? { status: 'access_denied' } : { status: 'query_failed' }
+  }
+}
+
 async function probeApi(url: string, timeoutMs: number): Promise<Awaited<ReturnType<InspectionAdapters['probeApi']>>> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
@@ -72,6 +127,7 @@ export function createWindowsInspectionAdapters(): InspectionAdapters {
     programFiles: process.env.ProgramFiles ?? null,
     programData: process.env.ProgramData ?? null,
     queryService: async name => name === 'HromadaAIDApi' ? queryWindowsService() : { installed: false, error: 'query_failed' },
+    readInstallationLocator: queryWindowsLocator,
     exists: async path => {
       try { await stat(path); return true }
       catch (error) {

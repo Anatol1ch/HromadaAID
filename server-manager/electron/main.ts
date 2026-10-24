@@ -34,6 +34,7 @@ function failedInspection(): InspectionSnapshot {
     service: { status: 'unknown', message },
     api: { status: 'unknown', message: 'Health endpoint не перевірено через помилку діагностики.', contractVersion: null },
     configuration: { programDirectory: null, dataDirectory: null, backupDirectory: null, databasePath: null, apiAddress: null, host: null, port: null, transport: null, serverVersion: null, serviceName: 'HromadaAIDApi', serviceAccount: null, startMode: null, logDirectory: null },
+    discovery: { source: 'unknown', confidence: 'unavailable', message: 'Джерело інсталяції не вдалося перевірити.' },
     checks: [{ id: 'installation', title: 'Перевірка середовища', status: 'unknown', checkedAt, message, details: 'INSPECTION_FAILED' }],
   }
 }

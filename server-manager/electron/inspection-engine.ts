@@ -5,11 +5,15 @@ import type { CheckStatus, InspectionCheck, InspectionSnapshot, InstallationStat
 export const HROMADAAID_SERVICE_NAME = 'HromadaAIDApi'
 export const INSPECTION_TIMEOUT_MS = 4_000
 export type ServiceMetadata = { installed: boolean; state?: string; startMode?: string; startName?: string; binaryPath?: string; error?: 'access_denied' | 'query_failed' }
+export type InstallationLocator =
+  | { status: 'missing' | 'invalid' | 'access_denied' | 'query_failed' }
+  | { status: 'available'; programDirectory: string; dataDirectory: string; backupDirectory: string; writableByUnprivileged: boolean }
 export type InspectionAdapters = {
   platform: string
   programFiles: string | null
   programData: string | null
   queryService(name: string): Promise<ServiceMetadata>
+  readInstallationLocator(): Promise<InstallationLocator>
   exists(path: string): Promise<boolean>
   readText(path: string): Promise<string>
   probeApi(url: string, timeoutMs: number): Promise<{ kind: 'response'; status: number; redirected: boolean; body: unknown } | { kind: 'timeout' } | { kind: 'network_error' } | { kind: 'invalid_response' }>
@@ -64,6 +68,10 @@ function extractWrapperPath(command: string | undefined): string | null {
   return absoluteWindowsPath(path) && win32.basename(path).toLowerCase() === 'hromadaaidservice.exe' ? path : null
 }
 function normalize(value: string): string { return win32.resolve(value).replace(/[\\/]+$/, '').toLocaleLowerCase('en-US') }
+function pathsOverlap(left: string, right: string): boolean {
+  const a = normalize(left), b = normalize(right)
+  return a === b || a.startsWith(`${b}\\`) || b.startsWith(`${a}\\`)
+}
 function isLoopback(host: string): boolean {
   const value = host.toLowerCase()
   return value === '::1' || value === '::ffff:127.0.0.1' || (isIP(value) === 4 && value.startsWith('127.'))
@@ -110,6 +118,12 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
   let packageState: 'ok' | 'missing' | 'access' | 'invalid' | 'unknown' = 'missing'
   let defaultDiscoveryFailed = false
   let defaultEvidence = false
+  let locatorStatus: InstallationLocator['status'] = 'missing'
+  let locatorEvidence = false
+  let locatorStale = false
+  let locatorUntrusted = false
+  let locatorError = false
+  let discovery: InspectionSnapshot['discovery'] = { source: 'unknown', confidence: 'unavailable', message: 'Джерело інсталяції ще не визначено.' }
 
   if (service.error) {
     const message = service.error === 'access_denied' ? 'Немає прав прочитати стан диспетчера служб.' : 'Не вдалося опитати диспетчер служб Windows.'
@@ -120,6 +134,7 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
     serviceMessage = 'Службу HromadaAIDApi не зареєстровано.'
     checks.push(check('service', 'Windows Service', 'warning', time, serviceMessage, 'service_not_found'))
   } else {
+    discovery = { source: 'windows_service', confidence: 'corroborated', message: 'Шлях отримано з конфігурації Windows Service.' }
     serviceStatus = service.state?.toLowerCase() === 'running' ? 'running' : service.state?.toLowerCase() === 'stopped' ? 'stopped' : 'other'
     serviceMessage = serviceStatus === 'running' ? 'Служба працює.' : serviceStatus === 'stopped' ? 'Службу зупинено.' : `Проміжний стан служби: ${service.state ?? 'невідомий'}.`
     configuration.serviceAccount = service.startName ?? null
@@ -147,7 +162,70 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
     } else configState = 'invalid'
   }
 
-  // Without a service, inspect only the documented default install locations. Custom paths have no independent discovery marker yet.
+  // NSIS already writes non-secret install paths to HKLM. Treat them as a
+  // locator, never as proof: validate the shape, assess key write ACLs, then
+  // corroborate paths with expected package/config files.
+  if (!service.error && !service.installed) {
+    let locator: InstallationLocator
+    try { locator = await adapters.readInstallationLocator() }
+    catch { locator = { status: 'query_failed' } }
+    locatorStatus = locator.status
+    if (locator.status === 'available') {
+      const fields = [locator.programDirectory, locator.dataDirectory, locator.backupDirectory]
+      const validPaths = fields.every(absoluteWindowsPath) &&
+        !fields.some(path => path.startsWith('\\\\')) &&
+        !pathsOverlap(locator.programDirectory, locator.dataDirectory) &&
+        !pathsOverlap(locator.programDirectory, locator.backupDirectory) &&
+        !pathsOverlap(locator.dataDirectory, locator.backupDirectory)
+      if (!validPaths) {
+        locatorStatus = 'invalid'
+        discovery = { source: 'installer_registry', confidence: 'untrusted', message: 'Реєстрові метадані інсталятора містять некоректні або вкладені шляхи.' }
+      }
+      else if (locator.writableByUnprivileged) {
+        locatorUntrusted = true
+        discovery = { source: 'installer_registry', confidence: 'untrusted', message: 'Реєстрові метадані інсталятора доступні для зміни непривілейованим користувачам; шляхи не використовувалися.' }
+      } else {
+        const candidateRoot = win32.join(locator.programDirectory, 'Server')
+        const candidateConfig = win32.join(locator.dataDirectory, 'server.json')
+        const packageMarkers = [
+          win32.join(candidateRoot, 'runtime', 'node.exe'),
+          win32.join(candidateRoot, 'service', 'HromadaAIDService.exe'),
+          win32.join(candidateRoot, 'app', 'dist', 'server', 'src', 'installed.js'),
+        ]
+        try {
+          const [packagePresent, configPresent] = await Promise.all([
+            Promise.all(packageMarkers.map(path => adapters.exists(path))),
+            adapters.exists(candidateConfig),
+          ])
+          locatorEvidence = packagePresent.some(Boolean) || configPresent
+          if (locatorEvidence) {
+            packageRoot = candidateRoot
+            configuration.programDirectory = locator.programDirectory
+            configPath = configPresent ? candidateConfig : null
+            if (!configPresent) configState = 'missing'
+            serviceStatus = 'missing'
+            serviceMessage = 'Метадані інсталятора вказують на серверні компоненти, але службу не зареєстровано.'
+            discovery = { source: 'installer_registry', confidence: 'corroborated', message: 'Шляхи з HKLM підтверджено файлами серверного пакета або конфігурацією.' }
+          } else {
+            locatorStale = true
+            discovery = { source: 'installer_registry', confidence: 'stale', message: 'Реєстрові шляхи знайдено, але очікувані компоненти за ними відсутні.' }
+          }
+        } catch (error) {
+          locatorError = true
+          const kind = componentError(error)
+          discovery = { source: 'installer_registry', confidence: 'unavailable', message: kind === 'access' ? 'Немає прав перевірити шляхи з реєстрових метаданих.' : 'Не вдалося перевірити шляхи з реєстрових метаданих.' }
+        }
+      }
+    } else if (locator.status === 'invalid') {
+      discovery = { source: 'installer_registry', confidence: 'untrusted', message: 'Реєстрові метадані інсталятора пошкоджені або містять некоректні шляхи.' }
+    } else if (locator.status === 'access_denied' || locator.status === 'query_failed') {
+      locatorError = true
+      discovery = { source: 'unknown', confidence: 'unavailable', message: locator.status === 'access_denied' ? 'Немає прав прочитати метадані інсталятора.' : 'Не вдалося прочитати метадані інсталятора.' }
+    }
+  }
+
+  // Older installs without the existing HKLM locator can only be discovered
+  // in these documented default locations; no drive scan is performed.
   if (!service.error && !service.installed && adapters.programFiles && adapters.programData) {
     const defaultProgram = win32.join(adapters.programFiles, 'HromadaAID')
     const defaultServer = win32.join(defaultProgram, 'Server')
@@ -162,7 +240,7 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
     let present: boolean[]
     try { present = await Promise.all(markers.map(path => adapters.exists(path))) }
     catch { present = markers.map(() => false); defaultDiscoveryFailed = true }
-    if (present.some(Boolean)) {
+    if (present.some(Boolean) && !locatorEvidence && !locatorUntrusted) {
       defaultEvidence = true
       packageRoot = present.slice(0, 3).some(Boolean) ? defaultServer : null
       configPath = present[4] ? win32.join(defaultData, 'server.json') : null
@@ -170,8 +248,13 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
       configState = configPath ? 'ok' : 'missing'
       serviceStatus = 'missing'
       serviceMessage = 'Компоненти сервера виявлено, але Windows Service не зареєстровано.'
+      discovery = { source: 'standard_locations', confidence: 'corroborated', message: 'Компоненти знайдено у стандартних каталогах Windows.' }
     }
   }
+
+  if (service.error) discovery = { source: 'unknown', confidence: 'unavailable', message: 'Installation Discovery обмежено помилкою опитування диспетчера служб.' }
+  else if (service.installed && packageRoot) discovery = { source: 'windows_service', confidence: configPath && configState === 'ok' ? 'confirmed' : 'corroborated', message: configPath && configState === 'ok' ? 'Шляхи підтверджено SCM, WinSW XML і server.json.' : 'Шлях отримано з SCM; частину компонентів ще не підтверджено.' }
+  else if (service.installed && discovery.source !== 'windows_service') discovery = { source: 'windows_service', confidence: 'corroborated', message: 'Windows SCM підтверджує зареєстровану службу.' }
 
   if (configPath) {
     try {
@@ -222,24 +305,39 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
   if (service.error) {
     installationStatus = 'unknown'
     installationMessage = 'Стан інсталяції невідомий через помилку опитування Windows Service.'
-  } else if (!service.installed && !packageRoot && !configPath && defaultDiscoveryFailed) {
+  } else if (!service.installed && !packageRoot && !configPath && (defaultDiscoveryFailed || locatorError)) {
     installationStatus = 'unknown'
     installationMessage = 'Не вдалося перевірити стандартні каталоги інсталяції через обмеження доступу.'
   } else if (!service.installed && !packageRoot && !configPath && (!adapters.programFiles || !adapters.programData)) {
     installationStatus = 'unknown'
     installationMessage = 'Не вдалося визначити стандартні каталоги Windows для перевірки інсталяції.'
-  } else if (!service.installed && !packageRoot && !configPath && defaultEvidence) {
+  } else if (!service.installed && !packageRoot && !configPath && (defaultEvidence || locatorEvidence)) {
     installationStatus = 'partial_installation'
     installationMessage = 'Залишилися компоненти сервера без повної інсталяції або зареєстрованої служби.'
   } else if (!service.installed && !packageRoot && !configPath) {
-    installationStatus = 'not_installed'
-    installationMessage = 'Ознак серверної інсталяції у стандартних каталогах не виявлено.'
+    if (locatorUntrusted || locatorStatus === 'invalid') {
+      installationStatus = 'unknown'
+      installationMessage = 'Не вдалося безпечно підтвердити реєстрові метадані серверної інсталяції.'
+    } else {
+      installationStatus = 'not_installed'
+      installationMessage = locatorStale ? 'Застарілі метадані інсталятора знайдено, але активних компонентів сервера немає.' : 'Ознак серверної інсталяції у перевірених каталогах не виявлено.'
+      if (discovery.source === 'unknown') discovery = { source: 'none', confidence: 'corroborated', message: locatorStale ? 'Реєстровий locator застарілий; активні компоненти не знайдено.' : 'Перевірено відомі стандартні каталоги; повного сканування дисків не виконувалося.' }
+    }
   } else if (service.installed && configured && packagePresent) {
     installationStatus = 'installed'
     installationMessage = 'Службу, конфігурацію та серверний пакет узгоджено.'
   } else {
     installationStatus = 'partial_installation'
     installationMessage = 'Виявлено неповний або неузгоджений комплект серверних компонентів.'
+  }
+
+  if (service.installed) {
+    const confirmed = installationStatus === 'installed'
+    discovery = {
+      source: 'windows_service',
+      confidence: confirmed ? 'confirmed' : 'corroborated',
+      message: confirmed ? 'Шляхи підтверджено SCM, WinSW XML, server.json і файлами пакета.' : 'Шлях служби отримано з SCM; виявлені компоненти перевіряються окремо.',
+    }
   }
 
   const configurationStatus: CheckStatus = configured ? 'passed' : configState === 'missing' ? 'warning' : 'failed'
@@ -251,7 +349,9 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
   checks.push(check('installation', 'Інсталяція', installationStatus === 'installed' ? 'passed' : installationStatus === 'not_installed' ? 'warning' : installationStatus === 'unknown' ? 'unknown' : 'failed', time, installationMessage))
 
   let api: InspectionSnapshot['api'] = { status: 'not_configured', message: 'API не перевірено: сумісну конфігурацію не визначено.', contractVersion: null }
-  if (config) {
+  // Only probe the configured API when SCM confirms the service installation.
+  // A registry locator is advisory and may point at a user-controlled config.
+  if (config && service.installed) {
     try {
       const response = await adapters.probeApi(healthUrl(config), INSPECTION_TIMEOUT_MS)
       if (response.kind === 'timeout') api = { status: 'unavailable', message: 'API не відповів у межах тайм-ауту.', contractVersion: null }
@@ -267,5 +367,5 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
     } catch { api = { status: 'unavailable', message: 'Перевірка API завершилася технічною помилкою.', contractVersion: null } }
   }
   checks.push(check('api', 'Health endpoint API', api.status === 'available' ? 'passed' : api.status === 'not_configured' ? 'not_checked' : api.status === 'unavailable' ? 'warning' : 'failed', time, api.message, api.contractVersion === null ? undefined : `apiContractVersion=${api.contractVersion}`))
-  return { checkedAt: time, installation: { status: installationStatus, message: installationMessage }, service: { status: serviceStatus, message: serviceMessage }, api, configuration, checks }
+  return { checkedAt: time, installation: { status: installationStatus, message: installationMessage }, service: { status: serviceStatus, message: serviceMessage }, api, configuration, discovery, checks }
 }

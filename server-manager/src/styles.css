@@ -97,6 +97,9 @@
 .sm-unavailable-value details { text-align: right; font-size: 10px; font-weight: 400; }
 .sm-unavailable-value summary { cursor: pointer; color: var(--accent-green); }
 .sm-unavailable-value details > span { display: block; max-width: 320px; margin-top: 4px; color: var(--color-text-secondary); font-weight: 400; overflow-wrap: anywhere; }
+.sm-discovery-summary { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto; gap: 6px 18px; align-items: baseline; padding: 13px 16px; border: 1px solid #dce8e2; border-radius: 12px; background: #f3f8f5; color: #456157; font-size: 13px; }
+.sm-discovery-summary strong { color: #173f32; }
+.sm-discovery-summary p { grid-column: 1 / -1; margin: 0; color: #60736c; overflow-wrap: anywhere; }
 .sm-muted { color: var(--color-text-secondary); font-size: 12px; line-height: 1.6; margin: 0; }
 .sm-table-wrap { min-width: 0; width: 100%; }
 .sm-events { width: 100%; table-layout: fixed; border-collapse: collapse; text-align: left; }
@@ -180,6 +183,8 @@
   .sm-events th, .sm-events td { padding-inline: 6px; }
 }
 @media (max-width: 760px) {
+  .sm-discovery-summary { grid-template-columns: 1fr; gap: 5px; }
+  .sm-discovery-summary p { grid-column: auto; }
   .sm-app { grid-template-columns: 1fr; }
   .sm-sidebar { position: static; height: auto; padding: 16px; gap: 16px; border-right: 0; border-bottom: 1px solid var(--border-standard); }
   .sm-sidebar-footer { display: none; }

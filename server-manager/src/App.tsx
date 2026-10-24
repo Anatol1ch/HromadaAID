@@ -24,6 +24,13 @@ function Status({ children, tone, plain = false }: { children: ReactNode; tone: 
   return <span className={`sm-status sm-status-${tone}${plain ? ' sm-status-plain' : ''}`}><span aria-hidden="true"/>{children}</span>
 }
 
+function discoverySourceLabel(source: string): string {
+  return source === 'windows_service' ? 'Windows Service і WinSW' : source === 'installer_registry' ? 'метадані інсталятора в HKLM' : source === 'standard_locations' ? 'стандартні каталоги Windows' : source === 'none' ? 'джерело відсутнє' : 'не визначено'
+}
+function discoveryConfidenceLabel(confidence: string): string {
+  return confidence === 'confirmed' ? 'підтверджено' : confidence === 'corroborated' ? 'підтверджено компонентами' : confidence === 'stale' ? 'застарілі метадані' : confidence === 'untrusted' ? 'недовірені метадані' : 'перевірка недоступна'
+}
+
 type DemoEvent = { id: string; time: string; title: string; detail: string; level: string; code: string }
 function EventTable({ events, compact = false, caption = 'Демонстраційні діагностичні події' }: { events: DemoEvent[]; compact?: boolean; caption?: string }) {
   const tableId = useId()
@@ -99,6 +106,7 @@ function RealContent({ section, inspection, checking, refresh, filter, setFilter
 
   if (section === 'configuration') return <>
     {(notInstalled || !snapshot) && <Alert variant="info">{notInstalled ? 'Конфігурацію сервера не знайдено. Параметри стануть доступними після встановлення та налаштування серверної служби.' : 'Конфігурацію сервера ще не перевірено. Запустіть перевірку, щоб отримати фактичні параметри.'}</Alert>}
+    <div className="sm-discovery-summary" role="status"><strong>Виявлення інсталяції</strong><span>Джерело: {discoverySourceLabel(snapshot?.discovery.source ?? 'unknown')}</span><span>Достовірність: {discoveryConfidenceLabel(snapshot?.discovery.confidence ?? 'unavailable')}</span><p>{snapshot?.discovery.message ?? 'Джерело інсталяції ще не перевірено.'}</p></div>
     <Panel title="Виявлені каталоги" icon={<Folder size={21} aria-hidden="true"/>} action={<span className="sm-readonly-label">Лише читання</span>}><dl className="sm-directory-list">{directoryRows.map(([label, path, owner]) => <div key={label}><span className="sm-card-icon"><Folder size={21} aria-hidden="true"/></span><div><dt>{label}</dt></div><dd>{value(path, owner)}</dd></div>)}</dl></Panel>
     <Panel title="Параметри сервера" icon={<Settings2 size={21} aria-hidden="true"/>} action={<span className="sm-readonly-label">Лише читання</span>}><dl className="sm-details sm-setting-rows">{settings.map(([label, item, owner]) => <div key={label}><dt>{label}</dt><dd>{value(item, owner)}</dd></div>)}</dl></Panel>
     {snapshot?.installation.status !== 'not_installed' && <Alert variant="info">Показано лише дозволені технічні метадані. Файли SQLite, резервні копії, приватні ключі та секрети не читаються.</Alert>}

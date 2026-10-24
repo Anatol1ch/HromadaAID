@@ -19,7 +19,7 @@ const wrapper = `${server}\\service\\HromadaAIDService.exe`
 const config = { configVersion: 2, mode: 'local', programDirectory: program, host: '127.0.0.1', port: 4310, databasePath: `${data}\\Database\\hromada-aid.sqlite`, backupDirectory: backups }
 const serviceXml = `<service><id>HromadaAIDApi</id><executable>${server}\\runtime\\node.exe</executable><arguments>"${server}\\app\\dist\\server\\src\\installed.js" --config "${configPath}"</arguments><workingdirectory>${server}\\app</workingdirectory><logpath>${data}\\Logs</logpath></service>`
 
-function fixture({ service = { installed: true, state: 'Running', startMode: 'Auto', startName: 'NT AUTHORITY\\LocalService', binaryPath: `"${wrapper}"` }, configText = JSON.stringify(config), api = { kind: 'response', status: 200, redirected: false, body: { status: 'ok', service: 'hromada-aid-api', apiContractVersion: 1 } }, files = null, now = new Date('2026-10-24T10:30:00.000Z') } = {}) {
+function fixture({ service = { installed: true, state: 'Running', startMode: 'Auto', startName: 'NT AUTHORITY\\LocalService', binaryPath: `"${wrapper}"` }, locator = { status: 'missing' }, configText = JSON.stringify(config), api = { kind: 'response', status: 200, redirected: false, body: { status: 'ok', service: 'hromada-aid-api', apiContractVersion: 1 } }, files = null, now = new Date('2026-10-24T10:30:00.000Z') } = {}) {
   const trace = {}
   const knownFiles = files ?? new Set([
     `${server}\\runtime\\node.exe`, `${server}\\service\\HromadaAIDService.exe`, `${server}\\app\\dist\\server\\src\\installed.js`, `${server}\\app\\node_modules\\fastify\\package.json`, `${server}\\app\\node_modules\\argon2\\package.json`, `${server}\\app\\node_modules\\@phc\\format\\package.json`, 'C:\\TLS\\cert.pem', 'C:\\TLS\\private.pem',
@@ -33,6 +33,7 @@ function fixture({ service = { installed: true, state: 'Running', startMode: 'Au
     adapter: {
       platform: 'win32', programFiles: 'C:\\Program Files', programData: 'C:\\ProgramData',
       queryService: async name => { assert.equal(name, HROMADAAID_SERVICE_NAME); return service },
+      readInstallationLocator: async () => locator,
       exists: async path => knownFiles.has(path.toLowerCase()),
       readText: async path => { const value = textFiles.get(path.toLowerCase()); if (value === undefined) { const error = new Error('not found'); error.code = 'ENOENT'; throw error } return value },
       probeApi: async (url, timeoutMs) => { trace.lastUrl = url; trace.timeout = timeoutMs; return api },
@@ -55,6 +56,8 @@ test('detects a complete installed service, reads only metadata and validates ac
   assert.equal(result.configuration.serviceAccount, 'NT AUTHORITY\\LocalService')
   assert.equal(result.configuration.logDirectory, `${data}\\Logs`)
   assert.equal(result.configuration.apiAddress, 'http://127.0.0.1:4310')
+  assert.equal(result.discovery.source, 'windows_service')
+  assert.equal(result.discovery.confidence, 'confirmed')
   assert.equal(f.trace.lastUrl, 'http://127.0.0.1:4310/health')
   assert.equal(f.trace.timeout, 4000)
   assert.equal(result.checkedAt, '2026-10-24T10:30:00.000Z')
@@ -71,6 +74,64 @@ test('distinguishes a genuinely missing service from a service query failure', a
   assert.equal((await inspectEnvironment(denied)).installation.status, 'unknown')
   const failed = fixture({ service: { installed: false, error: 'query_failed' } }).adapter
   assert.equal((await inspectEnvironment(failed)).installation.status, 'unknown')
+})
+
+test('discovers non-standard program, data and backup paths from the existing protected installer locator', async () => {
+  const customProgram = 'D:\\Застосунки HromadaAID'
+  const customData = 'E:\\Дані HromadaAID'
+  const customBackups = 'F:\\Резервні копії HromadaAID'
+  const customRoot = `${customProgram}\\Server`
+  const customConfig = `${customData}\\server.json`
+  const customFiles = new Set([
+    `${customRoot}\\runtime\\node.exe`, `${customRoot}\\service\\HromadaAIDService.exe`, `${customRoot}\\app\\dist\\server\\src\\installed.js`,
+    `${customRoot}\\app\\node_modules\\fastify\\package.json`, `${customRoot}\\app\\node_modules\\argon2\\package.json`, `${customRoot}\\app\\node_modules\\@phc\\format\\package.json`, customConfig,
+  ].map(value => value.toLowerCase()))
+  const custom = fixture({
+    service: { installed: false },
+    locator: { status: 'available', programDirectory: customProgram, dataDirectory: customData, backupDirectory: customBackups, writableByUnprivileged: false },
+    files: customFiles,
+  })
+  const readText = custom.adapter.readText
+  custom.adapter.readText = async path => {
+    if (path.toLowerCase() === customConfig.toLowerCase()) return JSON.stringify({ ...config, programDirectory: customProgram, databasePath: `${customData}\\Database\\hromada-aid.sqlite`, backupDirectory: customBackups })
+    if (path.toLowerCase() === `${customRoot}\\app\\package.json`.toLowerCase()) return JSON.stringify({ version: '0.1.0' })
+    return readText(path)
+  }
+  const result = await inspectEnvironment(custom.adapter)
+  assert.equal(result.installation.status, 'partial_installation')
+  assert.equal(result.service.status, 'missing')
+  assert.equal(result.configuration.programDirectory, customProgram)
+  assert.equal(result.configuration.dataDirectory, customData)
+  assert.equal(result.configuration.backupDirectory, customBackups)
+  assert.equal(result.discovery.source, 'installer_registry')
+  assert.equal(result.discovery.confidence, 'corroborated')
+  assert.equal(custom.trace.lastUrl, undefined, 'an advisory locator never triggers an API request without SCM confirmation')
+})
+
+test('fails closed for writable and malformed locators, and labels a locator with no surviving components as stale', async () => {
+  const paths = { programDirectory: 'D:\\HromadaAID', dataDirectory: 'D:\\HromadaAID-Data', backupDirectory: 'E:\\HromadaAID-Backups' }
+  const writable = fixture({ service: { installed: false }, locator: { status: 'available', ...paths, writableByUnprivileged: true }, files: new Set() })
+  const writableResult = await inspectEnvironment(writable.adapter)
+  assert.equal(writableResult.installation.status, 'unknown')
+  assert.equal(writableResult.discovery.confidence, 'untrusted')
+  assert.equal(writableResult.configuration.programDirectory, null)
+
+  const malformed = fixture({ service: { installed: false }, locator: { status: 'available', ...paths, programDirectory: 'relative\\HromadaAID', writableByUnprivileged: false }, files: new Set() })
+  const malformedResult = await inspectEnvironment(malformed.adapter)
+  assert.equal(malformedResult.installation.status, 'unknown')
+  assert.equal(malformedResult.discovery.confidence, 'untrusted')
+
+  const overlapping = fixture({ service: { installed: false }, locator: { status: 'available', programDirectory: 'D:\\HromadaAID', dataDirectory: 'D:\\HromadaAID\\Data', backupDirectory: 'E:\\HromadaAID-Backups', writableByUnprivileged: false }, files: new Set() })
+  assert.equal((await inspectEnvironment(overlapping.adapter)).discovery.confidence, 'untrusted')
+
+  const stale = fixture({ service: { installed: false }, locator: { status: 'available', ...paths, writableByUnprivileged: false }, files: new Set() })
+  const staleResult = await inspectEnvironment(stale.adapter)
+  assert.equal(staleResult.installation.status, 'not_installed')
+  assert.equal(staleResult.discovery.confidence, 'stale')
+  assert.match(staleResult.discovery.message, /Реєстрові шляхи знайдено/)
+
+  const inaccessible = fixture({ service: { installed: false }, locator: { status: 'access_denied' }, files: new Set() })
+  assert.equal((await inspectEnvironment(inaccessible.adapter)).installation.status, 'unknown')
 })
 
 test('detects stopped and transitional service states independently of API status', async () => {
@@ -183,7 +244,12 @@ test('PowerShell provider is constrained to a read-only named-service query and 
   assert.match(source, /SERVICE_ACCESS_DENIED/)
   assert.match(source, /timeout:\s*5_000/)
   assert.match(source, /windowsHide:\s*true/)
+  assert.match(source, /HKEY_LOCAL_MACHINE\\Software\\HromadaAID\\Installer/)
+  assert.match(source, /writableByUnprivileged/)
+  assert.match(source, /Security\.AccessControl\.RegistryRights\]::SetValue/)
+  assert.match(source, /Get-Acl -LiteralPath/)
   assert.doesNotMatch(source, /Start-Service|Stop-Service|New-Service|Remove-Service|sc\.exe\s+(?:start|stop|create|delete)|Set-Acl|Set-NetFirewall/)
+  assert.doesNotMatch(source, /Set-ItemProperty|New-ItemProperty|Remove-ItemProperty|New-Item\s+-Path\s+Registry|Remove-Item\s+-Path\s+Registry/)
   assert.match(source, /redirect:\s*'manual'/)
   assert.match(source, /AbortController/)
 })
