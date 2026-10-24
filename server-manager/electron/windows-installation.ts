@@ -16,8 +16,8 @@ async function verifyPackageCopy(source: string, candidate: string): Promise<voi
   const sourceManifest = await readFile(join(source, 'package-integrity.json'))
   const candidateManifest = await readFile(join(candidate, 'package-integrity.json'))
   if (!sourceManifest.equals(candidateManifest)) throw new Error('Незавершений Server.next відрізняється від комплектного серверного пакета; файли збережено для перевірки.')
-  await callNode(source, [join(source, 'installer', 'verify-server-package.mjs'), source], join(source, 'app'), undefined, 120_000)
-  await callNode(candidate, [join(candidate, 'installer', 'verify-server-package.mjs'), candidate], join(candidate, 'app'), undefined, 120_000)
+  await verifyPackagedServer(source)
+  await verifyPackagedServer(candidate)
   const manifest = JSON.parse(sourceManifest.toString('utf8')) as { files?: Array<{ path: string; sha256: string; sizeBytes: number }> }
   if (!Array.isArray(manifest.files) || manifest.files.length === 0) throw new Error('Маніфест комплектного серверного пакета порожній.')
   for (const file of manifest.files) {
@@ -26,6 +26,15 @@ async function verifyPackageCopy(source: string, candidate: string): Promise<voi
     if (expected.length !== file.sizeBytes || createHash('sha256').update(expected).digest('hex') !== file.sha256 || !actual.equals(expected)) {
       throw new Error('Незавершений Server.next не збігається з перевіреним пакетом; його не перезаписано.')
     }
+  }
+}
+
+async function verifyPackagedServer(root: string): Promise<void> {
+  try {
+    await callNode(root, [join(root, 'installer', 'verify-server-package.mjs'), root], join(root, 'app'), undefined, 120_000)
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'невідома помилка локального модуля'
+    throw Object.assign(new Error(`Перевірка комплекту сервера не пройшла: ${detail}`), { code: 'SERVER_PACKAGE_INVALID' })
   }
 }
 
@@ -102,7 +111,7 @@ export function createWindowsInstallationAdapters(): ServerInstallAdapters {
       const root = payloadRoot()
       const configModule = await import(pathToFileURL(join(root, 'installer', 'windows-installer-config.mjs')).href)
       configModule.validateInstallerOptions({ mode: 'server', programDirectory: request.programDirectory, dataDirectory: request.dataDirectory, backupDirectory: request.backupDirectory })
-      await callNode(root, [join(root, 'installer', 'verify-server-package.mjs'), root], join(root, 'app'), undefined, 120_000)
+      await verifyPackagedServer(root)
       const integrity = JSON.parse(await readFile(join(root, 'package-integrity.json'), 'utf8')) as { files: Array<{ sizeBytes: number }> }
       if (!Array.isArray(integrity.files) || integrity.files.length < 1) throw new Error('Маніфест серверного пакета порожній або пошкоджений.')
       const serverBytes = integrity.files.reduce((total, file) => total + file.sizeBytes, 0) + (await stat(join(root, 'package-integrity.json'))).size
@@ -119,7 +128,7 @@ export function createWindowsInstallationAdapters(): ServerInstallAdapters {
         await verifyPackageCopy(root, stage)
         return
       }
-      await callNode(root, [join(root, 'installer', 'verify-server-package.mjs'), root], join(root, 'app'), undefined, 120_000)
+      await verifyPackagedServer(root)
       await cp(root, stage, { recursive: true, errorOnExist: true, force: false })
       await verifyPackageCopy(root, stage)
     },

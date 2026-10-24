@@ -131,6 +131,9 @@ async function main() {
   await copyFile(join(root, 'packaging', 'install-server-service.ps1'), join(serverTarget, 'installer', 'install-server-service.ps1'))
   await copyFile(join(root, 'packaging', 'admin-setup.ps1'), join(serverTarget, 'installer', 'admin-setup.ps1'))
   await copyFile(join(root, 'packaging', 'verify-server-package.mjs'), join(serverTarget, 'installer', 'verify-server-package.mjs'))
+  // verify-server-package.mjs imports this sibling at runtime; keep the complete
+  // local module graph in the payload rather than relying on the build host.
+  await copyFile(join(root, 'packaging', 'server-runtime-check.mjs'), join(serverTarget, 'installer', 'server-runtime-check.mjs'))
   await copyFile(join(root, 'packaging', 'server-package-transaction.mjs'), join(serverTarget, 'installer', 'server-package-transaction.mjs'))
   await copyFile(join(root, 'packaging', 'windows-service-control.ps1'), join(serverTarget, 'installer', 'windows-service-control.ps1'))
   await copyFile(join(root, 'packaging', 'write-installation-locator.ps1'), join(serverTarget, 'installer', 'write-installation-locator.ps1'))

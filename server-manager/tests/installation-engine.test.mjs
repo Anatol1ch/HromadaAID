@@ -51,6 +51,31 @@ test('existing or incomplete installation blocks a clean install before filesyst
   assert.equal(f.events.at(-1).status, 'failed')
 })
 
+test('technical server-payload verification failures remain distinct from an existing partial installation', async () => {
+  const f = fixture()
+  f.adapters.preflight = async () => {
+    throw Object.assign(new Error("Cannot find module 'server-runtime-check.mjs'"), { code: 'SERVER_PACKAGE_INVALID' })
+  }
+  await assert.rejects(f.run(), error => {
+    assert.equal(error.code, 'SERVER_PACKAGE_INVALID')
+    assert.match(error.message, /server-runtime-check\.mjs/)
+    assert.doesNotMatch(error.message, /наявну або неповну інсталяцію/)
+    return true
+  })
+  assert.equal(f.events.at(-1).errorCode, 'SERVER_PACKAGE_INVALID')
+  assert.equal(f.calls.includes('stagePackage'), false)
+})
+
+test('a failed packaged-module check while considering a partial-install retry surfaces its technical cause', async () => {
+  const f = fixture({ installation: 'partial_installation' })
+  f.adapters.canResume = async () => {
+    throw Object.assign(new Error("Cannot find module 'server-runtime-check.mjs'"), { code: 'SERVER_PACKAGE_INVALID' })
+  }
+  await assert.rejects(f.run(), error => error.code === 'SERVER_PACKAGE_INVALID' && /server-runtime-check/.test(error.message))
+  assert.equal(f.events.at(-1).errorCode, 'SERVER_PACKAGE_INVALID')
+  assert.doesNotMatch(f.events.at(-1).message, /наявну або неповну інсталяцію/)
+})
+
 test('partial install resumes only when the Windows adapter confirms the staged package and same paths', async () => {
   const f = fixture({ installation: 'partial_installation', resumable: true, users: 'present' })
   await f.run()

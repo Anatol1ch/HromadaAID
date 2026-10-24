@@ -27,7 +27,7 @@ const serverManifest = await verifyServerPackage(serverSource, { verifyRuntime: 
 for (const required of [
   'runtime/node.exe', 'service/HromadaAIDService.exe', 'installer/prepare-server-install.mjs',
   'installer/windows-installer-paths.ps1', 'installer/install-server-service.ps1',
-  'installer/verify-server-package.mjs', 'installer/server-package-transaction.mjs',
+  'installer/verify-server-package.mjs', 'installer/server-runtime-check.mjs', 'installer/server-package-transaction.mjs',
   'installer/write-installation-locator.ps1', 'app/dist/server/src/installer-initialization.js',
   'app/dist/server/src/create-admin.js',
 ]) if (!serverManifest.files.some(entry => entry.path === required)) throw new Error(`Bundled server payload is missing ${required}.`)
@@ -101,6 +101,18 @@ await collectPayload(payloadDirectory)
 actualPayload.delete('package-integrity.json')
 if (actualPayload.size !== requiredPayload.size || [...requiredPayload].some(path => !actualPayload.has(path))) throw new Error('Bundled server payload differs from its verified file manifest.')
 if (packagedServerManifest.files.length !== serverManifest.files.length) throw new Error('Bundled server payload manifest changed during packaging.')
+// Validate the verifier from inside the actual extraResources payload with the
+// bundled Node runtime. Importing the repository copy cannot catch missing
+// sibling modules in electron-builder's output.
+const packagedNode = join(payloadDirectory, 'runtime', 'node.exe')
+const packagedVerifier = join(payloadDirectory, 'installer', 'verify-server-package.mjs')
+const packagedVerifierRun = spawnSync(packagedNode, [packagedVerifier, payloadDirectory], {
+  cwd: join(payloadDirectory, 'app'), encoding: 'utf8', windowsHide: true, timeout: 120_000,
+})
+if (packagedVerifierRun.error || packagedVerifierRun.status !== 0) {
+  const diagnostic = [packagedVerifierRun.stderr, packagedVerifierRun.stdout].filter(Boolean).join('\n').trim().slice(0, 4_000)
+  throw new Error(`Packaged server verifier could not load and validate its local module graph (exit ${packagedVerifierRun.status ?? 'unknown'}): ${diagnostic || packagedVerifierRun.error?.message || 'no diagnostic'}`)
+}
 if ([...actualPayload].some(path => /(?:^|[\\/])(?:tests?|__tests__|fixtures?|\.git)(?:[\\/]|$)|\.(?:sqlite3?|db3?|hraid(?:\.|$)|dpapi(?:\.|$)|pem|p12|key)$/i.test(path))) throw new Error('Server payload contains test files or sensitive user data.')
 const forbiddenNames = /(^|[\\/])(Server|Server\.next|server|node_modules|release|.*\.sqlite(?:3)?|.*\.hraid|.*\.dpapi)([\\/]|$)/i
 const packagedFiles = []
