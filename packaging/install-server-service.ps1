@@ -1,4 +1,4 @@
-param(
+﻿param(
   [Parameter(Mandatory = $true)][string]$ProgramDirectory,
   [Parameter(Mandatory = $true)][string]$DataDirectory,
   [Parameter(Mandatory = $true)][string]$BackupDirectory,
@@ -226,8 +226,9 @@ try {
     if (-not $pendingExists) { throw 'База існує без користувачів і без маркера першого встановлення. Створення адміністратора в довільній базі заборонено; потрібне окреме рішення адміністратора.' }
     $adminScript = Join-Path $stagedServer 'installer\admin-setup.ps1'
     $createAdminCli = Join-Path $stagedServer 'app\dist\server\src\create-admin.js'
-    & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $adminScript -NodeExecutable $newNode -CreateAdminScript $createAdminCli -DatabasePath $database
-    if ($LASTEXITCODE -ne 0) { throw 'Першого адміністратора не створено. Наявні база, ключ і архіви збережено; повторіть встановлення для продовження.' }
+    $adminArguments = @('-NoLogo', '-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $adminScript), '-NodeExecutable', ('"{0}"' -f $newNode), '-CreateAdminScript', ('"{0}"' -f $createAdminCli), '-DatabasePath', ('"{0}"' -f $database))
+    $adminProcess = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList $adminArguments -WindowStyle Hidden -Wait -PassThru
+    if ($adminProcess.ExitCode -ne 0) { throw 'Першого адміністратора не створено. Наявні база, ключ і архіви збережено; повторіть встановлення для продовження.' }
     $databaseStatus = Get-DatabaseStatus $newNode $stagedServer $database
     if ($databaseStatus.users -ne 'present') { throw 'Після створення адміністратора перевірка облікового запису не пройшла.' }
   }

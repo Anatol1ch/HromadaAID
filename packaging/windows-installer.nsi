@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 Unicode true
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma
@@ -64,7 +64,10 @@ Section "Сервер HromadaAID" SEC_SERVER
   ; Stop an existing instance before replacing its runtime or WinSW files.
   SetOutPath "$PLUGINSDIR"
   File /oname=windows-service-control.ps1 "${PROJECT_DIR}\packaging\windows-service-control.ps1"
-  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-service-control.ps1" -Action stop-before-update -ProgramDirectory "$INSTDIR" -StateFile "$PLUGINSDIR\service-state.txt" -UpdateJournalPath "$DataDirectory\.hromadaaid-update-state.json"' $1
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-service-control.ps1" -Action stop-before-update -ProgramDirectory "$INSTDIR" -StateFile "$PLUGINSDIR\service-state.txt" -UpdateJournalPath "$DataDirectory\.hromadaaid-update-state.json"'
+  Pop $1
+  Pop $3
+  DetailPrint "Зупинення попередньої служби: код $1"
   ${If} $1 != 0
     MessageBox MB_ICONSTOP|MB_OK "Не вдалося штатно зупинити попередню службу. Файли сервера не оновлено. Код: $1"
     Abort
@@ -80,12 +83,18 @@ Section -PrepareServer
     SetOutPath "$PLUGINSDIR"
     File /oname=prepare-server-install.mjs "${PROJECT_DIR}\packaging\prepare-server-install.mjs"
     File /oname=windows-installer-config.mjs "${PROJECT_DIR}\packaging\windows-installer-config.mjs"
-    ExecWait '"$INSTDIR\Server.next\runtime\node.exe" "$PLUGINSDIR\prepare-server-install.mjs" --program-dir "$INSTDIR" --data-dir "$DataDirectory" --backup-dir "$BackupDirectory" --package-root "$INSTDIR\Server.next"' $1
+    nsExec::ExecToStack '"$INSTDIR\Server.next\runtime\node.exe" "$PLUGINSDIR\prepare-server-install.mjs" --program-dir "$INSTDIR" --data-dir "$DataDirectory" --backup-dir "$BackupDirectory" --package-root "$INSTDIR\Server.next"'
+    Pop $1
+    Pop $3
+    DetailPrint "Підготовка каталогів і конфігурації: код $1"
     ${If} $1 != 0
       MessageBox MB_ICONSTOP|MB_OK "Не вдалося підготувати конфігурацію сервера. Каталоги та наявні дані залишено без видалення. Код: $1"
       Abort
     ${EndIf}
-    ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Server.next\installer\install-server-service.ps1" -ProgramDirectory "$INSTDIR" -DataDirectory "$DataDirectory" -BackupDirectory "$BackupDirectory" -PreviousServiceStateFile "$PLUGINSDIR\service-state.txt"' $1
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Server.next\installer\install-server-service.ps1" -ProgramDirectory "$INSTDIR" -DataDirectory "$DataDirectory" -BackupDirectory "$BackupDirectory" -PreviousServiceStateFile "$PLUGINSDIR\service-state.txt"'
+    Pop $1
+    Pop $3
+    DetailPrint "Підготовка Windows Service: код $1"
     ${If} $1 != 0
       MessageBox MB_ICONSTOP|MB_OK "Не вдалося підготувати Windows Service. Наявні бази, ключі та резервні копії збережено. Перевірте права, диски, конфігурацію та журнали інсталятора. Код: $1"
       Abort
@@ -116,7 +125,9 @@ SectionEnd
 
 Section "Uninstall"
   IfFileExists "$INSTDIR\Server\installer\windows-service-control.ps1" 0 unSkipServiceRemoval
-  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Server\installer\windows-service-control.ps1" -Action uninstall -ProgramDirectory "$INSTDIR"' $0
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Server\installer\windows-service-control.ps1" -Action uninstall -ProgramDirectory "$INSTDIR"'
+  Pop $0
+  Pop $3
   ${If} $0 != 0
     MessageBox MB_ICONSTOP|MB_OK "Не вдалося штатно зупинити або видалити службу HromadaAIDApi. Файли та дані залишено. Код: $0"
     Abort
@@ -159,13 +170,17 @@ FunctionEnd
 
 Function .onInstFailed
   IfFileExists "$PLUGINSDIR\windows-service-control.ps1" 0 installFailureDone
-  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-service-control.ps1" -Action restore-after-failure -ProgramDirectory "$INSTDIR" -StateFile "$PLUGINSDIR\service-state.txt"' $0
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-service-control.ps1" -Action restore-after-failure -ProgramDirectory "$INSTDIR" -StateFile "$PLUGINSDIR\service-state.txt"'
+  Pop $0
+  Pop $3
 installFailureDone:
 FunctionEnd
 
 Function HromadaAidRestoreServiceAfterAbort
   IfFileExists "$PLUGINSDIR\windows-service-control.ps1" 0 userAbortDone
-  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-service-control.ps1" -Action restore-after-failure -ProgramDirectory "$INSTDIR" -StateFile "$PLUGINSDIR\service-state.txt"' $0
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-service-control.ps1" -Action restore-after-failure -ProgramDirectory "$INSTDIR" -StateFile "$PLUGINSDIR\service-state.txt"'
+  Pop $0
+  Pop $3
 userAbortDone:
 FunctionEnd
 
@@ -325,9 +340,22 @@ Function SummaryLeave
   ${EndIf}
   SetOutPath "$PLUGINSDIR"
   File /oname=windows-installer-paths.ps1 "${PROJECT_DIR}\packaging\windows-installer-paths.ps1"
-  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-installer-paths.ps1" -Mode "$ValidationMode" -ProgramDirectory "$INSTDIR" -DataDirectory "$DataDirectory" -BackupDirectory "$BackupDirectory" -ClientBytes ${CLIENT_PAYLOAD_BYTES} -ServerBytes ${SERVER_PAYLOAD_BYTES} -SupportBytes ${INSTALLER_SUPPORT_BYTES}' $2
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-installer-paths.ps1" -Mode "$ValidationMode" -ProgramDirectory "$INSTDIR" -DataDirectory "$DataDirectory" -BackupDirectory "$BackupDirectory" -ClientBytes ${CLIENT_PAYLOAD_BYTES} -ServerBytes ${SERVER_PAYLOAD_BYTES} -SupportBytes ${INSTALLER_SUPPORT_BYTES}'
+  Pop $2
+  Pop $3
+  DetailPrint "Попередня перевірка каталогів: код $2"
   ${If} $2 != 0
-    MessageBox MB_ICONSTOP|MB_OK "Перевірка каталогів не пройдена. Використайте окремі доступні локальні диски NTFS; каталоги не мають перекриватися, а наявні дані потребують сумісного server.json."
+    ${If} $2 == 3
+      MessageBox MB_ICONSTOP|MB_OK "На одному з вибраних дисків недостатньо вільного місця. Звільніть місце або змініть відповідний каталог. Наявні дані не змінено."
+    ${ElseIf} $2 == 4
+      MessageBox MB_ICONSTOP|MB_OK "Каталоги програми, даних і резервних копій мають бути на доступних локальних дисках NTFS. Перевірте диск і файлову систему."
+    ${ElseIf} $2 == 5
+      MessageBox MB_ICONSTOP|MB_OK "Знайдено наявну базу, архів або server.json, що не відповідає вибраним каталогам. Для оновлення виберіть попередні шляхи або окремо перевірте дані адміністратора."
+    ${ElseIf} $2 == 6
+      MessageBox MB_ICONSTOP|MB_OK "Каталоги програми, серверних даних і резервних копій не повинні перекриватися. Виберіть окремі каталоги."
+    ${Else}
+      MessageBox MB_ICONSTOP|MB_OK "Не вдалося перевірити доступність або параметри вибраних каталогів. Перевірте диски, права доступу та server.json, якщо це оновлення. Наявні дані не змінено. Код: $2"
+    ${EndIf}
     Abort
   ${EndIf}
 FunctionEnd

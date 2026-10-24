@@ -36,6 +36,10 @@ public static class HromadaAidInstallerPath {
 
 function Stop-WithMessage([string]$message) {
   [Console]::Error.WriteLine($message)
+  if ($message -match 'недостатньо місця') { exit 3 }
+  if ($message -match 'NTFS') { exit 4 }
+  if ($message -match 'server\.json|базу HromadaAID|DPAPI-ключ|резервних архівів|резервних копій уже є архіви') { exit 5 }
+  if ($message -match 'перекриватися|поза каталогом програми|каталозі програмних файлів') { exit 6 }
   exit 1
 }
 
@@ -70,7 +74,7 @@ if ($Mode -ne 'client') {
 }
 $resolved = @{}
 foreach ($entry in $paths.GetEnumerator()) {
-  if ($entry.Value -notmatch '^[A-Za-z]:\\' -or $entry.Value -match '[<>:"|?*\x00-\x1f]') {
+  if ($entry.Value -notmatch '^[A-Za-z]:\\' -or $entry.Value.Substring(2) -match '[<>:"|?*\x00-\x1f]') {
     Stop-WithMessage "Шлях до каталогу $($entry.Key) має бути абсолютним локальним шляхом Windows."
   }
   if ($entry.Value.StartsWith('\\')) { Stop-WithMessage 'Мережеві шляхи та UNC-каталоги для встановлення не підтримуються.' }

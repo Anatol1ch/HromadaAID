@@ -1,4 +1,4 @@
-param(
+﻿param(
   [Parameter(Mandatory = $true)][ValidateSet('stop-before-update', 'restore-after-failure', 'uninstall')][string]$Action,
   [Parameter(Mandatory = $true)][string]$ProgramDirectory,
   [Parameter(Mandatory = $false)][string]$StateFile,

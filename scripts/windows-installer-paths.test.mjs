@@ -1,8 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, win32 } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { renderInstalledServerConfig, renderWinSWConfig, validateInstallerOptions } from '../packaging/windows-installer-config.mjs'
 import { prepareServerInstall } from '../packaging/prepare-server-install.mjs'
 import { readFile } from 'node:fs/promises'
@@ -28,7 +30,7 @@ test('installer accepts the three choices and only validates server paths when n
 })
 
 test('NSIS exposes the three install modes as independent client and server components', async () => {
-  const script = await readFile(new URL('../packaging/windows-installer.nsi', import.meta.url), 'utf8')
+  const script = (await readFile(new URL('../packaging/windows-installer.nsi', import.meta.url), 'utf8')).replace(/^\uFEFF/, '')
   assert.match(script, /Section "Клієнт HromadaAID" SEC_CLIENT/)
   assert.match(script, /Section "Сервер HromadaAID" SEC_SERVER/)
   assert.match(script, /SectionSetFlags \$\{SEC_CLIENT\} \$\{SF_SELECTED\}/)
@@ -44,6 +46,29 @@ test('NSIS exposes the three install modes as independent client and server comp
   assert.match(script, /Function BackupPage[\s\S]*Call IsServerSelected[\s\S]*FunctionEnd/)
   assert.match(script, /Page custom AdminSetupPage AdminSetupLeave "Створення адміністратора"/)
   assert.match(script, /SetOutPath "\$INSTDIR\\Server\.next"/)
+  assert.ok(script.replace(/^\uFEFF/, '').startsWith('# -*- coding: utf-8 -*-\r\nUnicode true') || script.replace(/^\uFEFF/, '').startsWith('# -*- coding: utf-8 -*-\nUnicode true'))
+  assert.match(script, /nsExec::ExecToStack/)
+  assert.doesNotMatch(script, /ExecWait/)
+  assert.match(script, /Pop \$2[\s\S]*?\$2 == 3[\s\S]*?\$2 == 4[\s\S]*?\$2 == 5[\s\S]*?\$2 == 6/)
+  assert.doesNotMatch(script, /ExecWait\s+'[^\r\n]*powershell\.exe/i)
+})
+
+test('installer text sources are explicitly UTF-8 and Unicode NSIS is enabled', async () => {
+  const scriptBytes = readFileSync(new URL('../packaging/windows-installer.nsi', import.meta.url))
+  assert.deepEqual([...scriptBytes.subarray(0, 3)], [0xef, 0xbb, 0xbf])
+  const script = scriptBytes.subarray(3).toString('utf8')
+  assert.match(script, /^Unicode true/m)
+  assert.match(script, /Клієнт HromadaAID/)
+  assert.match(script, /Каталог серверних даних/)
+  assert.doesNotMatch(script, /\uFFFD|Рџ|СЂС/)
+  const build = readFileSync(new URL('./build-windows-installer.mjs', import.meta.url), 'utf8')
+  assert.match(build, /'\/INPUTCHARSET',[\s\S]*?'UTF8'/)
+  for (const name of ['admin-setup.ps1', 'install-server-service.ps1', 'windows-service-control.ps1', 'windows-installer-paths.ps1']) {
+    const bytes = readFileSync(new URL(`../packaging/${name}`, import.meta.url))
+    assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], `${name} must include a UTF-8 BOM for Windows PowerShell 5.1`)
+    const text = bytes.subarray(3).toString('utf8')
+    assert.doesNotMatch(text, /\uFFFD|Рџ|СЂС/, `${name} contains likely mojibake`)
+  }
 })
 
 test('NSIS registers and verifies the LocalService WinSW wrapper, preserves user data on uninstall', async () => {
@@ -62,6 +87,7 @@ test('NSIS registers and verifies the LocalService WinSW wrapper, preserves user
   assert.match(installer, /installer-preflight\.js/)
   assert.match(installer, /installer-initialization\.js/)
   assert.match(installer, /create-admin\.js/)
+  assert.match(installer, /\$adminArguments[\s\S]*Start-Process[\s\S]*-WindowStyle Hidden -Wait -PassThru/)
   assert.match(installer, /Invoke-PackageTransaction \$stagedServer 'prepare'/)
   assert.match(installer, /Invoke-PackageTransaction \$stagedServer 'activate'/)
   assert.match(installer, /verify-server-package\.mjs/)
@@ -110,6 +136,49 @@ test('PowerShell path validator skips server data paths for client-only installa
   assert.match(validator, /SupportBytes \+ 8MB/)
   assert.match(validator, /\$requiredText/)
   assert.doesNotMatch(validator, /67108864|64\s*\*\s*1024\s*\*\s*1024/)
+  assert.match(validator, /недостатньо місця[\s\S]*exit 3/)
+  assert.match(validator, /NTFS[\s\S]*exit 4/)
+  assert.match(validator, /server\\\.json\|базу HromadaAID[\s\S]*exit 5/)
+})
+
+test('PowerShell preflight accepts Unicode, not-yet-created sibling directories without creating them', { skip: process.platform !== 'win32' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'HromadaAID preflight '))
+  const paths = {
+    program: join(root, 'Програма'),
+    data: join(root, 'Серверні дані'),
+    backups: join(root, 'Резервні копії'),
+  }
+  try {
+    const script = fileURLToPath(new URL('../packaging/windows-installer-paths.ps1', import.meta.url))
+    const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    const result = spawnSync(powershell, [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script,
+      '-Mode', 'server-client', '-ProgramDirectory', paths.program, '-DataDirectory', paths.data,
+      '-BackupDirectory', paths.backups, '-ClientBytes', '0', '-ServerBytes', '0', '-SupportBytes', '0',
+    ], { encoding: 'utf8', windowsHide: true, timeout: 20_000 })
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+    for (const path of Object.values(paths)) assert.equal(existsSync(path), false, `preflight must not create ${path}`)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('server preparation creates new data and backup directories only when installation work begins', () => {
+  const root = mkdtempSync(join(tmpdir(), 'hromada-create-targets-'))
+  const options = {
+    mode: 'server-client',
+    programDirectory: join(root, 'Програма'),
+    dataDirectory: join(root, 'Дані'),
+    backupDirectory: join(root, 'Копії'),
+    packageRoot: join(root, 'Програма', 'Server.next'),
+  }
+  try {
+    assert.equal(existsSync(options.dataDirectory), false)
+    assert.equal(existsSync(options.backupDirectory), false)
+    prepareServerInstall(options)
+    for (const path of [options.dataDirectory, join(options.dataDirectory, 'Database'), join(options.dataDirectory, 'Logs'), options.backupDirectory]) {
+      assert.equal(existsSync(path), true, `${path} is created during install preparation`)
+    }
+    assert.equal(existsSync(join(options.dataDirectory, 'Database', 'hromada-aid.sqlite')), false)
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
 test('administrator setup keeps credentials in masked controls and forwards them only through child stdin', async () => {

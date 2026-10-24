@@ -1,4 +1,4 @@
-param(
+﻿param(
   [Parameter(Mandatory = $true)][string]$NodeExecutable,
   [Parameter(Mandatory = $true)][string]$CreateAdminScript,
   [Parameter(Mandatory = $true)][string]$DatabasePath

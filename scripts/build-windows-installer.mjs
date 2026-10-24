@@ -58,6 +58,8 @@ function main() {
   const nsisHome = findNsisHome(makensis)
   const output = join(release, 'HromadaAID-Setup-' + manifest.appVersion + '.exe')
   execFileSync(makensis, [
+    '/INPUTCHARSET',
+    'UTF8',
     '/V2',
     nsisDefine('CLIENT_PAYLOAD', client),
     nsisDefine('SERVER_PAYLOAD', server),
