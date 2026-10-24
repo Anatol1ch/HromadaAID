@@ -11,8 +11,50 @@ $ErrorActionPreference = 'Stop'
 $script:PreflightStage = 'arguments'
 
 trap {
-  $hresult = $_.Exception.HResult
-  [Console]::Out.WriteLine("PREFLIGHT_ERROR|stage=$script:PreflightStage|code=1|reason=unhandled-exception|hresult=$hresult")
+  $record = $_
+  $exception = $record.Exception
+  $exceptionChain = @()
+  while ($null -ne $exception) {
+    $exceptionChain += [ordered]@{
+      type = $exception.GetType().FullName
+      message = $exception.Message
+      hresult = $exception.HResult
+    }
+    $exception = $exception.InnerException
+  }
+
+  $detailFileName = 'HromadaAID-preflight-' + [guid]::NewGuid().ToString('N') + '.json'
+  $detail = [ordered]@{
+    stage = $script:PreflightStage
+    script = [IO.Path]::GetFileName($record.InvocationInfo.ScriptName)
+    line = $record.InvocationInfo.ScriptLineNumber
+    errorId = $record.FullyQualifiedErrorId
+    position = $record.InvocationInfo.PositionMessage
+    arguments = [ordered]@{
+      mode = $Mode
+      programDirectory = $ProgramDirectory
+      dataDirectory = $DataDirectory
+      backupDirectory = $BackupDirectory
+      clientBytes = $ClientBytes
+      serverBytes = $ServerBytes
+      supportBytes = $SupportBytes
+    }
+    exceptions = $exceptionChain
+  }
+  $detailWritten = $false
+  try {
+    $detailPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), $detailFileName)
+    $detailJson = ConvertTo-Json -InputObject $detail -Depth 8
+    [IO.File]::WriteAllText($detailPath, $detailJson, [Text.UTF8Encoding]::new($false))
+    $detailWritten = $true
+  } catch {
+    # Preserve the original failure even if the diagnostic file cannot be written.
+  }
+
+  $hresult = $record.Exception.HResult
+  $exceptionType = $record.Exception.GetType().FullName
+  $line = $record.InvocationInfo.ScriptLineNumber
+  [Console]::Out.WriteLine("PREFLIGHT_ERROR|stage=$script:PreflightStage|code=1|reason=unhandled-exception|hresult=$hresult|type=$exceptionType|line=$line|detailFile=$detailFileName|detailWritten=$detailWritten")
   exit 1
 }
 

@@ -37,6 +37,9 @@ Var DataEdit
 Var BackupEdit
 Var DataDirectory
 Var BackupDirectory
+Var PreflightProgramDirectory
+Var PreflightDataDirectory
+Var PreflightBackupDirectory
 Var DisplayDataDirectory
 Var DisplayBackupDirectory
 Var InstallMode
@@ -190,6 +193,21 @@ Function IsServerSelected
   Push $0
 FunctionEnd
 
+Function TrimPathTrailingSeparator
+  Exch $0
+trimPathTrailingSeparatorLoop:
+  StrLen $1 $0
+  ${If} $1 > 0
+    StrCpy $2 $0 1 -1
+    ${If} $2 == "\"
+      IntOp $1 $1 - 1
+      StrCpy $0 $0 $1
+      Goto trimPathTrailingSeparatorLoop
+    ${EndIf}
+  ${EndIf}
+  Exch $0
+FunctionEnd
+
 Function DataPage
   Call IsServerSelected
   Pop $0
@@ -338,10 +356,19 @@ Function SummaryLeave
       StrCpy $ValidationMode "server-client"
     ${EndIf}
   ${EndIf}
+  Push "$INSTDIR"
+  Call TrimPathTrailingSeparator
+  Pop $PreflightProgramDirectory
+  Push "$DataDirectory"
+  Call TrimPathTrailingSeparator
+  Pop $PreflightDataDirectory
+  Push "$BackupDirectory"
+  Call TrimPathTrailingSeparator
+  Pop $PreflightBackupDirectory
   SetOutPath "$PLUGINSDIR"
   File /oname=windows-installer-paths.ps1 "${PROJECT_DIR}\packaging\windows-installer-paths.ps1"
-  DetailPrint "Preflight paths: program=[$INSTDIR] data=[$DataDirectory] backups=[$BackupDirectory] mode=[$ValidationMode]"
-  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-installer-paths.ps1" -Mode "$ValidationMode" -ProgramDirectory "$INSTDIR" -DataDirectory "$DataDirectory" -BackupDirectory "$BackupDirectory" -ClientBytes ${CLIENT_PAYLOAD_BYTES} -ServerBytes ${SERVER_PAYLOAD_BYTES} -SupportBytes ${INSTALLER_SUPPORT_BYTES}'
+  DetailPrint "Preflight launch: powershell=[$SYSDIR\WindowsPowerShell\v1.0\powershell.exe] script=[$PLUGINSDIR\windows-installer-paths.ps1] cwd=[$PLUGINSDIR] mode=[$ValidationMode] program=[$PreflightProgramDirectory] data=[$PreflightDataDirectory] backups=[$PreflightBackupDirectory] clientBytes=[${CLIENT_PAYLOAD_BYTES}] serverBytes=[${SERVER_PAYLOAD_BYTES}] supportBytes=[${INSTALLER_SUPPORT_BYTES}]"
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-installer-paths.ps1" -Mode "$ValidationMode" -ProgramDirectory "$PreflightProgramDirectory" -DataDirectory "$PreflightDataDirectory" -BackupDirectory "$PreflightBackupDirectory" -ClientBytes ${CLIENT_PAYLOAD_BYTES} -ServerBytes ${SERVER_PAYLOAD_BYTES} -SupportBytes ${INSTALLER_SUPPORT_BYTES}'
   Pop $2
   Pop $3
   DetailPrint "Попередня перевірка каталогів: код $2"

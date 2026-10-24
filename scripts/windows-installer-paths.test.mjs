@@ -38,8 +38,8 @@ test('NSIS exposes the three install modes as independent client and server comp
   assert.match(script, /StrCpy \$ValidationMode "client"/)
   assert.match(script, /StrCpy \$ValidationMode "server-client"/)
   assert.match(script, /-Mode "\$ValidationMode"/)
-  assert.match(script, /-ProgramDirectory "\$INSTDIR" -DataDirectory "\$DataDirectory" -BackupDirectory "\$BackupDirectory"/)
-  assert.match(script, /nsExec::ExecToStack[\s\S]*?windows-installer-paths\.ps1[\s\S]*?-ProgramDirectory "\$INSTDIR"[\s\S]*?-DataDirectory "\$DataDirectory"[\s\S]*?-BackupDirectory "\$BackupDirectory"/)
+  assert.match(script, /Call TrimPathTrailingSeparator[\s\S]*?Pop \$PreflightProgramDirectory[\s\S]*?Pop \$PreflightDataDirectory[\s\S]*?Pop \$PreflightBackupDirectory/)
+  assert.match(script, /nsExec::ExecToStack[\s\S]*?windows-installer-paths\.ps1[\s\S]*?-ProgramDirectory "\$PreflightProgramDirectory"[\s\S]*?-DataDirectory "\$PreflightDataDirectory"[\s\S]*?-BackupDirectory "\$PreflightBackupDirectory"/)
   assert.match(script, /Pop \$2\s+Pop \$3\s+DetailPrint "Попередня перевірка каталогів: код \$2"/)
   assert.match(script, /--package-root "\$INSTDIR\\Server\.next"/)
   assert.match(script, /CLIENT_PAYLOAD_BYTES/)
@@ -57,7 +57,7 @@ test('NSIS exposes the three install modes as independent client and server comp
   assert.match(script, /Page custom BackupPage BackupLeave ": Резервні копії"/)
   assert.match(script, /Page custom AdminSetupPage AdminSetupLeave ": Створення адміністратора"/)
   assert.match(script, /Page custom SummaryPage SummaryLeave ": Перевірка параметрів"/)
-  assert.match(script, /Preflight paths: program=\[\$INSTDIR\] data=\[\$DataDirectory\] backups=\[\$BackupDirectory\]/)
+  assert.match(script, /Preflight launch: powershell=\[\$SYSDIR\\WindowsPowerShell\\v1\.0\\powershell\.exe\] script=\[\$PLUGINSDIR\\windows-installer-paths\.ps1\] cwd=\[\$PLUGINSDIR\]/)
   assert.match(script, /Діагностика preflight: \$3/)
   assert.match(script, /Не вдалося перевірити вибрані параметри\. Код: \$2.*\$3/)
   assert.doesNotMatch(script, /ExecWait\s+'[^\r\n]*powershell\.exe/i)
@@ -210,6 +210,38 @@ test('PowerShell preflight returns actionable stdout diagnostics for NSIS ExecTo
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
+test('PowerShell preflight trap records exception details and safe arguments', { skip: process.platform !== 'win32' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'HromadaAID preflight exception '))
+  try {
+    const original = readFileSync(new URL('../packaging/windows-installer-paths.ps1', import.meta.url), 'utf8')
+    const marker = "\nAdd-Type -TypeDefinition @'"
+    assert.ok(original.includes(marker))
+    const script = join(root, 'windows-installer-paths.ps1')
+    writeFileSync(script, original.replace(marker, "\nthrow [System.InvalidOperationException]::new('synthetic diagnostic failure')" + marker), 'utf8')
+    const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    const result = spawnSync(powershell, [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', script,
+      '-Mode', 'server-client', '-ProgramDirectory', join(root, 'Program'), '-DataDirectory', join(root, 'Data'),
+      '-BackupDirectory', join(root, 'Backups'), '-ClientBytes', '0', '-ServerBytes', '0', '-SupportBytes', '0',
+    ], { encoding: 'utf8', windowsHide: true, timeout: 20_000 })
+    assert.equal(result.status, 1)
+    assert.match(result.stdout, /PREFLIGHT_ERROR\|stage=arguments\|code=1\|reason=unhandled-exception\|hresult=-?\d+\|type=System\.InvalidOperationException\|line=\d+\|detailFile=HromadaAID-preflight-[a-f0-9]+\.json\|detailWritten=True/)
+    const detailName = result.stdout.match(/detailFile=([^|\r\n]+)/)?.[1]
+    assert.ok(detailName)
+    const detailPath = join(tmpdir(), detailName)
+    try {
+      const detail = JSON.parse(readFileSync(detailPath, 'utf8'))
+      assert.equal(detail.stage, 'arguments')
+      assert.equal(detail.script, 'windows-installer-paths.ps1')
+      assert.equal(detail.arguments.mode, 'server-client')
+      assert.equal(detail.arguments.dataDirectory, join(root, 'Data'))
+      assert.equal(detail.exceptions[0].type, 'System.InvalidOperationException')
+      assert.equal(detail.exceptions[0].message, 'synthetic diagnostic failure')
+      assert.ok(detail.line > 0)
+    } finally { rmSync(detailPath, { force: true }) }
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
 test('synthetic NSIS ExecToStack preserves installer path arguments and captures PowerShell stdout', { skip: process.platform !== 'win32' }, (t) => {
   const root = mkdtempSync(join(tmpdir(), 'HromadaAID NSIS contract '))
   const paths = {
@@ -261,6 +293,97 @@ test('synthetic NSIS ExecToStack preserves installer path arguments and captures
     assert.equal(exitCode, '0')
     const received = JSON.parse(Buffer.from(stdout, 'base64').toString('utf8'))
     assert.deepEqual(received, [paths.program, paths.data, paths.backups])
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('NSIS ExecToStack runs the actual preflight from PLUGINSDIR and preserves its exit code and stdout', { skip: process.platform !== 'win32' }, (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'HromadaAID actual NSIS preflight '))
+  const paths = {
+    program: join(root, 'Програма з пробілами'),
+    data: join(root, 'Серверні дані з пробілами'),
+    backups: join(root, 'Резервні копії з пробілами'),
+  }
+  const preflight = fileURLToPath(new URL('../packaging/windows-installer-paths.ps1', import.meta.url))
+  const nsi = join(root, 'preflight-test.nsi')
+  const harness = join(root, 'preflight-test.exe')
+  const capture = join(root, 'nsis-preflight-output.txt')
+  const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const installerSource = readFileSync(new URL('../packaging/windows-installer.nsi', import.meta.url), 'utf8')
+  const trimFunction = installerSource.match(/Function TrimPathTrailingSeparator\r?\n[\s\S]*?FunctionEnd/)?.[0]
+  assert.ok(trimFunction, 'production trailing-separator helper must be available to the harness')
+  const call = `  nsExec::ExecToStack '\"${powershell}\" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$PLUGINSDIR\\windows-installer-paths.ps1\" -Mode \"server-client\" -ProgramDirectory \"$PreflightProgramDirectory\" -DataDirectory \"$PreflightDataDirectory\" -BackupDirectory \"$PreflightBackupDirectory\" -ClientBytes 388534871 -ServerBytes 125227157 -SupportBytes 63725'`
+  const source = [
+    'Unicode true',
+    '!include "LogicLib.nsh"',
+    `OutFile \"${harness}\"`,
+    'Var PreflightProgramDirectory',
+    'Var PreflightDataDirectory',
+    'Var PreflightBackupDirectory',
+    trimFunction,
+    'RequestExecutionLevel user',
+    'SilentInstall silent',
+    'Section',
+    '  InitPluginsDir',
+    '  SetOutPath \"$PLUGINSDIR\"',
+    `  File /oname=windows-installer-paths.ps1 \"${preflight}\"`,
+    `  StrCpy $PreflightProgramDirectory \"${paths.program}\\\"`,
+    `  StrCpy $PreflightBackupDirectory \"${paths.backups}\\\"`,
+    `  StrCpy $PreflightDataDirectory \"${process.env.SystemDrive ?? 'C:'}\\\"`,
+    '  Push $PreflightProgramDirectory',
+    '  Call TrimPathTrailingSeparator',
+    '  Pop $PreflightProgramDirectory',
+    '  Push $PreflightBackupDirectory',
+    '  Call TrimPathTrailingSeparator',
+    '  Pop $PreflightBackupDirectory',
+    '  Push $PreflightDataDirectory',
+    '  Call TrimPathTrailingSeparator',
+    '  Pop $PreflightDataDirectory',
+    call,
+    '  Pop $0',
+    '  Pop $1',
+    '  StrCpy $4 $0',
+    '  StrCpy $5 $1',
+    `  StrCpy $PreflightDataDirectory \"${paths.data}\\\"`,
+    '  Push $PreflightDataDirectory',
+    '  Call TrimPathTrailingSeparator',
+    '  Pop $PreflightDataDirectory',
+    call,
+    '  Pop $2',
+    '  Pop $3',
+    `  FileOpen $6 \"${capture}\" w`,
+    '  FileWrite $6 "$4|$5$\\r$\\n$2|$3"',
+    '  FileClose $6',
+    'SectionEnd',
+  ].join('\r\n') + '\r\n'
+  writeFileSync(nsi, source, 'utf8')
+  try {
+    const cache = join(process.env.LOCALAPPDATA ?? '', 'electron-builder', 'Cache')
+    const findMakensis = (directory, depth = 5) => {
+      if (depth < 0 || !existsSync(directory)) return undefined
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const candidate = join(directory, entry.name)
+        if (entry.isFile() && entry.name.toLowerCase() === 'makensis.exe') return candidate
+        if (entry.isDirectory()) { const found = findMakensis(candidate, depth - 1); if (found) return found }
+      }
+    }
+    const makensis = process.env.MAKENSIS_PATH ?? findMakensis(cache)
+    if (!makensis) return t.skip('makensis is unavailable; NSIS source assertions and PowerShell tests still run.')
+    execFileSync(makensis, ['/INPUTCHARSET', 'UTF8', '/V2', nsi], { windowsHide: true, timeout: 60_000 })
+    const run = spawnSync(harness, ['/S'], { windowsHide: true, encoding: 'utf8', timeout: 60_000 })
+    assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`)
+    const lines = readFileSync(capture, 'utf8').trim().split(/\r?\n/).filter(Boolean)
+    assert.equal(lines.length, 2, readFileSync(capture, 'utf8'))
+    const failedDivider = lines[0].indexOf('|')
+    const failedCode = lines[0].slice(0, failedDivider)
+    const failedOutput = lines[0].slice(failedDivider + 1)
+    assert.equal(failedCode, '1')
+    assert.match(failedOutput, /PREFLIGHT_ERROR\|stage=data-directory\|code=1\|reason=invalid-local-path/, readFileSync(capture, 'utf8'))
+    const successDivider = lines[1].indexOf('|')
+    const successCode = lines[1].slice(0, successDivider)
+    const successOutput = lines[1].slice(successDivider + 1)
+    assert.equal(successCode, '0')
+    assert.equal(successOutput, '')
+    for (const path of Object.values(paths)) assert.equal(existsSync(path), false, `preflight must not create ${path}`)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
