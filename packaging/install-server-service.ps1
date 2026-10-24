@@ -6,7 +6,7 @@
 )
 $ErrorActionPreference = 'Stop'
 $serviceName = 'HromadaAIDApi'
-$serviceAccount = 'NT SERVICE\HromadaAIDApi'
+$serviceSid = $null
 $stagedServer = Join-Path $ProgramDirectory 'Server.next'
 $activeServer = Join-Path $ProgramDirectory 'Server'
 $previousServer = Join-Path $ProgramDirectory 'Server.previous'
@@ -84,6 +84,16 @@ function Test-AbsoluteLocalPath([string]$Path) {
     return $false
   }
 }
+function Get-ServiceSid([string]$Name) {
+  $scPath = Join-Path $env:SystemRoot 'System32\sc.exe'
+  $output = & $scPath showsid $Name 2>&1
+  $exitCode = $LASTEXITCODE
+  $text = $output -join "`n"
+  if ($exitCode -ne 0 -or $text -notmatch '(?i)\b(S-1-5-80-(?:\d+-){4}\d+)\b') {
+    throw 'Не вдалося визначити SID служби для налаштування захищених прав доступу.'
+  }
+  return $Matches[1]
+}
 function Save-Acl([string]$Path) {
   if ([IO.Directory]::Exists($Path) -or [IO.File]::Exists($Path)) { $aclSnapshots[$Path] = (Get-Acl -LiteralPath $Path).Sddl }
 }
@@ -105,8 +115,34 @@ function Set-AclChecked([string]$Path, [string[]]$Rules, [bool]$ResetInheritance
   Invoke-Checked "$env:SystemRoot\System32\icacls.exe" $arguments 'Не вдалося налаштувати права доступу до вибраних каталогів.'
 }
 function Set-ReadOnlyServiceFile([string]$Path) {
-  Set-AclChecked $Path @('SYSTEM:F', 'BUILTIN\Administrators:F', "$serviceAccount`:R")
-  Invoke-Checked "$env:SystemRoot\System32\icacls.exe" @($Path, '/deny', "$serviceAccount`:(W,D)") 'Не вдалося захистити конфігураційний файл від змін службою.'
+  Set-AclChecked $Path @('*S-1-5-18:F', '*S-1-5-32-544:F')
+}
+function Grant-ServiceAccess([string]$Path, [string]$Permissions, [string]$Inheritance = '') {
+  if ([string]::IsNullOrWhiteSpace($script:serviceSid)) { throw 'SID служби ще не підтверджено; доступ до серверних файлів не змінено.' }
+  $servicePrincipal = "*$script:serviceSid"
+  $inheritanceFlags = if ($Inheritance) { "($Inheritance)" } else { '' }
+  Set-AclChecked $Path @("$servicePrincipal`:$inheritanceFlags$Permissions") $false
+}
+function Protect-ServiceFile([string]$Path) {
+  Grant-ServiceAccess $Path 'R'
+  $servicePrincipal = "*$script:serviceSid"
+  Invoke-Checked "$env:SystemRoot\System32\icacls.exe" @($Path, '/deny', "$servicePrincipal`:(W,D)") 'Не вдалося захистити конфігураційний файл від змін службою.'
+}
+function Configure-ServiceAccess {
+  $inheritance = 'OI)(CI'
+  Grant-ServiceAccess $DataDirectory 'RX' $inheritance
+  Grant-ServiceAccess $databaseRoot 'M' $inheritance
+  Grant-ServiceAccess (Join-Path $DataDirectory 'Logs') 'M' $inheritance
+  Grant-ServiceAccess $BackupDirectory 'M' $inheritance
+  Grant-ServiceAccess $activeServer 'RX' $inheritance
+  Protect-ServiceFile $config
+  if ($settings.tls) {
+    $tlsCertificate = [IO.Path]::GetFullPath([string]$settings.tls.certificatePath)
+    $tlsPrivateKey = [IO.Path]::GetFullPath([string]$settings.tls.privateKeyPath)
+    if ([IO.File]::Exists($tlsCertificate)) { Protect-ServiceFile $tlsCertificate }
+    if ([IO.File]::Exists($tlsPrivateKey)) { Protect-ServiceFile $tlsPrivateKey }
+  }
+  if ([IO.File]::Exists($key)) { Protect-ServiceFile $key }
 }
 function Invoke-PackageTransaction([string]$PackageRoot, [string]$Action, [string[]]$AdditionalArguments = @()) {
   $node = Join-Path $PackageRoot 'runtime\node.exe'
@@ -149,6 +185,7 @@ function Register-Service([string]$Wrapper) {
   $exitCode = $LASTEXITCODE
   if ($exitCode -ne 0 -or $sidResult -notmatch 'UNRESTRICTED|unrestricted') { $script:LastChildExitCode = $exitCode; throw 'Не вдалося підтвердити service SID служби.' }
   $script:LastChildExitCode = $null
+  $script:serviceSid = Get-ServiceSid $serviceName
 }
 function Get-HealthUrl($Settings) {
   $hostName = [string]$Settings.host
@@ -254,15 +291,15 @@ try {
 
   Set-InstallStage 'configure-acl'
   foreach ($path in @($ProgramDirectory, $activeServer, $DataDirectory, $databaseRoot, (Join-Path $DataDirectory 'Logs'), $BackupDirectory, $config, $key)) { Save-Acl $path }
-  Set-AclChecked $DataDirectory @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)RX")
-  Set-AclChecked $databaseRoot @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)M")
-  Set-AclChecked (Join-Path $DataDirectory 'Logs') @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)M")
-  Set-AclChecked $BackupDirectory @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)M")
+  Set-AclChecked $DataDirectory @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
+  Set-AclChecked $databaseRoot @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
+  Set-AclChecked (Join-Path $DataDirectory 'Logs') @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
+  Set-AclChecked $BackupDirectory @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
   Set-ReadOnlyServiceFile $config
   if ($settings.tls) {
     $tlsCertificate = [IO.Path]::GetFullPath([string]$settings.tls.certificatePath)
     $tlsPrivateKey = [IO.Path]::GetFullPath([string]$settings.tls.privateKeyPath)
-    if ([IO.File]::Exists($tlsCertificate)) { Save-Acl $tlsCertificate; Set-AclChecked $tlsCertificate @('SYSTEM:F', 'BUILTIN\Administrators:F', "$serviceAccount`:R") }
+    if ([IO.File]::Exists($tlsCertificate)) { Save-Acl $tlsCertificate; Set-ReadOnlyServiceFile $tlsCertificate }
     if ([IO.File]::Exists($tlsPrivateKey)) { Save-Acl $tlsPrivateKey; Set-ReadOnlyServiceFile $tlsPrivateKey }
   }
 
@@ -288,7 +325,7 @@ try {
   }
 
   if ([IO.File]::Exists($key)) { Set-ReadOnlyServiceFile $key }
-  Set-AclChecked $BackupDirectory @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)M")
+  Set-AclChecked $BackupDirectory @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
   if ([IO.File]::Exists($key)) { Set-ReadOnlyServiceFile $key }
 
   Set-InstallStage 'inspect-database-and-create-admin'
@@ -330,9 +367,11 @@ try {
   Invoke-PackageTransaction $stagedServer 'activate' $activateArguments
 
   $wrapper = Join-Path $activeServer 'service\HromadaAIDService.exe'
-  Set-AclChecked $activeServer @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)RX")
+  Set-AclChecked $activeServer @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
   Set-InstallStage 'register-service-and-sid'
   Register-Service $wrapper
+  Set-InstallStage 'grant-service-acl'
+  Configure-ServiceAccess
   $settings = Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
   $healthUrl = Get-HealthUrl $settings
   Set-InstallStage 'start-service'
@@ -359,6 +398,7 @@ try {
 
   if ($hadOldPackage -and [IO.Directory]::Exists($activeServer) -and -not [IO.Directory]::Exists($previousServer)) {
     try {
+      Restore-Acls
       $oldWrapper = Join-Path $activeServer 'service\HromadaAIDService.exe'
       if (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) { Register-Service $oldWrapper }
       if ($wasServiceRunning) {
@@ -367,7 +407,6 @@ try {
         Wait-ServiceHealthy (Get-HealthUrl (Get-Content -LiteralPath $config -Raw | ConvertFrom-Json))
       }
       if ([IO.File]::Exists($journalPath)) { Invoke-PackageTransaction $stagedServer 'discard-prepared' }
-      Restore-Acls
       [Console]::Error.WriteLine("Оновлення зупинено до перемикання пакета; попередній сервер залишено: $failure")
       exit 1
     } catch { $failure = 'Попередній пакет залишився на місці, але його стан служби потребує перевірки адміністратором.' }
@@ -383,6 +422,7 @@ try {
     if ($canRollback -and -not [IO.Directory]::Exists($failedServer)) {
       try {
         Invoke-PackageTransaction $statusRoot 'rollback' @('--schema-version', [string]$current.schemaVersion)
+        Restore-Acls
         $rollbackWrapper = Join-Path $activeServer 'service\HromadaAIDService.exe'
         Register-Service $rollbackWrapper
         if ($wasServiceRunning) {
@@ -391,7 +431,6 @@ try {
         }
         $rollbackToolRoot = if ([IO.Directory]::Exists($failedServer)) { $failedServer } elseif ([IO.Directory]::Exists($stagedServer)) { $stagedServer } else { $activeServer }
         Invoke-PackageTransaction $rollbackToolRoot 'finalize-rollback'
-        Restore-Acls
         [Console]::Error.WriteLine("Нове оновлення не пройшло перевірку. Попередній серверний пакет відновлено: $failure")
         exit 1
       } catch {

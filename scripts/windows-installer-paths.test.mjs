@@ -96,6 +96,13 @@ test('NSIS registers and verifies the LocalService WinSW wrapper, preserves user
   assert.match(installer, /Status -eq 'Running'/)
   assert.match(installer, /Test-HromadaServiceHealth/)
   assert.match(installer, /Set-InstallStage 'register-service-and-sid'/)
+  assert.match(installer, /Set-AclChecked \$DataDirectory @\('\*S-1-5-18:[\s\S]*?Register-Service \$wrapper[\s\S]*?Configure-ServiceAccess/)
+  assert.match(installer, /\$script:serviceSid = Get-ServiceSid \$serviceName/)
+  assert.match(installer, /Register-Service \$wrapper\s+Set-InstallStage 'grant-service-acl'\s+Configure-ServiceAccess[\s\S]*?Set-InstallStage 'start-service'/)
+  assert.doesNotMatch(installer, /SYSTEM:|BUILTIN\\Administrators:|NT SERVICE\\HromadaAIDApi:/)
+  assert.match(installer, /\*S-1-5-18/)
+  assert.match(installer, /\*S-1-5-32-544/)
+  assert.match(installer, /\*\$script:serviceSid/)
   assert.match(installer, /SERVICE_INSTALL_ERROR\|stage=\$script:InstallStage\|type=\$type\|line=\$line\|hresult=\$hresult\|childExitCode=\$script:LastChildExitCode\|detailFile=\$fileName/)
   assert.match(installer, /HromadaAID-service-install-/)
   assert.match(installer, /message = \(Protect-InstallDiagnosticText \$exception\.Message\)/)
@@ -111,11 +118,60 @@ test('NSIS registers and verifies the LocalService WinSW wrapper, preserves user
   assert.match(installer, /Wait-ServiceHealthy/)
   assert.match(installer, /schemaVersion.*oldSchemaMaximum/)
   assert.match(installer, /Server\.previous/)
-  assert.match(installer, /NT SERVICE\\HromadaAIDApi/)
+  assert.match(installer, /& \$scPath showsid \$Name/)
+  assert.match(installer, /function Configure-ServiceAccess[\s\S]*?Protect-ServiceFile \$config/)
+  assert.match(installer, /Restore-Acls[\s\S]*?Register-Service \$oldWrapper/)
   assert.doesNotMatch(installer, /LocalSystem|Everyone:|S-1-1-0/)
   assert.match(script, /-Action uninstall/)
   assert.match(serviceControl, /\$Action -eq 'uninstall'/)
   assert.doesNotMatch(script, /RMDir\s+\/r\s+"\$DataDirectory|RMDir\s+\/r\s+"\$BackupDirectory/)
+})
+
+test('installer ACL rules use SIDs and actual icacls on isolated Unicode paths', { skip: process.platform !== 'win32' }, async () => {
+  const installer = await readFile(new URL('../packaging/install-server-service.ps1', import.meta.url), 'utf8')
+  const invokeChecked = installer.match(/function Invoke-Checked\([\s\S]*?(?=\r?\nfunction Test-AbsoluteLocalPath)/)?.[0]
+  const getServiceSid = installer.match(/function Get-ServiceSid\([\s\S]*?(?=\r?\nfunction Save-Acl)/)?.[0]
+  const aclFunctions = installer.match(/function Set-AclChecked\([\s\S]*?(?=\r?\nfunction Invoke-PackageTransaction)/)?.[0]
+  assert.ok(invokeChecked && getServiceSid && aclFunctions, 'extract the actual installer ACL functions')
+
+  const root = mkdtempSync(join(tmpdir(), 'HromadaAID ACL test '))
+  const harness = join(root, 'test-acls.ps1')
+  const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    'try {',
+    "$unregisteredServiceSid = Get-ServiceSid 'HromadaAIDApi'; if ($unregisteredServiceSid -notmatch '^S-1-5-80-(?:\\d+-){4}\\d+$') { throw 'Could not compute the HromadaAID service SID before registration.' }",
+    "$script:serviceSid = Get-ServiceSid 'Schedule'",
+    "if ($script:serviceSid -notmatch '^S-1-5-80-(?:\\d+-){4}\\d+$') { throw 'Invalid service SID returned by sc.exe.' }",
+    "$data = Join-Path $Root 'Дані HromadaAID'",
+    "$database = Join-Path $data 'База даних'",
+    "$logs = Join-Path $data 'Журнали'",
+    "$backups = Join-Path $Root 'Резервні копії'",
+    "$program = Join-Path $Root 'Program Files\\Server'",
+    'foreach ($path in @($data, $database, $logs, $backups, $program)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }',
+    "$config = Join-Path $data 'server.json'; [IO.File]::WriteAllText($config, '{}')",
+    "foreach ($path in @($data, $database, $logs, $backups, $program)) { Set-AclChecked $path @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F') }",
+    'Grant-ServiceAccess $data \'RX\' \'OI)(CI\'',
+    'Grant-ServiceAccess $database \'M\' \'OI)(CI\'',
+    'Grant-ServiceAccess $logs \'M\' \'OI)(CI\'',
+    'Grant-ServiceAccess $backups \'M\' \'OI)(CI\'',
+    'Grant-ServiceAccess $program \'RX\' \'OI)(CI\'',
+    'Set-ReadOnlyServiceFile $config',
+    'Protect-ServiceFile $config',
+    "foreach ($path in @($data, $database, $logs, $backups, $program, $config)) { $acl = if ([IO.File]::Exists($path)) { [IO.File]::GetAccessControl($path) } else { [IO.Directory]::GetAccessControl($path) }; $sidRules = $acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]); $sids = @($sidRules | ForEach-Object { $_.IdentityReference.Value }); if ($sids -notcontains 'S-1-5-18' -or $sids -notcontains 'S-1-5-32-544' -or $sids -notcontains $script:serviceSid) { throw \"Missing expected SID ACL for [$path].\" }; if ($sids -contains 'S-1-5-32-545' -or $sids -contains 'S-1-1-0') { throw \"Unexpected Users/Everyone access on [$path].\" } }",
+    "$configRules = ([IO.File]::GetAccessControl($config)).GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]); if (-not ($configRules | Where-Object { $_.IdentityReference.Value -eq $script:serviceSid -and $_.AccessControlType -eq 'Deny' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -ne 0 })) { throw 'Service write deny is missing from protected config.' }",
+    "Write-Output 'PASS: SID ACLs applied with icacls and verified on temporary Unicode paths'",
+    '} catch { [Console]::Error.WriteLine(($_ | Out-String)); $script:testFailure = $true } finally { & (Join-Path $env:SystemRoot \'System32\\icacls.exe\') $Root \'/reset\' \'/T\' \'/C\' 2>&1 | Out-Null }',
+    'if ($script:testFailure) { exit 1 }',
+  ].filter(Boolean).join('\r\n')
+  const wrapped = ['param([Parameter(Mandatory=$true)][string]$Root)', invokeChecked, getServiceSid, aclFunctions, script].join('\r\n')
+
+  try {
+    writeFileSync(harness, '\uFEFF' + wrapped, 'utf8')
+    const run = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', harness, '-Root', root], { windowsHide: true, encoding: 'utf8', timeout: 30_000 })
+    assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`)
+    assert.match(run.stdout, /PASS: SID ACLs applied with icacls/)
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
 test('service path validation uses APIs available in Windows PowerShell 5.1 and accepts only absolute local drive paths', { skip: process.platform !== 'win32' }, async () => {
