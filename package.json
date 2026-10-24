@@ -8,6 +8,8 @@
     "dev": "node scripts/dev.mjs",
     "manager:dev": "node scripts/server-manager.mjs dev",
     "manager:build": "node scripts/clean-server-manager-main.mjs && tsc -p server-manager/tsconfig.json && tsc -p server-manager/tsconfig.electron.json && vite build --config server-manager/vite.config.ts",
+    "manager:portable": "pnpm manager:build && node scripts/package-server-manager.mjs",
+    "manager:portable:smoke": "node scripts/smoke-portable-server-manager.mjs",
     "manager:start": "pnpm manager:build && node scripts/server-manager.mjs start",
     "manager:test": "pnpm manager:build && node --test server-manager/tests/shell.test.mjs server-manager/tests/inspection.test.mjs && node scripts/server-manager.mjs smoke && node scripts/server-manager.mjs smoke-dev",
     "build": "tsc -b && node scripts/clean-electron-build.mjs && tsc -p tsconfig.electron.json && node electron/copy-assets.mjs && vite build",

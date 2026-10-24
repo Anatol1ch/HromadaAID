@@ -1,0 +1,17 @@
+appId: local.hromadaaid.server-manager
+productName: HromadaAID Server Manager
+directories:
+  app: dist-server-manager/package
+  output: release/server-manager
+files:
+  - main/**/*
+  - renderer/**/*
+  - package.json
+asar: true
+npmRebuild: false
+win:
+  target:
+    - target: dir
+      arch:
+        - x64
+  signAndEditExecutable: false

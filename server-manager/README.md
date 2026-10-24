@@ -7,6 +7,8 @@
 - `pnpm manager:dev` — окреме вікно з Vite/HMR на `127.0.0.1:5176`; закриття вікна завершує dev-сеанс. Зайнятий порт не звільняється примусово.
 - `pnpm manager:start` — збірка й автономний запуск через `file://`, без Vite/Fastify. Потрібні лише залежності розробника цього репозиторію.
 - `pnpm manager:build` — окремі виходи `dist-server-manager/main/main.js`, sandbox-сумісний `preload.cjs`, inspection modules і `dist-server-manager/renderer`; основна збірка клієнта їх не включає.
+- `pnpm manager:portable` — створює самодостатній Windows x64 portable-каталог `release/server-manager/win-unpacked` через `electron-builder --dir`; каталог містить власний Electron runtime та локальні UI-ресурси, без Fastify, клієнта й серверних даних.
+- `pnpm manager:portable:smoke` — запускає вже зібраний portable `.exe` з тимчасовим профілем на 12 секунд і завершує лише цей процес.
 - `pnpm manager:test` — типи, збірка, unit-тести engine та функціональні перевірки Electron-вікна через `file://` і Vite, у тимчасових профілях. Знімок огляду: `dist-server-manager/preview.png`.
 
 Реальний режим є режимом за замовчуванням. Він запускає перевірку лише після явної дії користувача. У dev-режимі залишено перемикач до шести синтетичних сценаріїв; у packaged UI його немає. Перемикання режиму не змінює систему.
