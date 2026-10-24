@@ -1,4 +1,4 @@
-param(
+﻿param(
   [Parameter(Mandatory = $true)][string]$ProgramDirectory,
   [Parameter(Mandatory = $true)][string]$DataDirectory,
   [Parameter(Mandatory = $true)][string]$BackupDirectory

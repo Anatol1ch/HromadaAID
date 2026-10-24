@@ -680,3 +680,14 @@ test('server preparation renders WinSW configuration into the staged package, ta
     assert.equal(existsSync(join(programDirectory, 'Server', 'service', 'HromadaAIDService.xml')), false)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
+
+test('installation locator script has a UTF-8 BOM and parses with Windows PowerShell 5.1', () => {
+  const scriptPath = fileURLToPath(new URL('../packaging/write-installation-locator.ps1', import.meta.url))
+  const bytes = readFileSync(scriptPath)
+  assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf])
+  const escapedPath = scriptPath.replaceAll("'", "''")
+  const command = `$tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile('${escapedPath}',[ref]$tokens,[ref]$errors);if($errors.Count){$errors|ForEach-Object{[Console]::Error.WriteLine($_.Message)};exit 1}`
+  const result = spawnSync(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8', windowsHide: true })
+  assert.ifError(result.error)
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+})

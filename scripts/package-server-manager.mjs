@@ -113,6 +113,19 @@ if (packagedVerifierRun.error || packagedVerifierRun.status !== 0) {
   const diagnostic = [packagedVerifierRun.stderr, packagedVerifierRun.stdout].filter(Boolean).join('\n').trim().slice(0, 4_000)
   throw new Error(`Packaged server verifier could not load and validate its local module graph (exit ${packagedVerifierRun.status ?? 'unknown'}): ${diagnostic || packagedVerifierRun.error?.message || 'no diagnostic'}`)
 }
+const installerPowerShellFiles = [
+  'windows-installer-paths.ps1', 'install-server-service.ps1', 'admin-setup.ps1',
+  'windows-service-control.ps1', 'write-installation-locator.ps1',
+].map(name => join(payloadDirectory, 'installer', name))
+if (process.platform === 'win32') {
+  const powershell = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const paths = Buffer.from(JSON.stringify(installerPowerShellFiles), 'utf8').toString('base64')
+  const parserScript = `$ErrorActionPreference='Stop';$paths=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${paths}')) | ConvertFrom-Json;$failures=@();foreach($path in $paths){$tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile([string]$path,[ref]$tokens,[ref]$errors);foreach($errorRecord in $errors){$failures+=('{0}:{1}: {2}' -f $path,$errorRecord.Extent.StartLineNumber,$errorRecord.Message)}};if($failures.Count){[Console]::Error.WriteLine(($failures -join [Environment]::NewLine));exit 1};[Console]::Out.WriteLine('Packaged PowerShell 5.1 scripts parsed successfully.')`
+  const parsed = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(parserScript, 'utf16le').toString('base64')], {
+    cwd: join(payloadDirectory, 'installer'), encoding: 'utf8', windowsHide: true, timeout: 60_000,
+  })
+  if (parsed.error || parsed.status !== 0) throw new Error(`Packaged PowerShell scripts failed Windows PowerShell 5.1 parsing: ${(parsed.stderr || parsed.stdout || parsed.error?.message || 'no diagnostic').slice(0, 4_000)}`)
+}
 if ([...actualPayload].some(path => /(?:^|[\\/])(?:tests?|__tests__|fixtures?|\.git)(?:[\\/]|$)|\.(?:sqlite3?|db3?|hraid(?:\.|$)|dpapi(?:\.|$)|pem|p12|key)$/i.test(path))) throw new Error('Server payload contains test files or sensitive user data.')
 const forbiddenNames = /(^|[\\/])(Server|Server\.next|server|node_modules|release|.*\.sqlite(?:3)?|.*\.hraid|.*\.dpapi)([\\/]|$)/i
 const packagedFiles = []

@@ -62,13 +62,25 @@ try {
 }`
 
 function psEncodedCommand(script: string): string { return Buffer.from(script, 'utf16le').toString('base64') }
+
+/** A single bounded retry for a cold PowerShell/CIM startup timeout only. */
+export async function queryServiceWithInitialTimeoutRetry<T>(query: () => Promise<T>, wait: (milliseconds: number) => Promise<void> = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))): Promise<T> {
+  try {
+    return await query()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ETIMEDOUT') throw error
+    await wait(250)
+    return query()
+  }
+}
+
 async function queryWindowsService(): Promise<ServiceMetadata> {
   if (process.platform !== 'win32') return { installed: false, error: 'query_failed' }
   const executable = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   try {
-    const result = await execFileAsync(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', psEncodedCommand(serviceQueryScript)], {
+    const result = await queryServiceWithInitialTimeoutRetry(() => execFileAsync(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', psEncodedCommand(serviceQueryScript)], {
       windowsHide: true, timeout: 5_000, killSignal: 'SIGTERM', maxBuffer: 32 * 1024, encoding: 'utf8',
-    })
+    }))
     const value = JSON.parse(result.stdout.trim()) as Record<string, unknown>
     if (value.installed === false) return { installed: false }
     if (value.installed !== true || typeof value.state !== 'string' || typeof value.binaryPath !== 'string') return { installed: false, error: 'query_failed' }

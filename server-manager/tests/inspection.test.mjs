@@ -277,8 +277,38 @@ test('PowerShell provider is constrained to a read-only named-service query and 
   assert.match(source, /Get-Acl -LiteralPath/)
   assert.doesNotMatch(source, /Start-Service|Stop-Service|New-Service|Remove-Service|sc\.exe\s+(?:start|stop|create|delete)|Set-Acl|Set-NetFirewall/)
   assert.doesNotMatch(source, /Set-ItemProperty|New-ItemProperty|Remove-ItemProperty|New-Item\s+-Path\s+Registry|Remove-Item\s+-Path\s+Registry/)
+  assert.match(source, /queryServiceWithInitialTimeoutRetry\(\(\) => execFileAsync/)
+  assert.match(source, /code !== 'ETIMEDOUT'/)
   assert.match(source, /redirect:\s*'manual'/)
   assert.match(source, /AbortController/)
+})
+
+test('Windows service query retries exactly once only after a child-process timeout', async () => {
+  const { queryServiceWithInitialTimeoutRetry } = await import('../../dist-server-manager/main/windows-inspection.js')
+  let calls = 0
+  const waits = []
+  const result = await queryServiceWithInitialTimeoutRetry(async () => {
+    calls++
+    if (calls === 1) throw Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' })
+    return 'missing-service-result'
+  }, async milliseconds => waits.push(milliseconds))
+  assert.equal(result, 'missing-service-result')
+  assert.equal(calls, 2)
+  assert.deepEqual(waits, [250])
+
+  calls = 0
+  await assert.rejects(queryServiceWithInitialTimeoutRetry(async () => {
+    calls++
+    throw Object.assign(new Error('access denied'), { code: 'EACCES' })
+  }, async () => assert.fail('non-timeout error must not retry')))
+  assert.equal(calls, 1)
+
+  calls = 0
+  await assert.rejects(queryServiceWithInitialTimeoutRetry(async () => {
+    calls++
+    throw Object.assign(new Error('still timed out'), { code: 'ETIMEDOUT' })
+  }, async () => {}))
+  assert.equal(calls, 2)
 })
 
 test('IPC handler accepts only the trusted renderer, coalesces refreshes and returns a safe failure state', async () => {

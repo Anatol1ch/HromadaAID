@@ -1,9 +1,11 @@
 import { app } from 'electron'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { cp, lstat, mkdir, readFile, stat } from 'node:fs/promises'
+import { cp, lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve, win32 } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { randomUUID } from 'node:crypto'
 import type { ServerInstallRequest } from './installation-contract.js'
 import type { ServerInstallAdapters } from './installation-engine.js'
 import { isInitialInstallRetryJournal } from './installation-recovery.js'
@@ -77,6 +79,18 @@ function safeFailure(error: unknown, secretValues: string[] = []): string {
   return message.replace(/(?:password|token|secret|recovery.?key|private.?key|dpapi.?key)(\s*[:=]\s*)[^\s,;]+/gi, '$1[приховано]').slice(0, 2_000)
 }
 
+async function writeSafeDiagnostic(name: string, error: unknown): Promise<string | null> {
+  const failure = error as Error & { stdout?: string; stderr?: string; exitCode?: number | null }
+  const text = [failure.stderr, failure.stdout, failure.message].filter(Boolean).join('\n')
+    .replace(/(?:password|token|secret|recovery.?key|private.?key|dpapi.?key|bearer)(\s*[:=]\s*)[^\s,;]+/gi, '$1[приховано]')
+    .slice(0, 12_000)
+  const path = join(tmpdir(), `HromadaAID-ServerManager-${name}-${randomUUID()}.log`)
+  try {
+    await writeFile(path, `Етап: ${name}\r\nКод завершення: ${failure.exitCode ?? 'невідомий'}\r\n${text || 'Діагностика відсутня.'}\r\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+    return path
+  } catch { return null }
+}
+
 async function callNode(root: string, args: string[], cwd: string, input?: Buffer, timeoutMs?: number) {
   return run(join(root, 'runtime', 'node.exe'), args, { cwd, input, timeoutMs })
 }
@@ -138,8 +152,13 @@ export function createWindowsInstallationAdapters(): ServerInstallAdapters {
     },
     recordLocator: async request => {
       const script = join(payloadRoot(), 'installer', 'write-installation-locator.ps1')
-      await run(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', script,
-        '-ProgramDirectory', request.programDirectory, '-DataDirectory', request.dataDirectory, '-BackupDirectory', request.backupDirectory])
+      try {
+        await run(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', script,
+          '-ProgramDirectory', request.programDirectory, '-DataDirectory', request.dataDirectory, '-BackupDirectory', request.backupDirectory])
+      } catch (error) {
+        const diagnostic = await writeSafeDiagnostic('installation-locator', error)
+        throw Object.assign(new Error(`Не вдалося записати метадані розташування сервера. Перевірте права адміністратора.${diagnostic ? ` Технічні подробиці: ${diagnostic}` : ''}`), { code: 'INSTALLATION_METADATA_WRITE_FAILED' })
+      }
     },
     initialize: async (request, onRecoveryKey, report) => {
       const root = join(request.programDirectory, 'Server.next')
