@@ -2,6 +2,9 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
+  // Electron loads the packaged renderer from file://. Relative asset URLs keep
+  // Vite's hashed bundles next to index.html instead of resolving from /assets.
+  base: './',
   plugins: [react()],
   clearScreen: false,
   server: {

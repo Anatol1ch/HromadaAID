@@ -27,6 +27,8 @@
     "server:test-installer": "pnpm server:build && node --test dist-server/server/src/installer-initialization.test.js",
     "windows:test-installer": "pnpm server:build && node --test dist-server/server/src/create-admin.test.js packaging/component-package.test.mjs packaging/verify-server-package.test.mjs packaging/server-package-transaction.test.mjs scripts/deploy-server-package.test.mjs scripts/windows-installer-space.test.mjs scripts/windows-installer-paths.test.mjs",
     "windows:package": "pnpm build && pnpm server:build && node scripts/prepare-server-package.mjs && node scripts/deploy-server-package.mjs && node node_modules/electron-builder/cli.js --win --x64 --dir && node scripts/package-windows.mjs",
+    "client:portable": "pnpm build && node node_modules/electron-builder/cli.js --win --x64 --dir && node scripts/package-client-portable.mjs",
+    "client:portable:smoke": "node scripts/smoke-portable-client.mjs",
     "windows:deployment-packages": "pnpm run windows:package && node scripts/package-deployment-v2.mjs",
     "windows:installer": "pnpm run windows:package && node scripts/build-windows-installer.mjs"
   },
