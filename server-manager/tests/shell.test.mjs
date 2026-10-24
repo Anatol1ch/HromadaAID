@@ -23,7 +23,7 @@ test('six synthetic scenarios keep service/API independent and provide safe oper
   assert.deepEqual(sections.map(section => section.id), ['overview', 'configuration', 'diagnostics', 'updates'])
 })
 
-test('renderer remains isolated and main exposes only the read-only inspection engine', () => {
+test('renderer remains isolated and main exposes only narrowly scoped inspection and installation IPC', () => {
   const main = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8')
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   const contract = readFileSync(new URL('../../shared/installation-contract.ts', import.meta.url), 'utf8')
@@ -41,6 +41,10 @@ test('renderer remains isolated and main exposes only the read-only inspection e
   assert.match(preload, /contextBridge\.exposeInMainWorld/)
   assert.match(preload, /inspectEnvironment:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('manager:inspect-environment'\)/)
   assert.doesNotMatch(preload, /send\(|execFile|spawn|require\((?!'electron'\))/)
+  assert.match(preload, /installServer:\s*request\s*=>\s*ipcRenderer\.invoke\('manager:install-server', request\)/)
+  assert.doesNotMatch(preload, /manager:execute|runCommand|execCommand|shell:/i)
+  for (const channel of ['manager:select-install-directory', 'manager:install-server', 'manager:save-recovery-key', 'manager:confirm-recovery-key-saved', 'manager:cancel-recovery-key']) assert.match(main, new RegExp(`ipcMain\\.handle\\('${channel}'`))
+  assert.match(main, /contextIsolation: true/)
   assert.match(main, /callback\(\{ cancel: !allowed \}\)/)
   assert.doesNotMatch(contract, /^import /m)
 })
@@ -56,4 +60,5 @@ test('separate renderer build contains only manager pages and a dedicated main o
   assert.doesNotMatch(bundle, /hromadaAid\.(?:auth|backups|recipients|connection)/)
   const main = readFileSync(new URL('../../dist-server-manager/main/main.js', import.meta.url), 'utf8')
   assert.match(main, /persist:server-manager/)
+  assert.ok(readFileSync(new URL('../../dist-server-manager/main/installation-recovery.js', import.meta.url), 'utf8').includes('initial-install-needs-review'))
 })

@@ -42,6 +42,14 @@ export type InspectionSnapshot = {
 
 export type ManagerInspectionApi = {
   inspectEnvironment(): Promise<InspectionSnapshot>
+  getInstallDefaults(): Promise<{ programDirectory: string; dataDirectory: string; backupDirectory: string }>
+  selectInstallDirectory(kind: import('./installation-contract.js').InstallDirectoryKind): Promise<string | null>
+  installServer(request: import('./installation-contract.js').ServerInstallRequest): Promise<{ operationId: string; success: boolean; message?: string }>
+  saveRecoveryKey(): Promise<{ saved: boolean; path?: string; message?: string }>
+  confirmRecoveryKeySaved(): Promise<boolean>
+  cancelRecoveryKey(): Promise<boolean>
+  onInstallationUpdate(listener: (value: import('./installation-contract.js').ServerInstallUpdate) => void): () => void
+  onRecoveryKeyRequired(listener: (value: { operationId: string; key: string }) => void): () => void
 }
 
 declare global {

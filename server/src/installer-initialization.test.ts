@@ -43,6 +43,30 @@ test('fresh install requires recovery-key confirmation and initializes only synt
   } finally { rmSync(f.root, { recursive: true, force: true }) }
 })
 
+test('first-install marker hook runs only after recovery-key confirmation and before persistent data', () => {
+  const f = fixture()
+  try {
+    const order: string[] = []
+    const deps = options(f, {
+      confirmRecoveryKey: () => { order.push('confirm'); return true },
+      beforeInitialize: () => { order.push('marker'); assert.equal(requireExists(f.keyPath), false); assert.equal(requireExists(f.databasePath), false) },
+      createKey: () => { order.push('key'); writeFileSync(f.keyPath, 'synthetic protected-key marker', { flag: 'wx' }) },
+      initializeDatabase: () => { order.push('database'); writeFileSync(f.databasePath, 'synthetic initialized sqlite marker', { flag: 'wx' }) },
+    })
+    assert.equal(runInstallInitialization(deps), 'initialized')
+    assert.deepEqual(order, ['confirm', 'marker', 'key', 'database'])
+
+    order.length = 0
+    const existing = options(f, {
+      keyExists: () => true,
+      loadExistingKey: () => undefined,
+      beforeInitialize: () => { order.push('unexpected-marker') },
+    })
+    assert.equal(runInstallInitialization(existing), 'existing')
+    assert.deepEqual(order, [])
+  } finally { rmSync(f.root, { recursive: true, force: true }) }
+})
+
 test('fresh install initializes and integrity-checks an isolated synthetic SQLite database', () => {
   const f = fixture()
   try {

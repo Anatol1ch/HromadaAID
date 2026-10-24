@@ -4,6 +4,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { verifyServerPackage } from '../packaging/verify-server-package.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const packageRoot = resolve(root, 'dist-server-manager/package')
@@ -21,6 +22,15 @@ assertGeneratedPath(packageRoot, 'dist-server-manager/package')
 assertGeneratedPath(outputRoot, 'release/server-manager')
 
 const rootManifest = JSON.parse(await readFile(packageManifestPath, 'utf8'))
+const serverSource = resolve(root, 'release/installer-payload/Server')
+const serverManifest = await verifyServerPackage(serverSource, { verifyRuntime: true })
+for (const required of [
+  'runtime/node.exe', 'service/HromadaAIDService.exe', 'installer/prepare-server-install.mjs',
+  'installer/windows-installer-paths.ps1', 'installer/install-server-service.ps1',
+  'installer/verify-server-package.mjs', 'installer/server-package-transaction.mjs',
+  'installer/write-installation-locator.ps1', 'app/dist/server/src/installer-initialization.js',
+  'app/dist/server/src/create-admin.js',
+]) if (!serverManifest.files.some(entry => entry.path === required)) throw new Error(`Bundled server payload is missing ${required}.`)
 for (const target of [packageRoot, outputRoot]) await rm(target, { recursive: true, force: true })
 await mkdir(packageRoot, { recursive: true })
 await cp(resolve(root, 'dist-server-manager/main'), resolve(packageRoot, 'main'), { recursive: true })
@@ -68,20 +78,38 @@ try {
 }
 if (!asar) throw new Error('Cannot inspect app.asar using electron-builder’s bundled @electron/asar.')
 const archiveEntries = asar.listPackage(asarPath).map(path => path.replace(/\\/g, '/').replace(/^\/+/, ''))
-for (const expected of ['main/main.js', 'main/preload.cjs', 'main/inspection-engine.js', 'renderer/index.html']) {
+for (const expected of ['main/main.js', 'main/preload.cjs', 'main/inspection-engine.js', 'main/installation-recovery.js', 'renderer/index.html']) {
   if (!archiveEntries.includes(expected)) throw new Error(`Packaged Server Manager is missing ${expected}.`)
 }
 if (archiveEntries.some(path => /(^|[\\/])(server|node_modules|client|electron|fixtures|tests)([\\/]|$)|\.sqlite(?:3)?$|\.hraid$|\.dpapi/i.test(path))) {
   throw new Error('Portable app archive contains an unexpected server, test or user-data payload.')
 }
 
+const payloadDirectory = join(unpacked, 'resources', 'server-payload')
+const packagedServerManifest = await verifyServerPackage(payloadDirectory, { verifyRuntime: true })
+const requiredPayload = new Set(serverManifest.files.map(entry => entry.path))
+const actualPayload = new Set()
+async function collectPayload(directory, prefix = '') {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name)
+    const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name
+    if (entry.isDirectory()) await collectPayload(path, relativePath)
+    else if (entry.isFile()) actualPayload.add(relativePath)
+  }
+}
+await collectPayload(payloadDirectory)
+actualPayload.delete('package-integrity.json')
+if (actualPayload.size !== requiredPayload.size || [...requiredPayload].some(path => !actualPayload.has(path))) throw new Error('Bundled server payload differs from its verified file manifest.')
+if (packagedServerManifest.files.length !== serverManifest.files.length) throw new Error('Bundled server payload manifest changed during packaging.')
+if ([...actualPayload].some(path => /(?:^|[\\/])(?:tests?|__tests__|fixtures?|\.git)(?:[\\/]|$)|\.(?:sqlite3?|db3?|hraid(?:\.|$)|dpapi(?:\.|$)|pem|p12|key)$/i.test(path))) throw new Error('Server payload contains test files or sensitive user data.')
 const forbiddenNames = /(^|[\\/])(Server|Server\.next|server|node_modules|release|.*\.sqlite(?:3)?|.*\.hraid|.*\.dpapi)([\\/]|$)/i
 const packagedFiles = []
 async function collect(path) {
   for (const entry of await readdir(path, { withFileTypes: true })) {
     const absolute = join(path, entry.name)
     const name = relative(unpacked, absolute)
-    if (forbiddenNames.test(name)) throw new Error(`Unexpected server or data payload in portable package: ${name}`)
+    const expectedPayload = name.replaceAll('\\', '/').startsWith('resources/server-payload/')
+    if (!expectedPayload && forbiddenNames.test(name)) throw new Error(`Unexpected server or data payload in portable package: ${name}`)
     if (entry.isDirectory()) await collect(absolute)
     else if (entry.isFile()) packagedFiles.push({ path: name, size: (await stat(absolute)).size })
   }
@@ -93,8 +121,8 @@ const readme = [
   '',
   'Запустіть файл HromadaAID Server Manager.exe. Встановлення не потрібне.',
   'Пакет працює без Node.js, pnpm, Vite та підключення до інтернету.',
-  'Для першого запуску сервер не потрібен. Реальна діагностика виконується лише після натискання «Перевірити зараз».',
-  'Цей пакет не встановлює службу та не змінює системні параметри.',
+  'Для встановлення сервера потрібне підтвердження UAC. Системні зміни починаються лише після явного підтвердження у майстрі.',
+  'Перевірка середовища доступна окремо; база SQLite та службові дані створюються лише після натискання «Встановити сервер».',
   '',
   `Версія: ${rootManifest.version}`,
   'Платформа: Windows x64',

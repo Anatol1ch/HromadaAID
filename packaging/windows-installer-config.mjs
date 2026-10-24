@@ -93,12 +93,15 @@ function xmlEscape(value) {
 export function renderInstalledServerConfig(options) {
   const valid = validateInstallerOptions(options)
   if (valid.mode === 'client') throw new Error('Режим «Клієнт» не створює конфігурацію сервера.')
+  const host = options.host ?? '127.0.0.1'
+  const port = options.port ?? 4310
+  if (!['127.0.0.1', '::1'].includes(host) || !Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Для первинного встановлення дозволено локальну адресу loopback і порт від 1024 до 65535.')
   return JSON.stringify({
     configVersion: 2,
     mode: 'local',
     programDirectory: valid.programDirectory,
-    host: '127.0.0.1',
-    port: 4310,
+    host,
+    port,
     databasePath: join(valid.dataDirectory, 'Database', 'hromada-aid.sqlite'),
     backupDirectory: valid.backupDirectory,
   }, null, 2) + '\n'

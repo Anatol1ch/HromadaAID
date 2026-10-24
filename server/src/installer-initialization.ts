@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, unlinkSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync, readSync, writeSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BackupKeyStore, createRecoveryKey } from './backup-crypto.js'
 import { initializeInstalledServerDatabase } from './database.js'
@@ -23,6 +23,7 @@ type InstallInitializationOptions = {
   removeNewKey: () => void
   initializeDatabase: () => void
   confirmRecoveryKey: (encodedKey: string) => boolean
+  beforeInitialize?: () => void
 }
 
 /** First-install state machine with injectable filesystem/DPAPI seams for isolated tests. */
@@ -47,6 +48,7 @@ export function runInstallInitialization(options: InstallInitializationOptions):
     if (existsSync(options.databasePath) || options.keyExists() || options.hasArchives()) {
       throw new Error('Під час встановлення з’явилися наявні дані. Ініціалізацію зупинено без перезапису.')
     }
+    options.beforeInitialize?.()
     options.createKey(recovery.encoded)
     try {
       options.initializeDatabase()
@@ -83,9 +85,44 @@ function showAndConfirmRecoveryKey(encodedKey: string): boolean {
   return result.status === 0
 }
 
+function waitForManagerRecoveryConfirmation(encodedKey: string): boolean {
+  // This line is a private child-process protocol consumed by Server Manager.
+  // The key never enters command-line arguments, environment variables or logs.
+  // Use a synchronous descriptor write before the blocking stdin read so the
+  // parent receives the key even though this process is waiting for consent.
+  writeSync(1, `HROMADAAID_RECOVERY_KEY|${encodedKey}\n`, undefined, 'utf8')
+  const bytes: number[] = []
+  const one = Buffer.alloc(1)
+  while (bytes.length <= 64) {
+    const count = readSync(0, one, 0, 1, null)
+    if (count === 0) return false
+    if (one[0] === 10) break
+    if (one[0] !== 13) bytes.push(one[0])
+  }
+  const confirmation = Buffer.from(bytes).toString('ascii')
+  Buffer.from(bytes).fill(0)
+  return confirmation === 'saved'
+}
+
+function ensurePendingAdminMarker(configPath: string, databasePath: string): void {
+  const markerPath = resolve(dirname(configPath), '.hromadaaid-first-admin-pending.json')
+  const marker = JSON.stringify({ formatVersion: 1, databasePath, createdAt: new Date().toISOString() })
+  try { writeFileSync(markerPath, marker, { encoding: 'utf8', flag: 'wx', mode: 0o600 }) }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new Error('Не вдалося зафіксувати безпечний стан первинного налаштування.')
+    let existing: unknown
+    try { existing = JSON.parse(readFileSync(markerPath, 'utf8')) } catch { throw new Error('Маркер первинного налаштування пошкоджений; наявні дані збережено.') }
+    if (!existing || typeof existing !== 'object' || (existing as { formatVersion?: unknown }).formatVersion !== 1 || (existing as { databasePath?: unknown }).databasePath !== databasePath) {
+      throw new Error('Маркер первинного налаштування належить іншій базі; наявні дані збережено.')
+    }
+  }
+}
+
 function main(): void {
 try {
-  const configPath = resolve(initializationConfigArgument(process.argv.slice(2)))
+  const args = process.argv.slice(2)
+  const managerMode = args.length === 4 && args[3] === '--manager-recovery-stdin'
+  const configPath = resolve(initializationConfigArgument(managerMode ? args.slice(0, 3) : args))
   const config = readInstalledServerConfig(configPath)
   const keyStore = new BackupKeyStore(config.backupDirectory)
   const databasePath = config.databasePath
@@ -102,7 +139,8 @@ try {
       validateInstalledPaths(config, { initialize: true })
       initializeInstalledServerDatabase(databasePath)
     },
-    confirmRecoveryKey: showAndConfirmRecoveryKey,
+    confirmRecoveryKey: managerMode ? waitForManagerRecoveryConfirmation : showAndConfirmRecoveryKey,
+    ...(managerMode ? { beforeInitialize: () => ensurePendingAdminMarker(configPath, databasePath) } : {}),
   })
   console.log(result === 'initialized' ? 'Первинну базу та DPAPI-ключ створено; цілісність SQLite перевірено.' : 'Наявні база й DPAPI-ключ перевірено; дані не змінювалися.')
 } catch (error) {

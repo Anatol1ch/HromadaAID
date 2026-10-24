@@ -186,26 +186,32 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
         discovery = { source: 'installer_registry', confidence: 'untrusted', message: 'Реєстрові метадані інсталятора доступні для зміни непривілейованим користувачам; шляхи не використовувалися.' }
       } else {
         const candidateRoot = win32.join(locator.programDirectory, 'Server')
+        const candidateStagedRoot = win32.join(locator.programDirectory, 'Server.next')
         const candidateConfig = win32.join(locator.dataDirectory, 'server.json')
-        const packageMarkers = [
-          win32.join(candidateRoot, 'runtime', 'node.exe'),
-          win32.join(candidateRoot, 'service', 'HromadaAIDService.exe'),
-          win32.join(candidateRoot, 'app', 'dist', 'server', 'src', 'installed.js'),
+        const markersFor = (root: string) => [
+          win32.join(root, 'runtime', 'node.exe'),
+          win32.join(root, 'service', 'HromadaAIDService.exe'),
+          win32.join(root, 'app', 'dist', 'server', 'src', 'installed.js'),
         ]
         try {
-          const [packagePresent, configPresent] = await Promise.all([
-            Promise.all(packageMarkers.map(path => adapters.exists(path))),
+          const [activePresent, stagedPresent, configPresent] = await Promise.all([
+            Promise.all(markersFor(candidateRoot).map(path => adapters.exists(path))),
+            Promise.all(markersFor(candidateStagedRoot).map(path => adapters.exists(path))),
             adapters.exists(candidateConfig),
           ])
-          locatorEvidence = packagePresent.some(Boolean) || configPresent
+          const activeEvidence = activePresent.some(Boolean)
+          const stagedEvidence = stagedPresent.some(Boolean)
+          locatorEvidence = activeEvidence || stagedEvidence || configPresent
           if (locatorEvidence) {
-            packageRoot = candidateRoot
+            packageRoot = activeEvidence ? candidateRoot : stagedEvidence ? candidateStagedRoot : null
             configuration.programDirectory = locator.programDirectory
+            configuration.dataDirectory = locator.dataDirectory
+            configuration.backupDirectory = locator.backupDirectory
             configPath = configPresent ? candidateConfig : null
             if (!configPresent) configState = 'missing'
             serviceStatus = 'missing'
             serviceMessage = 'Метадані інсталятора вказують на серверні компоненти, але службу не зареєстровано.'
-            discovery = { source: 'installer_registry', confidence: 'corroborated', message: 'Шляхи з HKLM підтверджено файлами серверного пакета або конфігурацією.' }
+            discovery = { source: 'installer_registry', confidence: 'corroborated', message: stagedEvidence && !activeEvidence ? 'Виявлено підготовлений Server.next та перевірено каталоги з HKLM.' : 'Шляхи з HKLM підтверджено файлами серверного пакета або конфігурацією.' }
           } else {
             locatorStale = true
             discovery = { source: 'installer_registry', confidence: 'stale', message: 'Реєстрові шляхи знайдено, але очікувані компоненти за ними відсутні.' }

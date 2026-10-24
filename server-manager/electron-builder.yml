@@ -9,9 +9,12 @@ files:
   - package.json
 asar: true
 npmRebuild: false
+extraResources:
+  - from: release/installer-payload/Server
+    to: server-payload
 win:
+  requestedExecutionLevel: requireAdministrator
   target:
     - target: dir
       arch:
         - x64
-  signAndEditExecutable: false

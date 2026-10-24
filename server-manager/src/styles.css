@@ -162,6 +162,45 @@
 .sm-skip { position: fixed; top: -100px; left: 20px; z-index: 3000; padding: 12px 20px; background: var(--surface-card); color: var(--accent-green); }
 .sm-skip:focus { top: 10px; }
 .sm-start-error { padding: 40px; }
+.sm-install-wizard { display: grid; gap: 22px; max-width: 980px; width: 100%; margin-inline: auto; padding: clamp(20px, 3vw, 36px); border: 1px solid var(--border-standard); border-radius: var(--radius-card); background: var(--surface-card); box-shadow: 0 8px 30px #183d2910; }
+.sm-install-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.sm-install-header h2, .sm-install-wizard > header h2 { margin: 5px 0 8px; color: var(--color-text); font-size: clamp(22px, 2vw, 30px); line-height: 1.25; }
+.sm-install-header p, .sm-install-wizard > header p { max-width: 700px; margin: 0; color: var(--color-text-secondary); font-size: 13px; line-height: 1.6; }
+.sm-install-step-count { color: var(--accent-green); font-size: 12px; font-weight: 650; }
+.sm-install-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 0; margin: 0; list-style: none; }
+.sm-install-steps li { display: flex; align-items: center; gap: 9px; padding: 10px 8px; border-bottom: 2px solid var(--border-standard); color: var(--color-text-secondary); font-size: 12px; }
+.sm-install-steps li > span { flex: none; display: grid; width: 25px; height: 25px; place-items: center; border-radius: 50%; background: var(--surface-app); color: inherit; font-weight: 650; }
+.sm-install-steps li.active { border-color: var(--accent-green); color: var(--color-text); font-weight: 650; }
+.sm-install-steps li.active > span, .sm-install-steps li.complete > span { background: var(--accent-green); color: #fff; }
+.sm-install-steps li.complete { border-color: var(--accent-green-soft); color: var(--accent-green); }
+.sm-install-fields { display: grid; gap: 16px; }
+.sm-form-intro { margin: 0; color: var(--color-text-secondary); font-size: 13px; line-height: 1.6; }
+.sm-install-path { display: grid; grid-template-columns: minmax(170px, .7fr) minmax(0, 1.3fr) auto; align-items: center; gap: 12px; }
+.sm-install-path > span, .sm-install-control { color: var(--color-text-control); font-size: 13px; font-weight: 600; }
+.sm-install-path small, .sm-install-control small { display: block; margin-top: 4px; color: var(--color-text-secondary); font-size: 11px; font-weight: 400; line-height: 1.45; }
+.sm-install-path input, .sm-install-control input, .sm-install-control select { width: 100%; min-width: 0; min-height: 40px; padding: 9px 11px; border: 1px solid var(--border-standard); border-radius: var(--radius-control); background: var(--surface-card); color: var(--color-text); font: inherit; font-size: 12px; }
+.sm-install-path input:focus-visible, .sm-install-control input:focus-visible, .sm-install-control select:focus-visible { outline: 2px solid var(--accent-green); outline-offset: 2px; }
+.sm-install-control { display: grid; gap: 7px; max-width: 640px; }
+.sm-transport-note { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: var(--radius-control); background: var(--surface-panel); color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
+.sm-transport-note svg { flex: none; color: var(--accent-green); }
+.sm-install-review { display: grid; gap: 16px; }
+.sm-install-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding-top: 16px; border-top: 1px solid var(--border-surface); }
+.sm-install-footer > span { flex: 1; }
+.sm-install-progress { display: grid; justify-items: center; gap: 12px; min-height: 280px; align-content: center; text-align: center; }
+.sm-install-progress-icon, .sm-install-success > span { display: grid; width: 56px; height: 56px; place-items: center; border-radius: 16px; background: var(--accent-green-soft); color: var(--accent-green); }
+.sm-install-progress h3, .sm-install-success h3 { margin: 4px 0 0; color: var(--color-text); font-size: 20px; }
+.sm-install-progress p, .sm-install-success p { max-width: 650px; margin: 0; color: var(--color-text-secondary); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.sm-progress-track { width: min(460px, 100%); height: 7px; overflow: hidden; border-radius: 9px; background: var(--surface-app); }
+.sm-progress-track span { display: block; width: 36%; height: 100%; border-radius: inherit; background: var(--accent-green); animation: sm-progress 1.35s ease-in-out infinite alternate; }
+.sm-install-progress small { color: var(--color-text-secondary); font-size: 11px; }
+.sm-install-success { display: grid; justify-items: center; gap: 14px; padding: 22px 0; text-align: center; }
+.sm-install-success > .sm-details { width: min(620px, 100%); text-align: left; }
+.sm-recovery-key { width: 100%; max-height: 180px; overflow: auto; padding: 16px; border: 1px solid var(--border-standard); border-radius: var(--radius-control); background: var(--surface-app); color: var(--color-text); font: 600 15px/1.7 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
+.sm-form-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.sm-form-actions > .sm-muted { font-size: 11px; overflow-wrap: anywhere; }
+@keyframes sm-progress { from { transform: translateX(-110%); } to { transform: translateX(260%); } }
+@media (max-width: 760px) { .sm-install-header { flex-direction: column; } .sm-install-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sm-install-path { grid-template-columns: minmax(0, 1fr) auto; } .sm-install-path > span { grid-column: 1 / -1; } .sm-install-path input { grid-column: 1; } .sm-install-path button { grid-column: 2; grid-row: 2; } }
+@media (prefers-reduced-motion: reduce) { .sm-progress-track span { animation: none; width: 100%; } }
 @media (min-width: 1600px) {
   .sm-main, .sm-topbar { padding-inline: 32px; }
   .sm-state-card { padding: 24px; }

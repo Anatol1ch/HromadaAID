@@ -133,6 +133,7 @@ async function main() {
   await copyFile(join(root, 'packaging', 'verify-server-package.mjs'), join(serverTarget, 'installer', 'verify-server-package.mjs'))
   await copyFile(join(root, 'packaging', 'server-package-transaction.mjs'), join(serverTarget, 'installer', 'server-package-transaction.mjs'))
   await copyFile(join(root, 'packaging', 'windows-service-control.ps1'), join(serverTarget, 'installer', 'windows-service-control.ps1'))
+  await copyFile(join(root, 'packaging', 'write-installation-locator.ps1'), join(serverTarget, 'installer', 'write-installation-locator.ps1'))
   await stripNonRuntimeTestFiles(join(serverTarget, 'app', 'node_modules'))
 
   const clientFiles = await assertPackage(clientTarget)
@@ -156,6 +157,7 @@ async function main() {
   const installerSupportBytes = await Promise.all([
     'windows-installer-paths.ps1', 'windows-service-control.ps1', 'prepare-server-install.mjs',
     'windows-installer-config.mjs', 'install-server-service.ps1', 'admin-setup.ps1',
+    'write-installation-locator.ps1',
   ].map(path => stat(join(root, 'packaging', path)).then(info => info.size)))
   const manifest = {
     formatVersion: 1,

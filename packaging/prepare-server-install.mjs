@@ -17,6 +17,8 @@ function parseArguments(args) {
     dataDirectory: values.get('--data-dir'),
     backupDirectory: values.get('--backup-dir'),
     packageRoot: values.get('--package-root'),
+    ...(values.has('--host') ? { host: values.get('--host') } : {}),
+    ...(values.has('--port') ? { port: Number(values.get('--port')) } : {}),
   }
 }
 
@@ -49,7 +51,7 @@ export function prepareServerInstall(options, root = resolve(dirname(fileURLToPa
   mkdirSync(valid.backupDirectory, { recursive: true })
   mkdirSync(join(valid.dataDirectory, 'Database'), { recursive: true })
   mkdirSync(join(valid.dataDirectory, 'Logs'), { recursive: true })
-  const config = existed ? readFileSync(serverConfigPath, 'utf8') : renderInstalledServerConfig(valid)
+  const config = existed ? readFileSync(serverConfigPath, 'utf8') : renderInstalledServerConfig({ ...valid, host: options.host, port: options.port })
   if (!existed) {
     let descriptor
     try { descriptor = openSync(serverConfigPath, 'wx', 0o600) }

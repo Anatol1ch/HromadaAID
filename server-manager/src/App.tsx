@@ -3,6 +3,7 @@ import { Activity, ArrowRight, ChevronRight, CircleAlert, CircleCheck, Clock3, C
 import Alert from '../../src/components/Alert'
 import { DEMO_CHECKED_AT, demoPaths, scenarioIds, scenarios, sections, type ScenarioId, type Section } from './demo'
 import type { InspectionSnapshot } from '../electron/inspection-types'
+import InstallWizard from './InstallWizard'
 import { apiDisplay, diagnosticLevel, installationDisplay, notCheckedState, serviceDisplay } from './inspection-presentation'
 
 const navIcons = { overview: House, configuration: Settings2, diagnostics: Activity, updates: Download }
@@ -56,7 +57,7 @@ function EventTable({ events, compact = false, caption = 'Демонстраці
   </table></div>
 }
 
-function RealContent({ section, inspection, checking, refresh, filter, setFilter }: { section: Section; inspection: InspectionSnapshot | null; checking: boolean; refresh: () => void; filter: 'all' | 'issues'; setFilter: (value: 'all' | 'issues') => void }) {
+function RealContent({ section, inspection, checking, refresh, filter, setFilter, startInstall }: { section: Section; inspection: InspectionSnapshot | null; checking: boolean; refresh: () => void; filter: 'all' | 'issues'; setFilter: (value: 'all' | 'issues') => void; startInstall: () => void }) {
   const snapshot = inspection
   const pending = notCheckedState(checking)
   const install = snapshot ? installationDisplay(snapshot.installation.status) : pending
@@ -72,6 +73,7 @@ function RealContent({ section, inspection, checking, refresh, filter, setFilter
     code: item.details ?? item.status,
   }))
   const notInstalled = snapshot?.installation.status === 'not_installed'
+  const resumableCandidate = snapshot?.installation.status === 'partial_installation' && snapshot.discovery.source === 'installer_registry' && !!snapshot.configuration.programDirectory && !!snapshot.configuration.dataDirectory && !!snapshot.configuration.backupDirectory
   const reasonFor = (checkId: string) => snapshot?.checks.find(item => item.id === checkId)?.message ?? 'Причину не надано окремою перевіркою.'
   const value = (item: string | null | undefined, checkId = 'configuration') => item ?? <span className="sm-unavailable-value"><span>Не визначено</span>{snapshot && !notInstalled && <details><summary>Причина</summary><span>{reasonFor(checkId)}</span></details>}</span>
   const config = snapshot?.configuration
@@ -102,6 +104,7 @@ function RealContent({ section, inspection, checking, refresh, filter, setFilter
       <Panel title="Серверний пакет" icon={<Download size={21} aria-hidden="true"/>} action={<span className="sm-readonly-label">Без оновлень</span>}><p className="sm-card-lead">Встановлена версія</p><strong className="sm-real-version">{config?.serverVersion ?? 'Не визначено'}</strong><p className="sm-card-note">Перевірку GitHub Releases і встановлення оновлень не виконано.</p><p className="sm-card-note">API health contract: {snapshot?.api.contractVersion ?? 'Не отримано'}.</p></Panel>
     </div>
     <Panel title="Результати останньої перевірки" icon={<Activity size={21} aria-hidden="true"/>}><EventTable events={events.slice(0, 3)} compact caption="Останні результати перевірки серверного середовища"/></Panel>
+    {(notInstalled || resumableCandidate) && <div className="sm-future-action"><button className="primary-button" type="button" onClick={startInstall} disabled={checking}>{notInstalled ? 'Встановити сервер' : 'Продовжити налаштування'}</button><span>{notInstalled ? 'Локальний HTTP · Windows Service · серверні дані зберігаються окремо.' : 'Майстер перевірить, чи можна безпечно продовжити саме цю незавершену спробу.'}</span></div>}
   </>
 
   if (section === 'configuration') return <>
@@ -139,6 +142,7 @@ export default function App() {
   const [checking, setChecking] = useState(false)
   const [filter, setFilter] = useState<'all' | 'issues'>('all')
   const [notice, setNotice] = useState('')
+  const [installWizard, setInstallWizard] = useState(false)
   const heading = useRef<HTMLHeadingElement>(null)
   const previousSection = useRef(section)
   const scenario = scenarios[scenarioId]
@@ -189,7 +193,7 @@ export default function App() {
         <div className="sm-page-heading"><div><h1 ref={heading} tabIndex={-1}>{headings[section][0]}</h1><p>{headings[section][1]}</p></div><div className="sm-heading-controls">{scenarioPicker}{section === 'overview' && (mode === 'demo' ? <button className="secondary-button" type="button" onClick={inspect}><RefreshCw size={16} aria-hidden="true"/>Демоперевірка</button> : <button className="secondary-button" type="button" onClick={() => void inspectReal()} disabled={checking}><RefreshCw size={16} aria-hidden="true"/>{checking ? 'Перевірка…' : 'Перевірити зараз'}</button>)}</div></div>
         {notice && <p className="sm-local-notice" role="status">{notice}</p>}
 
-        {mode === 'real' ? <RealContent section={section} inspection={inspection} checking={checking} refresh={() => void inspectReal()} filter={filter} setFilter={setFilter}/> : <>
+        {installWizard ? <InstallWizard onClose={() => setInstallWizard(false)} onInstalled={() => { setInstallWizard(false); setSection('overview'); void inspectReal() }} initial={inspection?.installation.status === 'partial_installation' ? inspection.configuration : undefined}/> : mode === 'real' ? <RealContent section={section} inspection={inspection} checking={checking} refresh={() => void inspectReal()} filter={filter} setFilter={setFilter} startInstall={() => setInstallWizard(true)}/> : <>
         {section === 'overview' && <>
           <section className="sm-health-summary" aria-labelledby="server-state-title">
             <div className={scenarioId === 'running' ? 'visually-hidden' : `sm-scenario-notice sm-scenario-${scenario.tone}`}><h2 id="server-state-title">{scenario.title}</h2><p>{scenario.message}</p></div>

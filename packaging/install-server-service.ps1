@@ -2,7 +2,8 @@
   [Parameter(Mandatory = $true)][string]$ProgramDirectory,
   [Parameter(Mandatory = $true)][string]$DataDirectory,
   [Parameter(Mandatory = $true)][string]$BackupDirectory,
-  [Parameter(Mandatory = $false)][string]$PreviousServiceStateFile
+  [Parameter(Mandatory = $false)][string]$PreviousServiceStateFile,
+  [Parameter(Mandatory = $false)][switch]$FromServerManager
 )
 $ErrorActionPreference = 'Stop'
 $serviceName = 'HromadaAIDApi'
@@ -28,6 +29,7 @@ $script:LastChildExitCode = $null
 function Set-InstallStage([string]$Stage) {
   $script:InstallStage = $Stage
   $script:LastChildExitCode = $null
+  if ($FromServerManager) { [Console]::Out.WriteLine("HROMADAAID_INSTALL_STAGE|$Stage") }
 }
 
 function Protect-InstallDiagnosticText([string]$Text) {
@@ -316,9 +318,15 @@ try {
   Set-InstallStage 'initialize-data'
   if (-not $databaseExists -and -not $keyExists) {
     if ($hasArchives) { throw 'У каталозі резервних копій уже є архіви. Чисту ініціалізацію зупинено.' }
-    $pending = [ordered]@{ formatVersion = 1; databasePath = $database; createdAt = [DateTime]::UtcNow.ToString('o') } | ConvertTo-Json -Compress
-    try { [IO.File]::WriteAllText($pendingAdminPath, $pending, [Text.UTF8Encoding]::new($false)) }
-    catch { if (-not [IO.File]::Exists($pendingAdminPath)) { throw 'Не вдалося зафіксувати незавершений стан першого налаштування.' } }
+    if ([IO.File]::Exists($pendingAdminPath)) {
+      try { $pending = Get-Content -LiteralPath $pendingAdminPath -Raw | ConvertFrom-Json }
+      catch { throw 'Маркер незавершеного першого налаштування пошкоджений; наявні дані збережено.' }
+      if ($pending.formatVersion -ne 1 -or [IO.Path]::GetFullPath([string]$pending.databasePath) -ine $database) { throw 'Маркер першого налаштування належить іншій базі; наявні дані збережено.' }
+    } else {
+      $pending = [ordered]@{ formatVersion = 1; databasePath = $database; createdAt = [DateTime]::UtcNow.ToString('o') } | ConvertTo-Json -Compress
+      try { [IO.File]::WriteAllText($pendingAdminPath, $pending, [Text.UTF8Encoding]::new($false)) }
+      catch { if (-not [IO.File]::Exists($pendingAdminPath)) { throw 'Не вдалося зафіксувати незавершений стан першого налаштування.' } }
+    }
     Set-ReadOnlyServiceFile $pendingAdminPath
     $initialize = Join-Path $stagedServer 'app\dist\server\src\installer-initialization.js'
     & $newNode $initialize --config $config --confirm-initialization

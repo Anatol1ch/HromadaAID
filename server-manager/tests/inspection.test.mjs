@@ -108,6 +108,33 @@ test('discovers non-standard program, data and backup paths from the existing pr
   assert.equal(custom.trace.lastUrl, undefined, 'an advisory locator never triggers an API request without SCM confirmation')
 })
 
+test('discovers a corroborated staged Server.next after an interrupted first installation', async () => {
+  const customProgram = 'D:\\Застосунки HromadaAID'
+  const customData = 'E:\\Дані HromadaAID'
+  const customBackups = 'F:\\Резервні копії HromadaAID'
+  const stagedRoot = `${customProgram}\\Server.next`
+  const stagedFiles = new Set([
+    `${stagedRoot}\\runtime\\node.exe`, `${stagedRoot}\\service\\HromadaAIDService.exe`, `${stagedRoot}\\app\\dist\\server\\src\\installed.js`,
+    `${stagedRoot}\\app\\node_modules\\fastify\\package.json`, `${stagedRoot}\\app\\node_modules\\argon2\\package.json`, `${stagedRoot}\\app\\node_modules\\@phc\\format\\package.json`,
+  ].map(value => value.toLowerCase()))
+  const partial = fixture({
+    service: { installed: false },
+    locator: { status: 'available', programDirectory: customProgram, dataDirectory: customData, backupDirectory: customBackups, writableByUnprivileged: false },
+    files: stagedFiles,
+  })
+  partial.adapter.readText = async path => {
+    if (path.toLowerCase() === `${stagedRoot}\\app\\package.json`.toLowerCase()) return JSON.stringify({ version: '0.1.0' })
+    const error = new Error('missing'); error.code = 'ENOENT'; throw error
+  }
+  const result = await inspectEnvironment(partial.adapter)
+  assert.equal(result.installation.status, 'partial_installation')
+  assert.equal(result.configuration.programDirectory, customProgram)
+  assert.equal(result.configuration.dataDirectory, customData)
+  assert.equal(result.configuration.backupDirectory, customBackups)
+  assert.equal(result.configuration.serverVersion, '0.1.0')
+  assert.match(result.discovery.message, /Server.next/)
+})
+
 test('fails closed for writable and malformed locators, and labels a locator with no surviving components as stale', async () => {
   const paths = { programDirectory: 'D:\\HromadaAID', dataDirectory: 'D:\\HromadaAID-Data', backupDirectory: 'E:\\HromadaAID-Backups' }
   const writable = fixture({ service: { installed: false }, locator: { status: 'available', ...paths, writableByUnprivileged: true }, files: new Set() })
