@@ -8,6 +8,13 @@
   [Parameter(Mandatory = $true)][ValidateRange(0, 9007199254740991)][Int64]$SupportBytes
 )
 $ErrorActionPreference = 'Stop'
+$script:PreflightStage = 'arguments'
+
+trap {
+  $hresult = $_.Exception.HResult
+  [Console]::Out.WriteLine("PREFLIGHT_ERROR|stage=$script:PreflightStage|code=1|reason=unhandled-exception|hresult=$hresult")
+  exit 1
+}
 
 Add-Type -TypeDefinition @'
 using System;
@@ -34,13 +41,18 @@ public static class HromadaAidInstallerPath {
 }
 '@
 
-function Stop-WithMessage([string]$message) {
-  [Console]::Error.WriteLine($message)
-  if ($message -match 'недостатньо місця') { exit 3 }
-  if ($message -match 'NTFS') { exit 4 }
-  if ($message -match 'server\.json|базу HromadaAID|DPAPI-ключ|резервних архівів|резервних копій уже є архіви') { exit 5 }
-  if ($message -match 'перекриватися|поза каталогом програми|каталозі програмних файлів') { exit 6 }
-  exit 1
+function Stop-WithMessage([string]$message, [string]$reason = 'validation-failed', [int]$hresult = 0) {
+  $code = 1
+  if ($message -match 'недостатньо місця') { $code = 3; $reason = 'insufficient-space' }
+  elseif ($message -match 'NTFS') { $code = 4; $reason = 'volume-not-local-ntfs' }
+  elseif ($message -match 'server\.json|базу HromadaAID|DPAPI-ключ|резервних архівів|резервних копій уже є архіви') { $code = 5; $reason = 'existing-data-conflict' }
+  elseif ($message -match 'перекриватися|поза каталогом програми|каталозі програмних файлів') { $code = 6; $reason = 'overlapping-directories' }
+  elseif ($message -match 'коренем диска') { $reason = 'drive-root-not-allowed' }
+  elseif ($message -match 'абсолютним локальним шляхом') { $reason = 'invalid-local-path' }
+  elseif ($message -match 'Мережеві шляхи') { $reason = 'network-path-not-supported' }
+  elseif ($message -match 'потрібно вказати каталоги') { $reason = 'missing-server-directory' }
+  [Console]::Out.WriteLine("PREFLIGHT_ERROR|stage=$script:PreflightStage|code=$code|reason=$reason|hresult=$hresult")
+  exit $code
 }
 
 function Resolve-PotentialPath([string]$path) {
@@ -73,7 +85,13 @@ if ($Mode -ne 'client') {
   $paths['резервних копій'] = $BackupDirectory
 }
 $resolved = @{}
+$script:PreflightStage = 'directory-validation'
 foreach ($entry in $paths.GetEnumerator()) {
+  $script:PreflightStage = switch ($entry.Key) {
+    'програми' { 'program-directory'; break }
+    'серверних даних' { 'data-directory'; break }
+    'резервних копій' { 'backup-directory'; break }
+  }
   if ($entry.Value -notmatch '^[A-Za-z]:\\' -or $entry.Value.Substring(2) -match '[<>:"|?*\x00-\x1f]') {
     Stop-WithMessage "Шлях до каталогу $($entry.Key) має бути абсолютним локальним шляхом Windows."
   }
@@ -82,7 +100,7 @@ foreach ($entry in $paths.GetEnumerator()) {
     Stop-WithMessage "Каталог $($entry.Key) не може бути коренем диска."
   }
   try { $resolved[$entry.Key] = Resolve-PotentialPath $entry.Value }
-  catch { Stop-WithMessage $_.Exception.Message }
+  catch { Stop-WithMessage $_.Exception.Message 'path-resolution-failed' $_.Exception.HResult }
   $drive = [IO.Path]::GetPathRoot($resolved[$entry.Key]).TrimEnd('\')
   $volume = Get-CimInstance Win32_LogicalDisk -Filter ("DeviceID='" + $drive + "'")
   if ($null -eq $volume -or $volume.DriveType -ne 3 -or $volume.FileSystem -ne 'NTFS') {
@@ -92,6 +110,7 @@ foreach ($entry in $paths.GetEnumerator()) {
 
 # The payload sizes come from the file-by-file packaging manifest. All consumers
 # sharing a volume are aggregated before comparing with its one free-space value.
+$script:PreflightStage = 'free-space-check'
 $requirements = @{}
 function Add-VolumeRequirement([string]$Path, [Int64]$Bytes) {
   $root = [IO.Path]::GetPathRoot($Path).TrimEnd('\').ToUpperInvariant()
@@ -131,6 +150,7 @@ foreach ($volumeRoot in $requirements.Keys) {
   }
 }
 
+$script:PreflightStage = 'directory-overlap-check'
 $labels = @($resolved.Keys)
 for ($i = 0; $i -lt $labels.Count; $i++) {
   for ($j = $i + 1; $j -lt $labels.Count; $j++) {
@@ -151,6 +171,7 @@ foreach ($root in $programFilesRoots) {
   }
 }
 
+$script:PreflightStage = 'existing-data-check'
 $config = $null
 $database = $null
 if ($Mode -ne 'client') {

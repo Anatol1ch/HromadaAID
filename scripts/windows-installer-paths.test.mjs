@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -38,18 +38,28 @@ test('NSIS exposes the three install modes as independent client and server comp
   assert.match(script, /StrCpy \$ValidationMode "client"/)
   assert.match(script, /StrCpy \$ValidationMode "server-client"/)
   assert.match(script, /-Mode "\$ValidationMode"/)
+  assert.match(script, /-ProgramDirectory "\$INSTDIR" -DataDirectory "\$DataDirectory" -BackupDirectory "\$BackupDirectory"/)
+  assert.match(script, /nsExec::ExecToStack[\s\S]*?windows-installer-paths\.ps1[\s\S]*?-ProgramDirectory "\$INSTDIR"[\s\S]*?-DataDirectory "\$DataDirectory"[\s\S]*?-BackupDirectory "\$BackupDirectory"/)
+  assert.match(script, /Pop \$2\s+Pop \$3\s+DetailPrint "Попередня перевірка каталогів: код \$2"/)
   assert.match(script, /--package-root "\$INSTDIR\\Server\.next"/)
   assert.match(script, /CLIENT_PAYLOAD_BYTES/)
   assert.match(script, /SERVER_PAYLOAD_BYTES/)
   assert.match(script, /INSTALLER_SUPPORT_BYTES/)
   assert.match(script, /Function DataPage[\s\S]*Call IsServerSelected[\s\S]*FunctionEnd/)
   assert.match(script, /Function BackupPage[\s\S]*Call IsServerSelected[\s\S]*FunctionEnd/)
-  assert.match(script, /Page custom AdminSetupPage AdminSetupLeave "Створення адміністратора"/)
+  assert.match(script, /Page custom AdminSetupPage AdminSetupLeave ": Створення адміністратора"/)
   assert.match(script, /SetOutPath "\$INSTDIR\\Server\.next"/)
   assert.ok(script.replace(/^\uFEFF/, '').startsWith('# -*- coding: utf-8 -*-\r\nUnicode true') || script.replace(/^\uFEFF/, '').startsWith('# -*- coding: utf-8 -*-\nUnicode true'))
   assert.match(script, /nsExec::ExecToStack/)
   assert.doesNotMatch(script, /ExecWait/)
   assert.match(script, /Pop \$2[\s\S]*?\$2 == 3[\s\S]*?\$2 == 4[\s\S]*?\$2 == 5[\s\S]*?\$2 == 6/)
+  assert.match(script, /Page custom DataPage DataLeave ": Серверні дані"/)
+  assert.match(script, /Page custom BackupPage BackupLeave ": Резервні копії"/)
+  assert.match(script, /Page custom AdminSetupPage AdminSetupLeave ": Створення адміністратора"/)
+  assert.match(script, /Page custom SummaryPage SummaryLeave ": Перевірка параметрів"/)
+  assert.match(script, /Preflight paths: program=\[\$INSTDIR\] data=\[\$DataDirectory\] backups=\[\$BackupDirectory\]/)
+  assert.match(script, /Діагностика preflight: \$3/)
+  assert.match(script, /Не вдалося перевірити вибрані параметри\. Код: \$2.*\$3/)
   assert.doesNotMatch(script, /ExecWait\s+'[^\r\n]*powershell\.exe/i)
 })
 
@@ -136,9 +146,27 @@ test('PowerShell path validator skips server data paths for client-only installa
   assert.match(validator, /SupportBytes \+ 8MB/)
   assert.match(validator, /\$requiredText/)
   assert.doesNotMatch(validator, /67108864|64\s*\*\s*1024\s*\*\s*1024/)
-  assert.match(validator, /недостатньо місця[\s\S]*exit 3/)
-  assert.match(validator, /NTFS[\s\S]*exit 4/)
-  assert.match(validator, /server\\\.json\|базу HromadaAID[\s\S]*exit 5/)
+  assert.match(validator, /недостатньо місця[\s\S]*\$code = 3/)
+  assert.match(validator, /NTFS[\s\S]*\$code = 4/)
+  assert.match(validator, /server\\\.json\|базу HromadaAID[\s\S]*\$code = 5/)
+  assert.match(validator, /PREFLIGHT_ERROR\|stage=\$script:PreflightStage\|code=\$code\|reason=\$reason\|hresult=\$hresult/)
+  assert.match(validator, /PREFLIGHT_ERROR\|stage=\$script:PreflightStage\|code=1\|reason=unhandled-exception\|hresult=\$hresult/)
+  assert.match(validator, /'серверних даних' \{ 'data-directory'/)
+})
+
+test('folder browse callbacks preserve the complete selected path and never create directories', async () => {
+  const script = (await readFile(new URL('../packaging/windows-installer.nsi', import.meta.url), 'utf8')).replace(/^\uFEFF/, '')
+  const browseData = script.match(/Function BrowseData([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  const browseBackups = script.match(/Function BrowseBackups([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  const dataLeave = script.match(/Function DataLeave([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  const backupLeave = script.match(/Function BackupLeave([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(browseData, /SelectFolderDialog "Каталог серверних даних" "\$DataDirectory"/)
+  assert.match(browseData, /\$\{NSD_SetText\} \$DataEdit "\$0"/)
+  assert.match(browseBackups, /SelectFolderDialog "Каталог резервних копій" "\$BackupDirectory"/)
+  assert.match(browseBackups, /\$\{NSD_SetText\} \$BackupEdit "\$0"/)
+  assert.match(dataLeave, /\$\{NSD_GetText\} \$DataEdit \$DataDirectory/)
+  assert.match(backupLeave, /\$\{NSD_GetText\} \$BackupEdit \$BackupDirectory/)
+  for (const body of [browseData, browseBackups]) assert.doesNotMatch(body, /CreateDirectory/)
 })
 
 test('PowerShell preflight accepts Unicode, not-yet-created sibling directories without creating them', { skip: process.platform !== 'win32' }, () => {
@@ -158,6 +186,81 @@ test('PowerShell preflight accepts Unicode, not-yet-created sibling directories 
     ], { encoding: 'utf8', windowsHide: true, timeout: 20_000 })
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
     for (const path of Object.values(paths)) assert.equal(existsSync(path), false, `preflight must not create ${path}`)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('PowerShell preflight returns actionable stdout diagnostics for NSIS ExecToStack on code 1', { skip: process.platform !== 'win32' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'HromadaAID preflight diagnostic '))
+  const paths = {
+    program: join(root, 'Програма'),
+    data: `${process.env.SystemDrive ?? 'C:'}\\`,
+    backups: join(root, 'Резервні копії'),
+  }
+  try {
+    const script = fileURLToPath(new URL('../packaging/windows-installer-paths.ps1', import.meta.url))
+    const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    const result = spawnSync(powershell, [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script,
+      '-Mode', 'server-client', '-ProgramDirectory', paths.program, '-DataDirectory', paths.data,
+      '-BackupDirectory', paths.backups, '-ClientBytes', '0', '-ServerBytes', '0', '-SupportBytes', '0',
+    ], { encoding: 'utf8', windowsHide: true, timeout: 20_000 })
+    assert.equal(result.status, 1)
+    assert.match(result.stdout, /PREFLIGHT_ERROR\|stage=data-directory\|code=1\|reason=drive-root-not-allowed\|hresult=0/)
+    assert.doesNotMatch(result.stdout, /password|token|secret/i)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('synthetic NSIS ExecToStack preserves installer path arguments and captures PowerShell stdout', { skip: process.platform !== 'win32' }, (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'HromadaAID NSIS contract '))
+  const paths = {
+    program: join(root, 'Програма з пробілами'),
+    data: join(root, 'Серверні дані з пробілами'),
+    backups: join(root, 'Резервні копії з пробілами'),
+  }
+  const helper = join(root, 'capture-arguments.ps1')
+  const nsi = join(root, 'contract-test.nsi')
+  const harness = join(root, 'contract-test.exe')
+  const capture = join(root, 'nsis-output.txt')
+  const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const json = 'param([string]$ProgramDirectory, [string]$DataDirectory, [string]$BackupDirectory)\n' +
+    '$values = @($ProgramDirectory, $DataDirectory, $BackupDirectory)\n' +
+    '$payload = ConvertTo-Json -InputObject $values -Compress\n' +
+    '[Console]::Out.WriteLine([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload)))\n'
+  writeFileSync(helper, json, 'utf8')
+  const source = [
+    'Unicode true',
+    `OutFile "${harness}"`,
+    'RequestExecutionLevel user',
+    'SilentInstall silent',
+    'Section',
+    `  nsExec::ExecToStack '"${powershell}" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${helper}" -ProgramDirectory "${paths.program}" -DataDirectory "${paths.data}" -BackupDirectory "${paths.backups}"'`,
+    '  Pop $0',
+    '  Pop $1',
+    `  FileOpen $2 "${capture}" w`,
+    '  FileWrite $2 "$0|$1"',
+    '  FileClose $2',
+    'SectionEnd',
+  ].join('\r\n') + '\r\n'
+  writeFileSync(nsi, source, 'utf8')
+  try {
+    const cache = join(process.env.LOCALAPPDATA ?? '', 'electron-builder', 'Cache')
+    const findMakensis = (directory, depth = 5) => {
+      if (depth < 0 || !existsSync(directory)) return undefined
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const candidate = join(directory, entry.name)
+        if (entry.isFile() && entry.name.toLowerCase() === 'makensis.exe') return candidate
+        if (entry.isDirectory()) { const found = findMakensis(candidate, depth - 1); if (found) return found }
+      }
+    }
+    const makensis = process.env.MAKENSIS_PATH ?? findMakensis(cache)
+    if (!makensis) return t.skip('makensis is unavailable; NSIS source assertions and PowerShell integration tests still run.')
+    execFileSync(makensis, ['/INPUTCHARSET', 'UTF8', '/V2', nsi], { windowsHide: true, timeout: 60_000 })
+    const run = spawnSync(harness, ['/S'], { windowsHide: true, encoding: 'utf8', timeout: 30_000 })
+    assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`)
+    const [exitCode, stdout] = readFileSync(capture, 'utf8').split('|')
+    assert.equal(exitCode, '0')
+    const received = JSON.parse(Buffer.from(stdout, 'base64').toString('utf8'))
+    assert.deepEqual(received, [paths.program, paths.data, paths.backups])
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 

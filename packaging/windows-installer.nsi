@@ -45,10 +45,10 @@ Var ValidationMode
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
-Page custom DataPage DataLeave "Серверні дані"
-Page custom BackupPage BackupLeave "Резервні копії"
-Page custom AdminSetupPage AdminSetupLeave "Створення адміністратора"
-Page custom SummaryPage SummaryLeave "Перевірка параметрів"
+Page custom DataPage DataLeave ": Серверні дані"
+Page custom BackupPage BackupLeave ": Резервні копії"
+Page custom AdminSetupPage AdminSetupLeave ": Створення адміністратора"
+Page custom SummaryPage SummaryLeave ": Перевірка параметрів"
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_LANGUAGE "Ukrainian"
@@ -340,21 +340,23 @@ Function SummaryLeave
   ${EndIf}
   SetOutPath "$PLUGINSDIR"
   File /oname=windows-installer-paths.ps1 "${PROJECT_DIR}\packaging\windows-installer-paths.ps1"
+  DetailPrint "Preflight paths: program=[$INSTDIR] data=[$DataDirectory] backups=[$BackupDirectory] mode=[$ValidationMode]"
   nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-installer-paths.ps1" -Mode "$ValidationMode" -ProgramDirectory "$INSTDIR" -DataDirectory "$DataDirectory" -BackupDirectory "$BackupDirectory" -ClientBytes ${CLIENT_PAYLOAD_BYTES} -ServerBytes ${SERVER_PAYLOAD_BYTES} -SupportBytes ${INSTALLER_SUPPORT_BYTES}'
   Pop $2
   Pop $3
   DetailPrint "Попередня перевірка каталогів: код $2"
   ${If} $2 != 0
+    DetailPrint "Діагностика preflight: $3"
     ${If} $2 == 3
-      MessageBox MB_ICONSTOP|MB_OK "На одному з вибраних дисків недостатньо вільного місця. Звільніть місце або змініть відповідний каталог. Наявні дані не змінено."
+      MessageBox MB_ICONSTOP|MB_OK "На одному з вибраних дисків недостатньо вільного місця. Звільніть місце або змініть відповідний каталог. Наявні дані не змінено.$\r$\n$3"
     ${ElseIf} $2 == 4
-      MessageBox MB_ICONSTOP|MB_OK "Каталоги програми, даних і резервних копій мають бути на доступних локальних дисках NTFS. Перевірте диск і файлову систему."
+      MessageBox MB_ICONSTOP|MB_OK "Каталоги програми, даних і резервних копій мають бути на доступних локальних дисках NTFS. Перевірте диск і файлову систему.$\r$\n$3"
     ${ElseIf} $2 == 5
-      MessageBox MB_ICONSTOP|MB_OK "Знайдено наявну базу, архів або server.json, що не відповідає вибраним каталогам. Для оновлення виберіть попередні шляхи або окремо перевірте дані адміністратора."
+      MessageBox MB_ICONSTOP|MB_OK "Знайдено наявну базу, архів або server.json, що не відповідає вибраним каталогам. Для оновлення виберіть попередні шляхи або окремо перевірте дані адміністратора.$\r$\n$3"
     ${ElseIf} $2 == 6
-      MessageBox MB_ICONSTOP|MB_OK "Каталоги програми, серверних даних і резервних копій не повинні перекриватися. Виберіть окремі каталоги."
+      MessageBox MB_ICONSTOP|MB_OK "Каталоги програми, серверних даних і резервних копій не повинні перекриватися. Виберіть окремі каталоги.$\r$\n$3"
     ${Else}
-      MessageBox MB_ICONSTOP|MB_OK "Не вдалося перевірити доступність або параметри вибраних каталогів. Перевірте диски, права доступу та server.json, якщо це оновлення. Наявні дані не змінено. Код: $2"
+      MessageBox MB_ICONSTOP|MB_OK "Не вдалося перевірити вибрані параметри. Код: $2$\r$\n$\r$\n$3$\r$\n$\r$\nНаявні дані не змінено. Перевірте зазначений етап і виправте його причину."
     ${EndIf}
     Abort
   ${EndIf}
