@@ -22,10 +22,56 @@ $initialInstallRetry = $false
 $wasServiceRunning = $false
 $oldSchemaMaximum = 0
 $journal = $null
+$script:InstallStage = 'arguments'
+$script:LastChildExitCode = $null
+
+function Set-InstallStage([string]$Stage) {
+  $script:InstallStage = $Stage
+  $script:LastChildExitCode = $null
+}
+
+function Protect-InstallDiagnosticText([string]$Text) {
+  return ($Text -replace '(?i)(password|token|secret|recovery.?key|private.?key|dpapi.?key|bearer)(\s*[:=]\s*)[^\s,;]+', '$1$2[redacted]')
+}
+
+function Write-InstallFailureDiagnostic($Record) {
+  $exception = $Record.Exception
+  $exceptions = @()
+  while ($null -ne $exception) {
+    $exceptions += [ordered]@{
+      type = $exception.GetType().FullName
+      message = (Protect-InstallDiagnosticText $exception.Message)
+      hresult = $exception.HResult
+    }
+    $exception = $exception.InnerException
+  }
+  $fileName = 'HromadaAID-service-install-' + [guid]::NewGuid().ToString('N') + '.json'
+  $detailWritten = $false
+  try {
+    $detail = [ordered]@{
+      stage = $script:InstallStage
+      script = [IO.Path]::GetFileName($Record.InvocationInfo.ScriptName)
+      line = $Record.InvocationInfo.ScriptLineNumber
+      errorId = $Record.FullyQualifiedErrorId
+      childExitCode = $script:LastChildExitCode
+      exceptions = $exceptions
+    }
+    $detailPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), $fileName)
+    [IO.File]::WriteAllText($detailPath, (ConvertTo-Json -InputObject $detail -Depth 8), [Text.UTF8Encoding]::new($false))
+    $detailWritten = $true
+  } catch { }
+  $message = Protect-InstallDiagnosticText ([string]$Record.Exception.Message)
+  $hresult = $Record.Exception.HResult
+  $type = $Record.Exception.GetType().FullName
+  $line = $Record.InvocationInfo.ScriptLineNumber
+  [Console]::Out.WriteLine("SERVICE_INSTALL_ERROR|stage=$script:InstallStage|type=$type|line=$line|hresult=$hresult|childExitCode=$script:LastChildExitCode|detailFile=$fileName|detailWritten=$detailWritten|message=$message")
+}
 
 function Invoke-Checked([string]$File, [string[]]$Arguments, [string]$Failure) {
   & $File @Arguments
-  if ($LASTEXITCODE -ne 0) { throw $Failure }
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -ne 0) { $script:LastChildExitCode = $exitCode; throw $Failure }
+  $script:LastChildExitCode = $null
 }
 function Save-Acl([string]$Path) {
   if ([IO.Directory]::Exists($Path) -or [IO.File]::Exists($Path)) { $aclSnapshots[$Path] = (Get-Acl -LiteralPath $Path).Sddl }
@@ -57,7 +103,9 @@ function Invoke-PackageTransaction([string]$PackageRoot, [string]$Action, [strin
   if (-not [IO.File]::Exists($node) -or -not [IO.File]::Exists($tool)) { throw 'Пакет не містить безпечного механізму перемикання серверних файлів.' }
   $arguments = @($tool, $Action, '--program-dir', $ProgramDirectory, '--data-dir', $DataDirectory) + $AdditionalArguments
   & $node @arguments
-  if ($LASTEXITCODE -ne 0) { throw 'Не вдалося виконати контрольоване перемикання серверного пакета.' }
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -ne 0) { $script:LastChildExitCode = $exitCode; throw 'Не вдалося виконати контрольоване перемикання серверного пакета.' }
+  $script:LastChildExitCode = $null
 }
 function Get-SupportedSchemaMaximum([string]$PackageRoot) {
   $databaseModule = Join-Path $PackageRoot 'app\dist\electron\database.js'
@@ -71,7 +119,9 @@ function Get-DatabaseStatus([string]$Node, [string]$PackageRoot, [string]$Databa
   $cli = Join-Path $PackageRoot 'app\dist\server\src\create-admin.js'
   if (-not [IO.File]::Exists($cli)) { throw 'Пакет не містить перевірки стану облікових записів.' }
   $output = & $Node $cli --database $DatabasePath --status 2>$null
-  if ($LASTEXITCODE -ne 0) { throw 'Не вдалося безпечно прочитати стан серверної бази.' }
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -ne 0) { $script:LastChildExitCode = $exitCode; throw 'Не вдалося безпечно прочитати стан серверної бази.' }
+  $script:LastChildExitCode = $null
   try { return ($output | Select-Object -Last 1 | ConvertFrom-Json) }
   catch { throw 'Перевірка стану серверної бази повернула неочікуваний результат.' }
 }
@@ -85,7 +135,9 @@ function Register-Service([string]$Wrapper) {
   $script:newServiceRegistered = $true
   Invoke-Checked "$env:SystemRoot\System32\sc.exe" @('sidtype', $serviceName, 'unrestricted') 'Не вдалося налаштувати service SID.'
   $sidResult = & "$env:SystemRoot\System32\sc.exe" qsidtype $serviceName 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0 -or $sidResult -notmatch 'UNRESTRICTED|unrestricted') { throw 'Не вдалося підтвердити service SID служби.' }
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -ne 0 -or $sidResult -notmatch 'UNRESTRICTED|unrestricted') { $script:LastChildExitCode = $exitCode; throw 'Не вдалося підтвердити service SID служби.' }
+  $script:LastChildExitCode = $null
 }
 function Get-HealthUrl($Settings) {
   $hostName = [string]$Settings.host
@@ -126,6 +178,7 @@ function Unregister-ServiceIfPresent([string]$Wrapper) {
 }
 
 try {
+  Set-InstallStage 'validate-inputs'
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
   $principal = [Security.Principal.WindowsPrincipal]::new($identity)
   if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Для встановлення серверної служби потрібні права адміністратора.' }
@@ -138,11 +191,14 @@ try {
   foreach ($path in @((Join-Path $stagedServer 'service\HromadaAIDService.exe'), (Join-Path $stagedServer 'runtime\node.exe'), $config)) {
     if (-not [IO.File]::Exists($path)) { throw "Не знайдено обов'язковий файл серверного пакета: $path" }
   }
+  Set-InstallStage 'verify-package'
   $newNode = Join-Path $stagedServer 'runtime\node.exe'
   $packageVerifier = Join-Path $stagedServer 'installer\verify-server-package.mjs'
   if (-not [IO.File]::Exists($packageVerifier)) { throw 'Не знайдено перевірку повноти серверного пакета.' }
   & $newNode $packageVerifier $stagedServer
-  if ($LASTEXITCODE -ne 0) { throw 'Новий серверний пакет неповний або пошкоджений; встановлену версію не перемикали.' }
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -ne 0) { $script:LastChildExitCode = $exitCode; throw 'Новий серверний пакет неповний або пошкоджений; встановлену версію не перемикали.' }
+  $script:LastChildExitCode = $null
   if ([IO.File]::Exists($journalPath)) {
     try { $priorJournal = Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json }
     catch { throw 'Журнал попереднього встановлення пошкоджений; автоматичне оновлення зупинено.' }
@@ -156,6 +212,8 @@ try {
   }
   if ([IO.Directory]::Exists($previousServer) -or [IO.Directory]::Exists($failedServer)) { throw 'Знайдено службовий каталог попереднього або невдалого пакета. Автоматичне видалення чи перезапис зупинено; потрібна перевірка адміністратора.' }
 
+  Set-InstallStage 'validate-resume-state'
+  Set-InstallStage 'validate-configuration-and-existing-data'
   $settings = Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
   if ($settings.configVersion -notin @(1, 2)) { throw 'Версія server.json несумісна із встановленою версією HromadaAID.' }
   $database = [IO.Path]::GetFullPath([string]$settings.databasePath)
@@ -167,9 +225,12 @@ try {
   $hasArchives = @(Get-ChildItem -LiteralPath $BackupDirectory -Filter '*.hraid' -File -ErrorAction Stop).Count -gt 0
   if (($databaseExists -xor $keyExists) -or ($hasArchives -and -not ($databaseExists -and $keyExists))) { throw 'Виявлено неповний комплект бази, DPAPI-ключа або архівів. Наявні дані збережено; потрібна окрема перевірка адміністратора.' }
 
+  Set-InstallStage 'validate-server-preflight'
   $preflight = Join-Path $stagedServer 'app\dist\server\src\installer-preflight.js'
   & $newNode $preflight --config $config
-  if ($LASTEXITCODE -ne 0) { throw 'Конфігурація сервера, TLS або каталоги не пройшли перевірку.' }
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -ne 0) { $script:LastChildExitCode = $exitCode; throw 'Конфігурація сервера, TLS або каталоги не пройшли перевірку.' }
+  $script:LastChildExitCode = $null
   $newSchemaMaximum = Get-SupportedSchemaMaximum $stagedServer
   if ($hadOldPackage) {
     $oldSchemaMaximum = Get-SupportedSchemaMaximum $activeServer
@@ -180,6 +241,7 @@ try {
   if ($PreviousServiceStateFile -and [IO.File]::Exists($PreviousServiceStateFile)) { $wasServiceRunning = [IO.File]::ReadAllText($PreviousServiceStateFile).Trim() -eq 'Running' }
   else { $wasServiceRunning = $null -ne $service -and $service.Status -eq 'Running' }
 
+  Set-InstallStage 'configure-acl'
   foreach ($path in @($ProgramDirectory, $activeServer, $DataDirectory, $databaseRoot, (Join-Path $DataDirectory 'Logs'), $BackupDirectory, $config, $key)) { Save-Acl $path }
   Set-AclChecked $DataDirectory @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)RX")
   Set-AclChecked $databaseRoot @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)M")
@@ -193,6 +255,7 @@ try {
     if ([IO.File]::Exists($tlsPrivateKey)) { Save-Acl $tlsPrivateKey; Set-ReadOnlyServiceFile $tlsPrivateKey }
   }
 
+  Set-InstallStage 'initialize-data'
   if (-not $databaseExists -and -not $keyExists) {
     if ($hasArchives) { throw 'У каталозі резервних копій уже є архіви. Чисту ініціалізацію зупинено.' }
     $pending = [ordered]@{ formatVersion = 1; databasePath = $database; createdAt = [DateTime]::UtcNow.ToString('o') } | ConvertTo-Json -Compress
@@ -201,18 +264,23 @@ try {
     Set-ReadOnlyServiceFile $pendingAdminPath
     $initialize = Join-Path $stagedServer 'app\dist\server\src\installer-initialization.js'
     & $newNode $initialize --config $config --confirm-initialization
-    if ($LASTEXITCODE -ne 0) { throw 'Первинну ініціалізацію не завершено; повторний запуск зможе продовжити її.' }
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) { $script:LastChildExitCode = $exitCode; throw 'Первинну ініціалізацію не завершено; повторний запуск зможе продовжити її.' }
+    $script:LastChildExitCode = $null
     $databaseExists = $true; $keyExists = [IO.File]::Exists($key)
   } else {
     $verify = Join-Path $stagedServer 'app\dist\server\src\installer-initialization.js'
     & $newNode $verify --config $config --confirm-initialization
-    if ($LASTEXITCODE -ne 0) { throw 'Наявний ключ або конфігурація несумісні; повторну ініціалізацію не виконано.' }
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) { $script:LastChildExitCode = $exitCode; throw 'Наявний ключ або конфігурація несумісні; повторну ініціалізацію не виконано.' }
+    $script:LastChildExitCode = $null
   }
 
   if ([IO.File]::Exists($key)) { Set-ReadOnlyServiceFile $key }
   Set-AclChecked $BackupDirectory @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)M")
   if ([IO.File]::Exists($key)) { Set-ReadOnlyServiceFile $key }
 
+  Set-InstallStage 'inspect-database-and-create-admin'
   $databaseStatus = Get-DatabaseStatus $newNode $stagedServer $database
   if ([int]$databaseStatus.schemaVersion -gt $newSchemaMaximum) { throw 'Схема наявної SQLite новіша за цей пакет сервера; оновлення зупинено.' }
   if ($hadOldPackage -and [int]$databaseStatus.schemaVersion -gt $oldSchemaMaximum) { throw 'Попередній пакет не підтримує поточну версію SQLite. Оновлення з автоматичним відкатом небезпечне й зупинене.' }
@@ -233,6 +301,7 @@ try {
     if ($databaseStatus.users -ne 'present') { throw 'Після створення адміністратора перевірка облікового запису не пройшла.' }
   }
 
+  Set-InstallStage 'prepare-package-journal'
   $preparedArguments = @('--had-previous', ([string]$hadOldPackage).ToLowerInvariant(), '--old-schema', [string]$oldSchemaMaximum, '--schema-before', [string]$databaseStatus.schemaVersion, '--service-was-running', ([string]$wasServiceRunning).ToLowerInvariant())
   Invoke-PackageTransaction $stagedServer 'prepare' $preparedArguments
   $oldWrapper = Join-Path $activeServer 'service\HromadaAIDService.exe'
@@ -240,29 +309,38 @@ try {
     if ($service.Status -ne 'Stopped') { throw 'Служба має бути штатно зупинена перед оновленням серверних файлів.' }
     if (-not $hadOldPackage -or -not [IO.File]::Exists($oldWrapper)) { throw 'Не знайдено попередній WinSW для безпечного оновлення.' }
     & $oldWrapper uninstall
-    if ($LASTEXITCODE -ne 0) { throw 'WinSW не зміг зняти реєстрацію попередньої служби.' }
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) { $script:LastChildExitCode = $exitCode; throw 'WinSW не зміг зняти реєстрацію попередньої служби.' }
+    $script:LastChildExitCode = $null
     Wait-ServiceRemoved
   }
+  Set-InstallStage 'activate-server-package'
   $activateArguments = if ($initialInstallRetry) { @('--initial-retry', 'true') } else { @() }
   Invoke-PackageTransaction $stagedServer 'activate' $activateArguments
 
   $wrapper = Join-Path $activeServer 'service\HromadaAIDService.exe'
   Set-AclChecked $activeServer @('SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F', "$serviceAccount`:(OI)(CI)RX")
+  Set-InstallStage 'register-service-and-sid'
   Register-Service $wrapper
   $settings = Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
   $healthUrl = Get-HealthUrl $settings
+  Set-InstallStage 'start-service'
   Invoke-Checked $wrapper @('start') 'Windows Service не запустилася.'
+  Set-InstallStage 'health-check'
   Invoke-PackageTransaction $activeServer 'health-check'
   Wait-ServiceHealthy $healthUrl
   Invoke-PackageTransaction $activeServer 'healthy'
   try { if ([IO.File]::Exists($pendingAdminPath)) { Remove-Item -LiteralPath $pendingAdminPath -Force } } catch { [Console]::Error.WriteLine('Не вдалося прибрати маркер першого налаштування; сервер пройшов health-перевірку.') }
   try {
     $finalizeArguments = if ($initialInstallRetry) { @('--initial-retry', 'true') } else { @() }
+    Set-InstallStage 'finalize-update'
     Invoke-PackageTransaction $activeServer 'finalize' $finalizeArguments
   } catch { [Console]::Error.WriteLine('Сервер пройшов health-перевірку, але попередній пакет або журнал залишено для наступного контрольованого прибирання.') }
   Write-Output 'Службу HromadaAIDApi зареєстровано, запущено й перевірено. Попередній пакет видаляється лише після успішної перевірки.'
 } catch {
-  $failure = $_.Exception.Message
+  $caught = $_
+  $failure = Protect-InstallDiagnosticText ([string]$caught.Exception.Message)
+  Write-InstallFailureDiagnostic $caught
   $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
   if ($null -ne $service -and $service.Status -ne 'Stopped') { try { Stop-Service -Name $serviceName -ErrorAction Stop; (Get-Service -Name $serviceName).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(45)) } catch { } }
   $activeWrapper = Join-Path $activeServer 'service\HromadaAIDService.exe'

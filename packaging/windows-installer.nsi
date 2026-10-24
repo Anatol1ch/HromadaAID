@@ -99,7 +99,8 @@ Section -PrepareServer
     Pop $3
     DetailPrint "Підготовка Windows Service: код $1"
     ${If} $1 != 0
-      MessageBox MB_ICONSTOP|MB_OK "Не вдалося підготувати Windows Service. Наявні бази, ключі та резервні копії збережено. Перевірте права, диски, конфігурацію та журнали інсталятора. Код: $1"
+      DetailPrint "Діагностика підготовки служби: $3"
+      MessageBox MB_ICONSTOP|MB_OK "Не вдалося підготувати Windows Service. Наявні бази, ключі та резервні копії збережено. Код: $1. Діагностика: $3"
       Abort
     ${EndIf}
     Delete "$PLUGINSDIR\service-state.txt"

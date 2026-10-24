@@ -41,6 +41,7 @@ test('NSIS exposes the three install modes as independent client and server comp
   assert.match(script, /Call TrimPathTrailingSeparator[\s\S]*?Pop \$PreflightProgramDirectory[\s\S]*?Pop \$PreflightDataDirectory[\s\S]*?Pop \$PreflightBackupDirectory/)
   assert.match(script, /nsExec::ExecToStack[\s\S]*?windows-installer-paths\.ps1[\s\S]*?-ProgramDirectory "\$PreflightProgramDirectory"[\s\S]*?-DataDirectory "\$PreflightDataDirectory"[\s\S]*?-BackupDirectory "\$PreflightBackupDirectory"/)
   assert.match(script, /Pop \$2\s+Pop \$3\s+DetailPrint "Попередня перевірка каталогів: код \$2"/)
+  assert.match(script, /DetailPrint "Діагностика підготовки служби: \$3"[\s\S]*?MessageBox[^\r\n]*Діагностика: \$3/)
   assert.match(script, /--package-root "\$INSTDIR\\Server\.next"/)
   assert.match(script, /CLIENT_PAYLOAD_BYTES/)
   assert.match(script, /SERVER_PAYLOAD_BYTES/)
@@ -94,6 +95,12 @@ test('NSIS registers and verifies the LocalService WinSW wrapper, preserves user
   assert.match(installer, /\('start'\)/)
   assert.match(installer, /Status -eq 'Running'/)
   assert.match(installer, /Test-HromadaServiceHealth/)
+  assert.match(installer, /Set-InstallStage 'register-service-and-sid'/)
+  assert.match(installer, /SERVICE_INSTALL_ERROR\|stage=\$script:InstallStage\|type=\$type\|line=\$line\|hresult=\$hresult\|childExitCode=\$script:LastChildExitCode\|detailFile=\$fileName/)
+  assert.match(installer, /HromadaAID-service-install-/)
+  assert.match(installer, /message = \(Protect-InstallDiagnosticText \$exception\.Message\)/)
+  assert.match(installer, /function Protect-InstallDiagnosticText/)
+  assert.doesNotMatch(installer, /Write-InstallFailureDiagnostic[\s\S]*?Password\s*=/i)
   assert.match(installer, /installer-preflight\.js/)
   assert.match(installer, /installer-initialization\.js/)
   assert.match(installer, /create-admin\.js/)
@@ -109,6 +116,42 @@ test('NSIS registers and verifies the LocalService WinSW wrapper, preserves user
   assert.match(script, /-Action uninstall/)
   assert.match(serviceControl, /\$Action -eq 'uninstall'/)
   assert.doesNotMatch(script, /RMDir\s+\/r\s+"\$DataDirectory|RMDir\s+\/r\s+"\$BackupDirectory/)
+})
+
+test('retry cleanup removes only an interrupted Server.next package and preserves synthetic server data', { skip: process.platform !== 'win32' }, (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'HromadaAID retry cleanup '))
+  const program = join(root, 'Program Files', 'HromadaAID')
+  const data = join(root, 'Persistent Data')
+  const backups = join(root, 'Backups')
+  const staged = join(program, 'Server.next')
+  const database = join(data, 'Database', 'hromada-aid.sqlite')
+  const config = join(data, 'server.json')
+  const key = join(backups, '.hromadaaid-backup-key.dpapi')
+  const archive = join(backups, 'synthetic.hraid')
+  const journal = join(data, '.hromadaaid-update-state.json')
+  const serviceControl = fileURLToPath(new URL('../packaging/windows-service-control.ps1', import.meta.url))
+  const harness = join(root, 'retry-cleanup.ps1')
+  const powershell = join(process.env.SystemRoot ?? 'C:\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  try {
+    mkdirSync(join(staged, 'partial'), { recursive: true })
+    mkdirSync(join(data, 'Database'), { recursive: true })
+    mkdirSync(backups, { recursive: true })
+    writeFileSync(join(staged, 'partial', 'payload.bin'), 'interrupted staging payload')
+    writeFileSync(database, 'synthetic database sentinel')
+    writeFileSync(config, '{"synthetic":true}')
+    writeFileSync(key, 'synthetic DPAPI sentinel')
+    writeFileSync(archive, 'synthetic archive sentinel')
+    writeFileSync(journal, JSON.stringify({ phase: 'initial-install-needs-review', hadPreviousPackage: false }))
+    const psSource = [
+      'function Get-Service { param([string]$Name, [string]$ErrorAction); return $null }',
+      `. '${serviceControl.replace(/'/g, "''")}' -Action stop-before-update -ProgramDirectory '${program.replace(/'/g, "''")}' -UpdateJournalPath '${journal.replace(/'/g, "''")}'`,
+    ].join('\r\n') + '\r\n'
+    writeFileSync(harness, '\uFEFF' + psSource, 'utf8')
+    const run = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', harness], { windowsHide: true, encoding: 'utf8', timeout: 30_000 })
+    assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`)
+    assert.equal(existsSync(staged), false, 'stale staging files are discarded before retry')
+    for (const path of [database, config, key, archive, journal]) assert.equal(existsSync(path), true, `${path} must be preserved`)
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
 test('server production dependencies deploy only in a disposable isolated workspace', async () => {
