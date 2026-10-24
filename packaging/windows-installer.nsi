@@ -365,10 +365,11 @@ Function SummaryLeave
   Push "$BackupDirectory"
   Call TrimPathTrailingSeparator
   Pop $PreflightBackupDirectory
-  SetOutPath "$PLUGINSDIR"
+  ; Keep PowerShell CodeDom compilation away from NSIS/plugin DLLs in the PLUGINSDIR root.
+  SetOutPath "$PLUGINSDIR\Preflight"
   File /oname=windows-installer-paths.ps1 "${PROJECT_DIR}\packaging\windows-installer-paths.ps1"
-  DetailPrint "Preflight launch: powershell=[$SYSDIR\WindowsPowerShell\v1.0\powershell.exe] script=[$PLUGINSDIR\windows-installer-paths.ps1] cwd=[$PLUGINSDIR] mode=[$ValidationMode] program=[$PreflightProgramDirectory] data=[$PreflightDataDirectory] backups=[$PreflightBackupDirectory] clientBytes=[${CLIENT_PAYLOAD_BYTES}] serverBytes=[${SERVER_PAYLOAD_BYTES}] supportBytes=[${INSTALLER_SUPPORT_BYTES}]"
-  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-installer-paths.ps1" -Mode "$ValidationMode" -ProgramDirectory "$PreflightProgramDirectory" -DataDirectory "$PreflightDataDirectory" -BackupDirectory "$PreflightBackupDirectory" -ClientBytes ${CLIENT_PAYLOAD_BYTES} -ServerBytes ${SERVER_PAYLOAD_BYTES} -SupportBytes ${INSTALLER_SUPPORT_BYTES}'
+  DetailPrint "Preflight launch: powershell=[$SYSDIR\WindowsPowerShell\v1.0\powershell.exe] script=[$PLUGINSDIR\Preflight\windows-installer-paths.ps1] cwd=[$PLUGINSDIR\Preflight] mode=[$ValidationMode] program=[$PreflightProgramDirectory] data=[$PreflightDataDirectory] backups=[$PreflightBackupDirectory] clientBytes=[${CLIENT_PAYLOAD_BYTES}] serverBytes=[${SERVER_PAYLOAD_BYTES}] supportBytes=[${INSTALLER_SUPPORT_BYTES}]"
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\Preflight\windows-installer-paths.ps1" -Mode "$ValidationMode" -ProgramDirectory "$PreflightProgramDirectory" -DataDirectory "$PreflightDataDirectory" -BackupDirectory "$PreflightBackupDirectory" -ClientBytes ${CLIENT_PAYLOAD_BYTES} -ServerBytes ${SERVER_PAYLOAD_BYTES} -SupportBytes ${INSTALLER_SUPPORT_BYTES}'
   Pop $2
   Pop $3
   DetailPrint "Попередня перевірка каталогів: код $2"

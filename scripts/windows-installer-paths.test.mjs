@@ -57,7 +57,7 @@ test('NSIS exposes the three install modes as independent client and server comp
   assert.match(script, /Page custom BackupPage BackupLeave ": Резервні копії"/)
   assert.match(script, /Page custom AdminSetupPage AdminSetupLeave ": Створення адміністратора"/)
   assert.match(script, /Page custom SummaryPage SummaryLeave ": Перевірка параметрів"/)
-  assert.match(script, /Preflight launch: powershell=\[\$SYSDIR\\WindowsPowerShell\\v1\.0\\powershell\.exe\] script=\[\$PLUGINSDIR\\windows-installer-paths\.ps1\] cwd=\[\$PLUGINSDIR\]/)
+  assert.match(script, /Preflight launch: powershell=\[\$SYSDIR\\WindowsPowerShell\\v1\.0\\powershell\.exe\] script=\[\$PLUGINSDIR\\Preflight\\windows-installer-paths\.ps1\] cwd=\[\$PLUGINSDIR\\Preflight\]/)
   assert.match(script, /Діагностика preflight: \$3/)
   assert.match(script, /Не вдалося перевірити вибрані параметри\. Код: \$2.*\$3/)
   assert.doesNotMatch(script, /ExecWait\s+'[^\r\n]*powershell\.exe/i)
@@ -296,7 +296,7 @@ test('synthetic NSIS ExecToStack preserves installer path arguments and captures
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
-test('NSIS ExecToStack runs the actual preflight from PLUGINSDIR and preserves its exit code and stdout', { skip: process.platform !== 'win32' }, (t) => {
+test('NSIS ExecToStack isolates preflight from a conflicting native System.dll in PLUGINSDIR', { skip: process.platform !== 'win32' }, (t) => {
   const root = mkdtempSync(join(tmpdir(), 'HromadaAID actual NSIS preflight '))
   const paths = {
     program: join(root, 'Програма з пробілами'),
@@ -311,7 +311,8 @@ test('NSIS ExecToStack runs the actual preflight from PLUGINSDIR and preserves i
   const installerSource = readFileSync(new URL('../packaging/windows-installer.nsi', import.meta.url), 'utf8')
   const trimFunction = installerSource.match(/Function TrimPathTrailingSeparator\r?\n[\s\S]*?FunctionEnd/)?.[0]
   assert.ok(trimFunction, 'production trailing-separator helper must be available to the harness')
-  const call = `  nsExec::ExecToStack '\"${powershell}\" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$PLUGINSDIR\\windows-installer-paths.ps1\" -Mode \"server-client\" -ProgramDirectory \"$PreflightProgramDirectory\" -DataDirectory \"$PreflightDataDirectory\" -BackupDirectory \"$PreflightBackupDirectory\" -ClientBytes 388534871 -ServerBytes 125227157 -SupportBytes 63725'`
+  const unsafeCall = `  nsExec::ExecToStack '\"${powershell}\" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$PLUGINSDIR\\windows-installer-paths.ps1\" -Mode \"server-client\" -ProgramDirectory \"$PreflightProgramDirectory\" -DataDirectory \"$PreflightDataDirectory\" -BackupDirectory \"$PreflightBackupDirectory\" -ClientBytes 388534871 -ServerBytes 125227157 -SupportBytes 63725'`
+  const safeCall = `  nsExec::ExecToStack '\"${powershell}\" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$PLUGINSDIR\\Preflight\\windows-installer-paths.ps1\" -Mode \"server-client\" -ProgramDirectory \"$PreflightProgramDirectory\" -DataDirectory \"$PreflightDataDirectory\" -BackupDirectory \"$PreflightBackupDirectory\" -ClientBytes 388534871 -ServerBytes 125227157 -SupportBytes 63725'`
   const source = [
     'Unicode true',
     '!include "LogicLib.nsh"',
@@ -325,6 +326,8 @@ test('NSIS ExecToStack runs the actual preflight from PLUGINSDIR and preserves i
     'Section',
     '  InitPluginsDir',
     '  SetOutPath \"$PLUGINSDIR\"',
+    `  File /oname=System.dll \"${join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'version.dll')}\"`,
+    '  CreateDirectory "$PLUGINSDIR\\Preflight"',
     `  File /oname=windows-installer-paths.ps1 \"${preflight}\"`,
     `  StrCpy $PreflightProgramDirectory \"${paths.program}\\\"`,
     `  StrCpy $PreflightBackupDirectory \"${paths.backups}\\\"`,
@@ -338,7 +341,7 @@ test('NSIS ExecToStack runs the actual preflight from PLUGINSDIR and preserves i
     '  Push $PreflightDataDirectory',
     '  Call TrimPathTrailingSeparator',
     '  Pop $PreflightDataDirectory',
-    call,
+    unsafeCall,
     '  Pop $0',
     '  Pop $1',
     '  StrCpy $4 $0',
@@ -347,7 +350,9 @@ test('NSIS ExecToStack runs the actual preflight from PLUGINSDIR and preserves i
     '  Push $PreflightDataDirectory',
     '  Call TrimPathTrailingSeparator',
     '  Pop $PreflightDataDirectory',
-    call,
+    '  SetOutPath "$PLUGINSDIR\\Preflight"',
+    `  File /oname=windows-installer-paths.ps1 \"${preflight}\"`,
+    safeCall,
     '  Pop $2',
     '  Pop $3',
     `  FileOpen $6 \"${capture}\" w`,
@@ -377,7 +382,8 @@ test('NSIS ExecToStack runs the actual preflight from PLUGINSDIR and preserves i
     const failedCode = lines[0].slice(0, failedDivider)
     const failedOutput = lines[0].slice(failedDivider + 1)
     assert.equal(failedCode, '1')
-    assert.match(failedOutput, /PREFLIGHT_ERROR\|stage=data-directory\|code=1\|reason=invalid-local-path/, readFileSync(capture, 'utf8'))
+    assert.match(failedOutput, /PREFLIGHT_ERROR\|stage=arguments\|code=1\|reason=unhandled-exception/)
+    assert.match(failedOutput, /line=\d+/)
     const successDivider = lines[1].indexOf('|')
     const successCode = lines[1].slice(0, successDivider)
     const successOutput = lines[1].slice(successDivider + 1)
