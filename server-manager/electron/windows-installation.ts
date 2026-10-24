@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import type { ServerInstallRequest } from './installation-contract.js'
 import type { ServerInstallAdapters } from './installation-engine.js'
-import { isInitialInstallRetryJournal } from './installation-recovery.js'
+import { canResumeInitialInstallLayout, isInitialInstallRetryJournal } from './installation-recovery.js'
 import { inspectEnvironment } from './inspection-engine.js'
 import { createWindowsInspectionAdapters } from './windows-inspection.js'
 
@@ -113,10 +113,10 @@ export function createWindowsInstallationAdapters(): ServerInstallAdapters {
       let journal: unknown = null
       try { journal = JSON.parse(await readFile(journalPath, 'utf8')) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false }
       const retryJournal = journal === null ? false : isInitialInstallRetryJournal(journal, program)
+      const stageExists = await lstat(stage).then(info => info.isDirectory() && !info.isSymbolicLink(), () => false)
       if (journal !== null && !retryJournal) return false
-      if ((activeExists || failedExists) && !retryJournal) return false
-      if (!(await lstat(stage).then(info => info.isDirectory() && !info.isSymbolicLink(), () => false))) return false
-      await verifyPackageCopy(payloadRoot(), stage)
+      if (!canResumeInitialInstallLayout({ retryJournal, stagedPackageExists: stageExists, activePackageExists: activeExists, previousPackageExists: previousExists, failedPackageExists: failedExists })) return false
+      if (stageExists) await verifyPackageCopy(payloadRoot(), stage)
       if (activeExists) await verifyPackageCopy(payloadRoot(), active)
       if (failedExists) await verifyPackageCopy(payloadRoot(), failed)
       return true

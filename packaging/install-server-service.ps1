@@ -130,6 +130,13 @@ function Protect-ServiceFile([string]$Path) {
   $servicePrincipal = "*$script:serviceSid"
   Invoke-Checked "$env:SystemRoot\System32\icacls.exe" @($Path, '/deny', "$servicePrincipal`:(W,D)") 'Не вдалося захистити конфігураційний файл від змін службою.'
 }
+function Grant-LocalServiceConfigRead {
+  # LocalService needs to traverse the data directory and read the non-secret
+  # server.json. Keep this built-in account away from the database, keys, logs,
+  # and backups; those remain scoped to the unique service SID above.
+  Invoke-Checked "$env:SystemRoot\System32\icacls.exe" @($DataDirectory, '/grant:r', '*S-1-5-19:(X)') 'Не вдалося надати LocalService доступ для проходу до конфігурації сервера.'
+  Invoke-Checked "$env:SystemRoot\System32\icacls.exe" @($config, '/grant:r', '*S-1-5-19:R') 'Не вдалося надати LocalService читання конфігурації сервера.'
+}
 function Configure-ServiceAccess {
   $inheritance = 'OI)(CI'
   Grant-ServiceAccess $DataDirectory 'RX' $inheritance
@@ -138,6 +145,7 @@ function Configure-ServiceAccess {
   Grant-ServiceAccess $BackupDirectory 'M' $inheritance
   Grant-ServiceAccess $activeServer 'RX' $inheritance
   Protect-ServiceFile $config
+  Grant-LocalServiceConfigRead
   if ($settings.tls) {
     $tlsCertificate = [IO.Path]::GetFullPath([string]$settings.tls.certificatePath)
     $tlsPrivateKey = [IO.Path]::GetFullPath([string]$settings.tls.privateKeyPath)

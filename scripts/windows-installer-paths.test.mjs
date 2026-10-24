@@ -97,8 +97,10 @@ test('NSIS registers and verifies the LocalService WinSW wrapper, preserves user
   assert.match(installer, /Test-HromadaServiceHealth/)
   assert.match(installer, /Set-InstallStage 'register-service-and-sid'/)
   assert.match(installer, /Set-AclChecked \$DataDirectory @\('\*S-1-5-18:[\s\S]*?Register-Service \$wrapper[\s\S]*?Configure-ServiceAccess/)
+  assert.match(installer, /function Grant-LocalServiceConfigRead[\s\S]*?\*S-1-5-19:\(X\)[\s\S]*?\*S-1-5-19:R/)
   assert.match(installer, /\$script:serviceSid = Get-ServiceSid \$serviceName/)
   assert.match(installer, /Register-Service \$wrapper\s+Set-InstallStage 'grant-service-acl'\s+Configure-ServiceAccess[\s\S]*?Set-InstallStage 'start-service'/)
+  assert.match(installer, /function Configure-ServiceAccess\s*\{[\s\S]*?Protect-ServiceFile \$config\s+Grant-LocalServiceConfigRead/)
   assert.doesNotMatch(installer, /SYSTEM:|BUILTIN\\Administrators:|NT SERVICE\\HromadaAIDApi:/)
   assert.match(installer, /\*S-1-5-18/)
   assert.match(installer, /\*S-1-5-32-544/)
@@ -144,12 +146,14 @@ test('installer ACL rules use SIDs and actual icacls on isolated Unicode paths',
     "$script:serviceSid = Get-ServiceSid 'Schedule'",
     "if ($script:serviceSid -notmatch '^S-1-5-80-(?:\\d+-){4}\\d+$') { throw 'Invalid service SID returned by sc.exe.' }",
     "$data = Join-Path $Root 'Дані HromadaAID'",
+    '$DataDirectory = $data',
     "$database = Join-Path $data 'База даних'",
     "$logs = Join-Path $data 'Журнали'",
     "$backups = Join-Path $Root 'Резервні копії'",
     "$program = Join-Path $Root 'Program Files\\Server'",
     'foreach ($path in @($data, $database, $logs, $backups, $program)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }',
     "$config = Join-Path $data 'server.json'; [IO.File]::WriteAllText($config, '{}')",
+    "$key = Join-Path $backups '.synthetic-dpapi'; [IO.File]::WriteAllText($key, 'synthetic')",
     "foreach ($path in @($data, $database, $logs, $backups, $program)) { Set-AclChecked $path @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F') }",
     'Grant-ServiceAccess $data \'RX\' \'OI)(CI\'',
     'Grant-ServiceAccess $database \'M\' \'OI)(CI\'',
@@ -158,8 +162,14 @@ test('installer ACL rules use SIDs and actual icacls on isolated Unicode paths',
     'Grant-ServiceAccess $program \'RX\' \'OI)(CI\'',
     'Set-ReadOnlyServiceFile $config',
     'Protect-ServiceFile $config',
-    "foreach ($path in @($data, $database, $logs, $backups, $program, $config)) { $acl = if ([IO.File]::Exists($path)) { [IO.File]::GetAccessControl($path) } else { [IO.Directory]::GetAccessControl($path) }; $sidRules = $acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]); $sids = @($sidRules | ForEach-Object { $_.IdentityReference.Value }); if ($sids -notcontains 'S-1-5-18' -or $sids -notcontains 'S-1-5-32-544' -or $sids -notcontains $script:serviceSid) { throw \"Missing expected SID ACL for [$path].\" }; if ($sids -contains 'S-1-5-32-545' -or $sids -contains 'S-1-1-0') { throw \"Unexpected Users/Everyone access on [$path].\" } }",
+    'Set-ReadOnlyServiceFile $key',
+    'Protect-ServiceFile $key',
+    'Grant-LocalServiceConfigRead',
+    "foreach ($path in @($data, $database, $logs, $backups, $program, $config, $key)) { $acl = if ([IO.File]::Exists($path)) { [IO.File]::GetAccessControl($path) } else { [IO.Directory]::GetAccessControl($path) }; $sidRules = $acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]); $sids = @($sidRules | ForEach-Object { $_.IdentityReference.Value }); if ($sids -notcontains 'S-1-5-18' -or $sids -notcontains 'S-1-5-32-544' -or $sids -notcontains $script:serviceSid) { throw \"Missing expected SID ACL for [$path].\" }; if ($sids -contains 'S-1-5-32-545' -or $sids -contains 'S-1-1-0') { throw \"Unexpected Users/Everyone access on [$path].\" } }",
     "$configRules = ([IO.File]::GetAccessControl($config)).GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]); if (-not ($configRules | Where-Object { $_.IdentityReference.Value -eq $script:serviceSid -and $_.AccessControlType -eq 'Deny' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -ne 0 })) { throw 'Service write deny is missing from protected config.' }",
+    "$localService = 'S-1-5-19'; $dataRules = ([IO.Directory]::GetAccessControl($data)).GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]); if (-not ($dataRules | Where-Object { $_.IdentityReference.Value -eq $localService -and $_.AccessControlType -eq 'Allow' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ExecuteFile) -ne 0 })) { throw 'LocalService traverse permission is missing on the data directory.' }",
+    "if (-not ($configRules | Where-Object { $_.IdentityReference.Value -eq $localService -and $_.AccessControlType -eq 'Allow' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) -ne 0 })) { throw 'LocalService read permission is missing on server.json.' }",
+    "$keyRules = ([IO.File]::GetAccessControl($key)).GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]); if ($keyRules | Where-Object { $_.IdentityReference.Value -eq $localService -and $_.AccessControlType -eq 'Allow' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) -ne 0 }) { throw 'LocalService received direct access to the protected key.' }",
     "Write-Output 'PASS: SID ACLs applied with icacls and verified on temporary Unicode paths'",
     '} catch { [Console]::Error.WriteLine(($_ | Out-String)); $script:testFailure = $true } finally { & (Join-Path $env:SystemRoot \'System32\\icacls.exe\') $Root \'/reset\' \'/T\' \'/C\' 2>&1 | Out-Null }',
     'if ($script:testFailure) { exit 1 }',
