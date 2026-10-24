@@ -3,6 +3,7 @@ node_modules/
 dist/
 dist-electron/
 dist-server/
+dist-server-manager/
 dist-package/
 server/dist/
 release/
