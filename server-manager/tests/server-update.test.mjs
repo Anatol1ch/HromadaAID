@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 const { verifyUpdatePackage, prepareServerUpdate, applyServerUpdate } = await import('../../dist-server-manager/main/server-update.js')
-const { createWindowsServerUpdateAdapters } = await import('../../dist-server-manager/main/windows-server-update.js')
+const { createWindowsServerUpdateAdapters, buildZipCompressionRatioProbeCommand, normalizePowerShellDiagnostic } = await import('../../dist-server-manager/main/windows-server-update.js')
 
 const payloadFiles = [
   'runtime/node.exe', 'service/HromadaAIDService.exe', 'service/HromadaAIDService.xml.template', 'app/package.json',
@@ -164,6 +164,34 @@ test('Windows PowerShell safe extractor accepts Unicode paths and rejects ZIP tr
   const badScript = String.raw`Add-Type -AssemblyName System.IO.Compression;$zipPath=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__ZIP__'));$archive=[IO.Compression.ZipArchive]::new([IO.File]::Open($zipPath,[IO.FileMode]::CreateNew),[IO.Compression.ZipArchiveMode]::Create);try{$entry=$archive.CreateEntry('../escape.txt');$writer=[IO.StreamWriter]::new($entry.Open());$writer.Write('bad');$writer.Dispose()}finally{$archive.Dispose()}`
   assert.equal(create(badArchive, badScript).status, 0)
   await assert.rejects(createWindowsServerUpdateAdapters().extract(badArchive, join(root, 'bad temp parent', 'bad-out')), { code: 'ZIP_EXTRACTION_FAILED' })
+})
+
+test('Windows PowerShell ZIP ratio arithmetic handles Int64 products and rejects zip bombs', { skip: process.platform !== 'win32' }, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'HromadaAID ZIP limits ')); t.after(() => rm(root, { recursive: true, force: true }))
+  const powershell = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const runProbe = (length, compressedLength) => spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(buildZipCompressionRatioProbeCommand(length, compressedLength), 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true })
+  assert.equal(runProbe('361645040', '36164504').status, 0, 'Former Int32-overflow value must be accepted by safe Int64 arithmetic')
+  assert.equal(runProbe('20000000', '1000').status, 1, 'Compression ratio over 1000:1 must be rejected')
+  assert.equal(runProbe('9223372036854775807', '9223372036854776').status, 0, 'Int64 upper bound must not overflow during division')
+
+  const archive = join(root, 'bomb.zip')
+  const script = String.raw`Add-Type -AssemblyName System.IO.Compression; $archive=[IO.Compression.ZipArchive]::new([IO.File]::Open('__ZIP__',[IO.FileMode]::CreateNew),[IO.Compression.ZipArchiveMode]::Create);try{$entry=$archive.CreateEntry('bomb.bin',[IO.Compression.CompressionLevel]::Optimal);$stream=$entry.Open();try{$buffer=New-Object byte[] 65536;for($i=0;$i -lt 32;$i++){$stream.Write($buffer,0,$buffer.Length)}}finally{$stream.Dispose()}}finally{$archive.Dispose()}`.replace('__ZIP__', archive.replaceAll("'", "''"))
+  const created = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true })
+  assert.equal(created.status, 0, created.stderr)
+  await assert.rejects(createWindowsServerUpdateAdapters().extract(archive, join(root, 'bomb-out')), error => {
+    assert.equal(error.code, 'ZIP_EXTRACTION_FAILED')
+    assert.match(error.details, /коефіцієнт стиснення/)
+    return true
+  })
+})
+
+test('PowerShell diagnostics omit CLIXML progress while retaining actual errors', () => {
+  const clixml = '#< CLIXML\n<Objs><Obj S="progress"><AV>Preparing modules for first use</AV></Obj><S S="Error">ZIP invalid: &lt;bad&gt; &amp; unreadable</S></Objs>'
+  assert.equal(normalizePowerShellDiagnostic(clixml), 'ZIP invalid: <bad> & unreadable')
+  assert.doesNotMatch(normalizePowerShellDiagnostic(clixml), /Preparing modules/)
+  assert.equal(normalizePowerShellDiagnostic('#< CLIXML\n<Objs><S S="Error">token=private-value</S></Objs>'), 'token=[redacted]')
+  assert.equal(normalizePowerShellDiagnostic('Actual PowerShell failure'), 'Actual PowerShell failure')
+  assert.equal(normalizePowerShellDiagnostic('#< CLIXML\n<Objs><Obj S="progress"><AV>Preparing modules for first use</AV></Obj></Objs>'), '')
 })
 
 test('existing service installer stops only after validations and keeps failures before transaction from stopping service', async () => {

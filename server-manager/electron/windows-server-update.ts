@@ -11,6 +11,16 @@ import { verifyUpdatePackage } from './server-update.js'
 
 const extractionScript = String.raw`
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+function Test-HromadaZipCompressionRatio([long]$Length, [long]$CompressedLength) {
+  if ($Length -le 1048576) { return $true }
+  if ($CompressedLength -le 0) { return $false }
+  [long]$remainder = 0
+  [long]$minimumCompressedLength = [Math]::DivRem($Length, [long]1000, [ref]$remainder)
+  if ($remainder -gt 0) { $minimumCompressedLength++ }
+  return $CompressedLength -ge $minimumCompressedLength
+}
+try {
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archivePath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__ARCHIVE__'))
 $destination = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__DESTINATION__'))
@@ -39,7 +49,7 @@ try {
     if ($entry.Length -gt 536870912) { throw 'Один елемент ZIP перевищує дозволений розмір.' }
     $total += $entry.Length
     if ($total -gt 2147483648) { throw 'Розпакований ZIP перевищує дозволений розмір 2 ГБ.' }
-    if ($entry.Length -gt 0 -and ($entry.CompressedLength -eq 0 -or $entry.Length -gt [Math]::Max(1048576, $entry.CompressedLength * 1000))) { throw 'ZIP має небезпечний коефіцієнт стиснення.' }
+    if (-not (Test-HromadaZipCompressionRatio ([long]$entry.Length) ([long]$entry.CompressedLength))) { throw 'ZIP має небезпечний коефіцієнт стиснення.' }
     $target = [IO.Path]::GetFullPath([IO.Path]::Combine($destination, ($pathName -replace '/', [IO.Path]::DirectorySeparatorChar)))
     if (-not $target.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { throw 'Шлях ZIP виходить за межі каталогу розпакування.' }
     if ($target.Length -gt 240) { throw 'Шлях елемента ZIP надто довгий для сумісного розпакування.' }
@@ -53,6 +63,15 @@ try {
     if ((Get-Item -LiteralPath $target).Length -ne $entry.Length) { throw 'Розмір розпакованого елемента не збігається.' }
   }
 } finally { $archive.Dispose() }
+} catch {
+  $message = [string]$_.Exception.Message
+  $message = $message -replace '[\r\n|]+', ' '
+  $message = $message -replace '(?i)(password|token|secret|recovery.?key|private.?key|dpapi.?key|bearer)(\s*[:=]\s*)[^\s,;]+', '$1$2[redacted]'
+  if ($message.Length -gt 1000) { $message = $message.Substring(0, 1000) }
+  $encodedMessage = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($message))
+  [Console]::Out.WriteLine('HROMADAAID_ZIP_ERROR|' + $encodedMessage)
+  exit 1
+}
 `
 
 function psBase64(text: string): string { return Buffer.from(text, 'utf8').toString('base64') }
@@ -90,6 +109,23 @@ export function buildSafeZipExtractionCommand(archivePath: string, destination: 
   return extractionScript.replace('__ARCHIVE__', psBase64(archivePath)).replace('__DESTINATION__', psBase64(destination))
 }
 
+export function buildZipCompressionRatioProbeCommand(length: string, compressedLength: string): string {
+  const maxInt64 = 9_223_372_036_854_775_807n
+  for (const value of [length, compressedLength]) if (!/^(0|[1-9]\d*)$/.test(value) || BigInt(value) > maxInt64) throw new Error('Invalid ZIP length probe.')
+  const functionSource = `${extractionScript.slice(extractionScript.indexOf('function Test-HromadaZipCompressionRatio'), extractionScript.indexOf('}\ntry {'))}}`
+  return `${functionSource}\nif (Test-HromadaZipCompressionRatio ([long]${length}) ([long]${compressedLength})) { exit 0 } else { exit 1 }`
+}
+
+export function normalizePowerShellDiagnostic(value: string): string {
+  const input = value.trim()
+  if (!input.includes('#< CLIXML')) return input
+  const decoded = [...input.matchAll(/<S\s+S="Error">([\s\S]*?)<\/S>/g)].map(match => match[1]
+    .replace(/&#x([0-9a-f]+);/gi, (_entity, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_entity, decimal: string) => String.fromCodePoint(Number(decimal)))
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&'))
+  return decoded.join('\n').trim().replace(/(password|token|secret|recovery.?key|private.?key|dpapi.?key|bearer)(\s*[:=]\s*)[^\s,;]+/gi, '$1$2[redacted]')
+}
+
 export function createWindowsServerUpdateAdapters(): ServerUpdateAdapters {
   return {
     inspect: () => inspectEnvironment(createWindowsInspectionAdapters()),
@@ -99,7 +135,15 @@ export function createWindowsServerUpdateAdapters(): ServerUpdateAdapters {
       const workingDirectory = dirname(destination)
       try { await mkdir(workingDirectory, { recursive: true }) }
       catch (error) { throw Object.assign(new Error(`Не вдалося підготувати тимчасовий каталог розпакування: ${workingDirectory}`), { code: 'UPDATE_WORKING_DIRECTORY_UNAVAILABLE', cause: error }) }
-      await run(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(buildSafeZipExtractionCommand(zipPath, destination), 'utf16le').toString('base64')], workingDirectory)
+      try {
+        await run(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(buildSafeZipExtractionCommand(zipPath, destination), 'utf16le').toString('base64')], workingDirectory)
+      } catch (error) {
+        const failure = error as Error & { stdout?: string; stderr?: string; exitCode?: number }
+        const marker = /^HROMADAAID_ZIP_ERROR\|([A-Za-z0-9+/=]+)$/m.exec(failure.stdout ?? '')?.[1]
+        const diagnostic = marker ? Buffer.from(marker, 'base64').toString('utf8') : normalizePowerShellDiagnostic(failure.stderr ?? '')
+        const details = `Код завершення PowerShell: ${failure.exitCode ?? 'невідомо'}\n${diagnostic || 'PowerShell не повернув тексту помилки.'}`.slice(0, 2_000)
+        throw Object.assign(new Error('Не вдалося перевірити або безпечно розпакувати ZIP-пакет.'), { code: 'ZIP_EXTRACTION_FAILED', exitCode: failure.exitCode, details })
+      }
     },
     readCurrentSchema: async environment => {
       const root = join(environment.programDirectory, 'Server')

@@ -148,7 +148,10 @@ else {
       return { preview: prepared.preview }
     } catch (error) {
       const failure = error as Error & { code?: string }
-      return { preview: null, code: failure.code ?? 'UPDATE_VALIDATION_FAILED', error: failure.message || 'Не вдалося перевірити пакет сервера.' }
+      const message = failure.code === 'ZIP_EXTRACTION_FAILED'
+        ? 'Не вдалося перевірити або безпечно розпакувати ZIP-пакет. Перевірте архів і повторіть спробу.'
+        : failure.message || 'Не вдалося перевірити пакет сервера.'
+      return { preview: null, code: failure.code ?? 'UPDATE_VALIDATION_FAILED', error: message, details: (error as Error & { details?: string }).details }
     } finally { updatePreparationInProgress = false }
   })
   ipcMain.handle('manager:cancel-server-update-preview', async (event, previewId: unknown) => {
