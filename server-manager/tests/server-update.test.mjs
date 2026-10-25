@@ -1,19 +1,21 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile, readdir, rename } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
+import { existsSync } from 'node:fs'
 
-const { verifyUpdatePackage, prepareServerUpdate, applyServerUpdate } = await import('../../dist-server-manager/main/server-update.js')
+const { verifyUpdatePackage, prepareServerUpdate, applyServerUpdate, readPackageManifestIdentity } = await import('../../dist-server-manager/main/server-update.js')
 const { createWindowsServerUpdateAdapters, buildZipCompressionRatioProbeCommand, normalizePowerShellDiagnostic } = await import('../../dist-server-manager/main/windows-server-update.js')
 
 const payloadFiles = [
   'runtime/node.exe', 'service/HromadaAIDService.exe', 'service/HromadaAIDService.xml.template', 'app/package.json',
   'app/dist/server/src/create-admin.js', 'app/dist/electron/database.js', 'app/dist/shared/api-compatibility.js', 'installer/verify-server-package.mjs',
   'installer/server-runtime-check.mjs', 'installer/server-package-transaction.mjs', 'installer/prepare-server-install.mjs',
-  'installer/install-server-service.ps1', 'installer/write-installation-locator.ps1',
+  'installer/windows-installer-config.mjs', 'installer/install-server-service.ps1', 'installer/write-installation-locator.ps1',
 ]
 
 async function fixturePackage(directory, { version = '0.1.0', apiVersion = 1, schema = { minimum: 1, maximum: 28 } } = {}) {
@@ -60,12 +62,14 @@ function snapshot({ service = 'running', installation = 'installed', confidence 
 
 function adapters({ current = snapshot(), conflict = false, final = snapshot(), events = [] } = {}) {
   let installerCompleted = false
+  let candidateIdentity = ''
   return {
     inspect: async () => installerCompleted ? final : current,
     extract: async (_zip, destination) => { await mkdir(destination, { recursive: true }); await fixturePackage(destination) },
     readCurrentSchema: async () => 4,
     readInstalledApiContract: async () => 1,
-    prepare: async () => events.push('adapter:prepare'),
+    readActivePackageIdentity: async () => installerCompleted ? candidateIdentity : 'original-package-identity',
+    prepare: async (_environment, extracted) => { candidateIdentity = await readPackageManifestIdentity(extracted); events.push('adapter:prepare') },
     runInstaller: async (_env, report) => { events.push('adapter:installer'); report('stop', 'Штатна зупинка'); report('switch', 'Перемикання'); report('health', 'Перевірка API'); installerCompleted = true },
     cleanup: async path => rm(path, { recursive: true, force: true }),
     pathExists: async path => conflict && path.endsWith('Server.previous'),
@@ -137,19 +141,128 @@ test('failed API confirmation reports failure and never reports update success',
   const prepared = await prepareServerUpdate(join(root, 'package.zip'), io)
   const result = await applyServerUpdate(prepared, io, 'update-health-fail', () => undefined)
   assert.equal(result.success, false)
-  assert.equal(result.manualRecoveryRequired, false)
+  assert.equal(result.manualRecoveryRequired, true)
   assert.match(result.message, /не завершено/)
 })
 
 test('installer rollback outcome remains distinct from success and manual recovery', async t => {
   const root = await mkdtemp(join(tmpdir(), 'hromada-update-rollback-')); t.after(() => rm(root, { recursive: true, force: true }))
   const io = adapters()
-  io.runInstaller = async () => { throw new Error('Нове оновлення не пройшло перевірку. Попередній серверний пакет відновлено: service failed') }
+  io.runInstaller = async () => { throw Object.assign(new Error('Нове оновлення не пройшло перевірку. Попередній серверний пакет відновлено: service failed'), { rollbackConfirmed: true }) }
   const prepared = await prepareServerUpdate(join(root, 'package.zip'), io)
   const result = await applyServerUpdate(prepared, io, 'update-rollback', () => undefined)
   assert.equal(result.success, false)
   assert.equal(result.rolledBack, true)
   assert.equal(result.manualRecoveryRequired, false)
+})
+
+test('preparation failure with only Server.next leaves verified original installation intact', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'hromada-preparation-failure-')); t.after(() => rm(root, { recursive: true, force: true }))
+  const io = adapters()
+  const prepared = await prepareServerUpdate(join(root, 'package.zip'), io)
+  let installerCalled = false
+  io.prepare = async () => { throw new Error('Фактичний склад ZIP не відповідає маніфесту.') }
+  io.pathExists = async path => path.endsWith('Server.next')
+  io.runInstaller = async () => { installerCalled = true }
+  const result = await applyServerUpdate(prepared, io, 'preparation-failure', () => undefined)
+  assert.equal(installerCalled, false)
+  assert.equal(result.failureKind, 'preparation')
+  assert.equal(result.manualRecoveryRequired, false)
+  assert.equal(result.rolledBack, false)
+  assert.match(result.message, /Перемикання пакета не виконувалось/)
+  assert.match(result.message, /Server.next збережено/)
+})
+
+test('healthy API alone never proves rollback or unchanged package after a failure', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'hromada-rollback-evidence-')); t.after(() => rm(root, { recursive: true, force: true }))
+  for (const condition of ['journal', 'previous', 'changed-identity', 'access-error', 'text-only']) {
+    const io = adapters()
+    const prepared = await prepareServerUpdate(join(root, 'package.zip'), io)
+    io.runInstaller = async () => {
+      if (condition === 'changed-identity') io.readActivePackageIdentity = async () => 'different-content-same-version'
+      if (condition === 'journal') io.pathExists = async path => path.endsWith('.hromadaaid-update-state.json')
+      if (condition === 'previous') io.pathExists = async path => path.endsWith('Server.previous')
+      if (condition === 'access-error') io.pathExists = async () => { throw new Error('Access denied') }
+      throw Object.assign(new Error('Попередній серверний пакет відновлено'), { rollbackConfirmed: condition !== 'text-only' })
+    }
+    const result = await applyServerUpdate(prepared, io, condition, () => undefined)
+    assert.equal(result.rolledBack, false, condition)
+    assert.equal(result.manualRecoveryRequired, true, condition)
+  }
+})
+
+test('same SemVer and healthy API cannot report success for an unchanged package or unfinished transaction', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'hromada-update-success-evidence-')); t.after(() => rm(root, { recursive: true, force: true }))
+  for (const condition of ['unchanged', 'unfinished']) {
+    const io = adapters()
+    const prepared = await prepareServerUpdate(join(root, 'package.zip'), io)
+    const runInstaller = io.runInstaller
+    io.runInstaller = async (...args) => {
+      await runInstaller(...args)
+      if (condition === 'unchanged') io.readActivePackageIdentity = async () => prepared.activePackageIdentity
+      else io.pathExists = async path => path.endsWith('.hromadaaid-update-state.json')
+    }
+    const result = await applyServerUpdate(prepared, io, condition, () => undefined)
+    assert.equal(result.success, false)
+    assert.equal(result.manualRecoveryRequired, true)
+  }
+})
+
+const productionZip = process.env.HROMADAAID_TEST_SERVER_ZIP ?? join(process.cwd(), 'release', `HromadaAID-Server-v${JSON.parse(await readFile('package.json', 'utf8')).version}-win-x64.zip`)
+test('production ZIP survives repeat verification and real Server.next preparation with only generated WinSW XML added', { skip: process.platform !== 'win32' ? 'Requires Windows runtime' : !existsSync(productionZip) ? 'Set HROMADAAID_TEST_SERVER_ZIP to a complete production ZIP' : false }, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'HromadaAID production update тест ')); t.after(() => rm(root, { recursive: true, force: true }))
+  const io = createWindowsServerUpdateAdapters()
+  const extracted = join(root, 'extracted', 'package')
+  await io.extract(productionZip, extracted)
+  assert.deepEqual(await verifyUpdatePackage(extracted), await verifyUpdatePackage(extracted))
+  const programDirectory = join(root, 'Program'), dataDirectory = join(root, 'Data'), backupDirectory = join(root, 'Backups')
+  await mkdir(join(dataDirectory, 'Database'), { recursive: true }); await mkdir(backupDirectory, { recursive: true })
+  const databasePath = join(dataDirectory, 'Database', 'hromada-aid.sqlite'), configPath = join(dataDirectory, 'server.json'), keyPath = join(backupDirectory, '.hromadaaid-backup-key.dpapi')
+  await writeFile(databasePath, 'isolated synthetic database sentinel'); await writeFile(keyPath, 'isolated key sentinel')
+  await writeFile(configPath, JSON.stringify({ configVersion: 2, mode: 'local', host: '127.0.0.1', port: 4310, programDirectory, databasePath, backupDirectory }))
+  const before = await Promise.all([databasePath, configPath, keyPath].map(path => readFile(path)))
+  const environment = { programDirectory, dataDirectory, backupDirectory, databasePath, serverVersion: '0.1.0', apiContractVersion: 1, serviceStatus: 'running' }
+  const archiveCount = (await readdir(extracted, { recursive: true, withFileTypes: true })).filter(item => item.isFile()).length
+  t.diagnostic(`Production ZIP: ${archiveCount} files; integrity manifest: ${JSON.parse(await readFile(join(extracted, 'package-integrity.json'), 'utf8')).files.length} entries; generated WinSW XML adds exactly one file.`)
+  await io.prepare(environment, extracted)
+  const staged = join(programDirectory, 'Server.next')
+  const generated = await readFile(join(staged, 'service', 'HromadaAIDService.xml'))
+  const { renderWinSWConfig } = await import(pathToFileURL(join(extracted, 'installer', 'windows-installer-config.mjs')).href)
+  const expected = renderWinSWConfig(await readFile(join(extracted, 'service', 'HromadaAIDService.xml.template'), 'utf8'), { mode: 'server', programDirectory, dataDirectory, backupDirectory })
+  assert.equal(generated.toString('utf8'), expected)
+  const options = { serviceXmlSha256: createHash('sha256').update(expected, 'utf8').digest('hex') }
+  await verifyUpdatePackage(staged, options)
+  assert.equal((await readdir(staged, { recursive: true, withFileTypes: true })).filter(item => item.isFile()).length, archiveCount + 1)
+  await assert.rejects(verifyUpdatePackage(staged), { code: 'PACKAGE_CONTENT_MISMATCH' })
+  const stock = spawnSync(join(staged, 'runtime', 'node.exe'), [join(staged, 'installer', 'verify-server-package.mjs'), staged], { cwd: join(staged, 'app'), encoding: 'utf8', windowsHide: true, timeout: 120_000 })
+  assert.equal(stock.status, 0, stock.stderr || stock.stdout)
+  assert.match(stock.stdout, /create-admin.js --status/)
+  await assert.rejects(io.prepare(environment, extracted), { code: 'UPDATE_STAGE_EXISTS' })
+  await writeFile(join(staged, 'unknown.exe'), 'unexpected executable')
+  await assert.rejects(verifyUpdatePackage(staged, options), { code: 'PACKAGE_CONTENT_MISMATCH' })
+  await rm(join(staged, 'unknown.exe'))
+  await writeFile(join(staged, 'service', 'HromadaAIDService.xml'), 'modified XML')
+  await assert.rejects(verifyUpdatePackage(staged, options), { code: 'PREPARED_SERVICE_CONFIG_INVALID' })
+  assert.deepEqual(await Promise.all([databasePath, configPath, keyPath].map(path => readFile(path))), before)
+  await writeFile(join(staged, 'service', 'HromadaAIDService.xml'), generated)
+  await rename(staged, join(programDirectory, 'Server'))
+  const identity = await io.readActivePackageIdentity(environment)
+  assert.match(identity, /^[a-f0-9]{64}$/)
+  assert.equal(await io.readActivePackageIdentity(environment), identity)
+  await writeFile(join(programDirectory, 'Server', 'app', 'package.json'), '{"version":"0.1.0","tampered":true}')
+  await assert.rejects(io.readActivePackageIdentity(environment))
+  const currentPayload = await readFile(join(process.cwd(), 'packaging', 'install-server-service.ps1'), 'utf8')
+  assert.match(currentPayload, /\[switch\]\$UpdateOnly/)
+})
+
+test('Manager uses its bundled update orchestration and explicit outcome signals after verified recovery', async () => {
+  const source = await readFile(join(process.cwd(), 'server-manager/electron/windows-server-update.ts'), 'utf8')
+  assert.match(source, /const script = options\.installerScriptPath/)
+  assert.match(source, /HROMADAAID_UPDATE_OUTCOME/)
+  const main = await readFile(join(process.cwd(), 'server-manager/electron/main.ts'), 'utf8')
+  assert.match(main, /installerScriptPath: app\.isPackaged \? join\(process\.resourcesPath, 'server-payload', 'installer', 'install-server-service.ps1'\)/)
+  const installer = await readFile(join(process.cwd(), 'packaging/install-server-service.ps1'), 'utf8')
+  assert.ok(installer.indexOf("Invoke-PackageTransaction $rollbackToolRoot 'finalize-rollback'") < installer.indexOf('HROMADAAID_UPDATE_OUTCOME|rolled-back'))
 })
 
 test('Windows PowerShell safe extractor accepts Unicode paths and rejects ZIP traversal', { skip: process.platform !== 'win32' }, async t => {

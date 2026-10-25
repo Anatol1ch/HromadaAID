@@ -11,4 +11,4 @@ export type ServerUpdatePreview = {
 }
 export type ServerUpdateStage = 'package' | 'compatibility' | 'prepare' | 'stop' | 'switch' | 'start' | 'health' | 'complete'
 export type ServerUpdateProgress = { operationId: string; stage: ServerUpdateStage; message: string }
-export type ServerUpdateResult = { operationId: string; success: boolean; rolledBack: boolean; manualRecoveryRequired: boolean; message: string; details?: string }
+export type ServerUpdateResult = { operationId: string; success: boolean; rolledBack: boolean; manualRecoveryRequired: boolean; failureKind?: 'preparation' | 'rolled_back' | 'recovery_required'; message: string; details?: string }

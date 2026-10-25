@@ -7,7 +7,7 @@ import { inspectEnvironment } from './inspection-engine.js'
 import { createWindowsInspectionAdapters } from './windows-inspection.js'
 import type { ServerUpdateAdapters, ServerUpdateEnvironment } from './server-update.js'
 import type { ServerUpdateStage } from './server-update-contract.js'
-import { verifyUpdatePackage } from './server-update.js'
+import { verifyUpdatePackage, readPackageManifestIdentity } from './server-update.js'
 
 const extractionScript = String.raw`
 $ErrorActionPreference = 'Stop'
@@ -126,7 +126,7 @@ export function normalizePowerShellDiagnostic(value: string): string {
   return decoded.join('\n').trim().replace(/(password|token|secret|recovery.?key|private.?key|dpapi.?key|bearer)(\s*[:=]\s*)[^\s,;]+/gi, '$1$2[redacted]')
 }
 
-export function createWindowsServerUpdateAdapters(): ServerUpdateAdapters {
+export function createWindowsServerUpdateAdapters(options: { installerScriptPath?: string } = {}): ServerUpdateAdapters {
   return {
     inspect: () => inspectEnvironment(createWindowsInspectionAdapters()),
     extract: async (zipPath, destination) => {
@@ -161,6 +161,15 @@ export function createWindowsServerUpdateAdapters(): ServerUpdateAdapters {
       if (!match) throw Object.assign(new Error('Не знайдено версію API-контракту в установленому пакеті.'), { code: 'API_CONTRACT_UNKNOWN' })
       return Number(match[1])
     },
+    readActivePackageIdentity: async environment => {
+      const root = join(environment.programDirectory, 'Server')
+      // Reuse the installed verifier to hash-check all declared program files;
+      // generated WinSW XML is intentionally outside the archive manifests.
+      const script = `import {join} from 'node:path';import {pathToFileURL} from 'node:url';const root=process.argv[1];const {verifyServerPackage}=await import(pathToFileURL(join(root,'installer/verify-server-package.mjs')).href);await verifyServerPackage(root);console.log('PACKAGE_VERIFIED');`
+      const result = await run(join(root, 'runtime', 'node.exe'), ['--input-type=module', '--eval', script, root], join(root, 'app'), 120_000)
+      if (result.stdout.trim() !== 'PACKAGE_VERIFIED') throw new Error('Не вдалося підтвердити цілісність установленого пакета сервера.')
+      return readPackageManifestIdentity(root)
+    },
     prepare: async (environment, extractedPackage) => {
       const verified = await verifyUpdatePackage(extractedPackage)
       const activeStage = join(environment.programDirectory, 'Server.next')
@@ -175,15 +184,18 @@ export function createWindowsServerUpdateAdapters(): ServerUpdateAdapters {
         // Existing server.json is authoritative. Do not pass its host or port
         // through first-install loopback validation; prepare-server-install
         // preserves the existing config and uses these options only for a new one.
-        await run(join(activeStage, 'runtime', 'node.exe'), [join(activeStage, 'installer', 'prepare-server-install.mjs'), '--program-dir', environment.programDirectory, '--data-dir', environment.dataDirectory, '--backup-dir', environment.backupDirectory, '--package-root', activeStage], join(activeStage, 'app'))
-        await verifyUpdatePackage(activeStage)
+        const script = `import {createHash} from 'node:crypto';import {readFile} from 'node:fs/promises';import {join} from 'node:path';import {pathToFileURL} from 'node:url';const [root,programDirectory,dataDirectory,backupDirectory]=process.argv.slice(1);const options={mode:'server',programDirectory,dataDirectory,backupDirectory,packageRoot:root};const {prepareServerInstall}=await import(pathToFileURL(join(root,'installer/prepare-server-install.mjs')).href);const {renderWinSWConfig}=await import(pathToFileURL(join(root,'installer/windows-installer-config.mjs')).href);prepareServerInstall(options,root);const xml=renderWinSWConfig(await readFile(join(root,'service/HromadaAIDService.xml.template'),'utf8'),options);console.log(createHash('sha256').update(xml,'utf8').digest('hex'));`
+        const result = await run(join(activeStage, 'runtime', 'node.exe'), ['--input-type=module', '--eval', script, activeStage, environment.programDirectory, environment.dataDirectory, environment.backupDirectory], join(activeStage, 'app'))
+        await verifyUpdatePackage(activeStage, { serviceXmlSha256: result.stdout.trim() })
       } catch (error) {
         // Keep a failed/stale stage intact for inspection; never recursively clean a Program Files path.
         throw error
       }
     },
     runInstaller: async (environment, report) => {
-      const script = join(environment.programDirectory, 'Server.next', 'installer', 'install-server-service.ps1')
+      // Orchestration belongs to this Manager release, not to a possibly older
+      // ZIP whose installer may predate UpdateOnly and live-service preflight.
+      const script = options.installerScriptPath ?? resolve('packaging', 'install-server-service.ps1')
       let pending = ''
       try {
         await run(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', script,
@@ -207,13 +219,16 @@ export function createWindowsServerUpdateAdapters(): ServerUpdateAdapters {
           const stage = /(?:^|\|)stage=([^|]+)/.exec(errorLine)?.[1] ?? 'невідомий'
           const message = /(?:^|\|)message=([^|]+)/.exec(errorLine)?.[1] ?? 'Перегляньте журнал у %TEMP%.'
           const outcome = text.split(/\r?\n/).find(line => /Попередній серверний пакет відновлено|потрібне адміністративне відновлення/i.test(line))
-          throw Object.assign(new Error(`Етап ${stage}: ${message}${outcome ? `; ${outcome.slice(0, 1_500)}` : ''}`), { code: 'SERVICE_INSTALL_FAILED' })
+          throw Object.assign(new Error(`Етап ${stage}: ${message}${outcome ? `; ${outcome.slice(0, 1_500)}` : ''}`), { code: 'SERVICE_INSTALL_FAILED', rollbackConfirmed: /^HROMADAAID_UPDATE_OUTCOME\|rolled-back\r?$/m.test(text), preservedBeforeSwitch: /^HROMADAAID_UPDATE_OUTCOME\|preserved-before-switch\r?$/m.test(text) })
         }
         throw error
       }
     },
     cleanup: async path => { await rm(path, { recursive: true, force: true }) },
-    pathExists: async path => lstat(path).then(() => true, () => false),
+    pathExists: async path => {
+      try { await lstat(path); return true }
+      catch (error) { if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return false; throw error }
+    },
     nowId: randomUUID,
   }
 }

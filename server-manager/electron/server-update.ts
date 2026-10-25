@@ -13,6 +13,7 @@ export type ServerUpdateAdapters = {
   extract(zipPath: string, destination: string): Promise<void>
   readCurrentSchema(environment: ServerUpdateEnvironment): Promise<number>
   readInstalledApiContract(programDirectory: string): Promise<number>
+  readActivePackageIdentity(environment: ServerUpdateEnvironment): Promise<string>
   prepare(environment: ServerUpdateEnvironment, extractedPackage: string): Promise<void>
   runInstaller(environment: ServerUpdateEnvironment, report: (stage: ServerUpdateStage, message: string) => void): Promise<void>
   cleanup(path: string): Promise<void>
@@ -26,7 +27,7 @@ const expectedFiles = [
   'runtime/node.exe', 'service/HromadaAIDService.exe', 'service/HromadaAIDService.xml.template',
   'app/package.json', 'app/dist/server/src/create-admin.js', 'app/dist/electron/database.js', 'app/dist/shared/api-compatibility.js',
   'installer/verify-server-package.mjs', 'installer/server-runtime-check.mjs', 'installer/server-package-transaction.mjs',
-  'installer/prepare-server-install.mjs', 'installer/install-server-service.ps1', 'installer/write-installation-locator.ps1',
+  'installer/prepare-server-install.mjs', 'installer/windows-installer-config.mjs', 'installer/install-server-service.ps1', 'installer/write-installation-locator.ps1',
 ]
 
 function fail(code: string, message: string): Error { return Object.assign(new Error(message), { code }) }
@@ -56,7 +57,7 @@ async function listFiles(root: string): Promise<Array<{ path: string; sizeBytes:
 }
 
 /** Verifies both current server integrity manifest and Deployment 2.0 component manifest without executing package code. */
-export async function verifyUpdatePackage(rootInput: string): Promise<{ version: string; apiContract: number; schema: { minimum: number; maximum: number }; authenticity: 'unsigned' }> {
+export async function verifyUpdatePackage(rootInput: string, prepared?: { serviceXmlSha256: string }): Promise<{ version: string; apiContract: number; schema: { minimum: number; maximum: number }; authenticity: 'unsigned' }> {
   const root = await realpath(resolve(rootInput))
   const files = await listFiles(root)
   const actual = new Map(files.map(file => [file.path, file]))
@@ -71,6 +72,13 @@ export async function verifyUpdatePackage(rootInput: string): Promise<{ version:
     throw fail('PACKAGE_MANIFEST_INVALID', 'Маніфест сервера має несумісний формат або некоректні метадані.')
   }
   if (integrity.formatVersion !== 1 || !Array.isArray(integrity.files) || !Array.isArray(manifest.files)) throw fail('PACKAGE_MANIFEST_INVALID', 'Маніфест цілісності пакета некоректний.')
+  const generatedXml = 'service/HromadaAIDService.xml'
+  if (prepared) {
+    const xml = actual.get(generatedXml)
+    if (!/^[a-f0-9]{64}$/.test(prepared.serviceXmlSha256) || !xml || xml.sizeBytes > 65536 || xml.sha256 !== prepared.serviceXmlSha256 || [...manifest.files, ...integrity.files].some(entry => entry?.path === generatedXml)) {
+      throw fail('PREPARED_SERVICE_CONFIG_INVALID', 'Згенерована конфігурація WinSW не відповідає перевіреному шаблону та каталогам інсталяції.')
+    }
+  }
   const validateEntries = (entries: any[], excluded: Set<string>) => {
     const expected = new Map<string, any>()
     for (const entry of entries) {
@@ -78,7 +86,7 @@ export async function verifyUpdatePackage(rootInput: string): Promise<{ version:
       if (expected.has(path) || !Number.isSafeInteger(entry.sizeBytes) || entry.sizeBytes < 0 || !/^[a-f0-9]{64}$/i.test(entry.sha256)) throw fail('PACKAGE_MANIFEST_INVALID', 'Маніфест містить повторні або некоректні записи.')
       expected.set(path, entry)
     }
-    const found = [...actual.keys()].filter(path => !excluded.has(path))
+    const found = [...actual.keys()].filter(path => !excluded.has(path) && !(prepared && path === generatedXml))
     if (found.length !== expected.size) throw fail('PACKAGE_CONTENT_MISMATCH', 'Фактичний склад ZIP не відповідає маніфесту.')
     for (const path of found) {
       const file = actual.get(path)!, entry = expected.get(path)
@@ -112,7 +120,13 @@ async function environmentFrom(snapshot: Awaited<ReturnType<ServerUpdateAdapters
   return { programDirectory: c.programDirectory, dataDirectory: c.dataDirectory, backupDirectory: c.backupDirectory, databasePath: c.databasePath, serverVersion: c.serverVersion, apiContractVersion, serviceStatus: snapshot.service.status as 'running' | 'stopped' }
 }
 
-export type PreparedServerUpdate = { preview: ServerUpdatePreview; extractedRoot: string; cleanupRoot: string; environment: ServerUpdateEnvironment }
+export async function readPackageManifestIdentity(root: string): Promise<string> {
+  const hash = createHash('sha256')
+  for (const name of ['package-integrity.json', 'package-manifest.json']) { hash.update(await readFile(join(root, name))); hash.update('\0') }
+  return hash.digest('hex')
+}
+
+export type PreparedServerUpdate = { preview: ServerUpdatePreview; extractedRoot: string; cleanupRoot: string; environment: ServerUpdateEnvironment; activePackageIdentity: string; candidatePackageIdentity: string }
 
 export async function prepareServerUpdate(zipPath: string, adapters: ServerUpdateAdapters): Promise<PreparedServerUpdate> {
   if (!zipPath || !zipPath.toLocaleLowerCase('en-US').endsWith('.zip')) throw fail('UPDATE_ARCHIVE_INVALID', 'Виберіть ZIP-файл серверного пакета.')
@@ -127,36 +141,55 @@ export async function prepareServerUpdate(zipPath: string, adapters: ServerUpdat
     const metadata = await verifyUpdatePackage(extractedRoot)
     if (metadata.apiContract !== environment.apiContractVersion) throw fail('API_CONTRACT_INCOMPATIBLE', 'Пакет використовує несумісний API contract.')
     const currentSchema = await adapters.readCurrentSchema(environment)
+    const activePackageIdentity = await adapters.readActivePackageIdentity(environment)
+    const candidatePackageIdentity = await readPackageManifestIdentity(extractedRoot)
     if (currentSchema < metadata.schema.minimum || currentSchema > metadata.schema.maximum) throw fail('SQLITE_SCHEMA_INCOMPATIBLE', 'Поточна схема SQLite не підтримується вибраним серверним пакетом.')
-    return { cleanupRoot, extractedRoot, environment, preview: { id: adapters.nowId(), sourceName: zipPath.split(/[\\/]/).pop() || 'server.zip', currentVersion: environment.serverVersion, newVersion: metadata.version, apiContract: `hromadaaid-rest v${metadata.apiContract}`, sqliteRange: metadata.schema, currentSchema, sameVersion: metadata.version === environment.serverVersion, authenticity: metadata.authenticity } }
+    return { cleanupRoot, extractedRoot, environment, activePackageIdentity, candidatePackageIdentity, preview: { id: adapters.nowId(), sourceName: zipPath.split(/[\\/]/).pop() || 'server.zip', currentVersion: environment.serverVersion, newVersion: metadata.version, apiContract: `hromadaaid-rest v${metadata.apiContract}`, sqliteRange: metadata.schema, currentSchema, sameVersion: metadata.version === environment.serverVersion, authenticity: metadata.authenticity } }
   } catch (error) { await adapters.cleanup(cleanupRoot).catch(() => undefined); throw error }
 }
 
 export async function applyServerUpdate(prepared: PreparedServerUpdate, adapters: ServerUpdateAdapters, operationId: string, emit: (event: ServerUpdateProgress) => void): Promise<ServerUpdateResult> {
   const report = (stage: ServerUpdateStage, message: string) => emit({ operationId, stage, message })
+  let installerInvoked = false
   try {
     report('compatibility', 'Повторно перевіряємо інсталяцію та стан транзакції.')
     const current = await environmentFrom(await adapters.inspect(), adapters)
+    if (await adapters.readActivePackageIdentity(current) !== prepared.activePackageIdentity) throw fail('INSTALLATION_CHANGED', 'Вміст установленого пакета змінився після перевірки ZIP. Виберіть пакет повторно.')
     if (current.programDirectory !== prepared.environment.programDirectory || current.dataDirectory !== prepared.environment.dataDirectory || current.databasePath !== prepared.environment.databasePath || current.serverVersion !== prepared.environment.serverVersion) throw fail('INSTALLATION_CHANGED', 'Стан інсталяції змінився після перевірки пакета. Перевірте середовище й виберіть пакет повторно.')
     const program = resolve(current.programDirectory), data = resolve(current.dataDirectory)
     for (const path of [...forbiddenStagingNames.map(name => join(program, name)), join(data, updateJournalName)]) if (await adapters.pathExists(path)) throw fail('UPDATE_RECOVERY_REQUIRED', 'Знайдено залишки іншої транзакції; оновлення зупинено.')
     report('prepare', 'Копіюємо перевірений пакет у Server.next та повторно звіряємо файли.')
     await adapters.prepare(current, prepared.extractedRoot)
+    installerInvoked = true
     await adapters.runInstaller(current, report)
     report('health', 'Перевіряємо фактичний стан служби й API.')
     const final = await adapters.inspect()
     if (final.installation.status !== 'installed' || final.service.status !== 'running' || final.api.status !== 'available' || final.configuration.serverVersion !== prepared.preview.newVersion) throw fail('UPDATE_HEALTH_FAILED', 'Новий пакет не пройшов перевірку служби та API. Перегляньте стан відкату й діагностику.')
+    if (await adapters.readActivePackageIdentity(current) !== prepared.candidatePackageIdentity) throw fail('UPDATE_PACKAGE_NOT_ACTIVE', 'Фактично встановлений пакет не відповідає підтвердженому ZIP, навіть якщо версія та API збігаються.')
+    for (const path of [...forbiddenStagingNames.map(name => join(program, name)), join(data, updateJournalName)]) if (await adapters.pathExists(path)) throw fail('UPDATE_NOT_FINALIZED', 'Служба працює, але транзакція оновлення не завершена. Службові файли збережено для перевірки.')
     report('complete', 'Сервер оновлено, служба працює, API доступний.')
     return { operationId, success: true, rolledBack: false, manualRecoveryRequired: false, message: `Сервер оновлено до версії ${prepared.preview.newVersion}. Windows Service працює, API доступний.` }
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'Технічні подробиці недоступні.'
-    const rolledBack = /попередній серверний пакет відновлено|rollback.*completed|files-rolled-back/i.test(detail)
-    let transactionArtifactsRemain = false
+    const evidence = error as { rollbackConfirmed?: boolean; preservedBeforeSwitch?: boolean }
+    let criticalArtifactsRemain = false, stagedPackageRemains = false, stateReadable = true
     const program = resolve(prepared.environment.programDirectory), data = resolve(prepared.environment.dataDirectory)
-    for (const path of [...forbiddenStagingNames.map(name => join(program, name)), join(data, updateJournalName)]) {
-      try { if (await adapters.pathExists(path)) transactionArtifactsRemain = true } catch { transactionArtifactsRemain = true }
+    for (const path of [join(program, 'Server.previous'), join(program, 'Server.failed'), join(data, updateJournalName)]) {
+      try { if (await adapters.pathExists(path)) criticalArtifactsRemain = true } catch { stateReadable = false }
     }
-    const manualRecoveryRequired = !rolledBack && (transactionArtifactsRemain || /потрібне адміністративне відновлення|потребує перевірки адміністратором|потрібне контрольоване відновлення|невдалого пакета|Server\.previous|Server\.failed/i.test(detail))
-    return { operationId, success: false, rolledBack, manualRecoveryRequired, message: rolledBack ? 'Оновлення не завершено. Попередній сервер відновлено; перевірте його стан.' : manualRecoveryRequired ? 'Оновлення не завершено. Стан потребує ручного відновлення адміністратора.' : 'Оновлення не завершено. Перевірте діагностику перед повторною спробою.', details: detail.slice(0, 4_000) }
+    try { stagedPackageRemains = await adapters.pathExists(join(program, 'Server.next')) } catch { stateReadable = false }
+    let originalConfirmed = false
+    try {
+      const snapshot = await adapters.inspect()
+      const current = await environmentFrom(snapshot, adapters)
+      originalConfirmed = current.programDirectory === prepared.environment.programDirectory && current.dataDirectory === prepared.environment.dataDirectory && current.backupDirectory === prepared.environment.backupDirectory && current.databasePath === prepared.environment.databasePath && current.serverVersion === prepared.environment.serverVersion && current.serviceStatus === prepared.environment.serviceStatus && (current.serviceStatus === 'stopped' || snapshot.api.status === 'available') && await adapters.readActivePackageIdentity(current) === prepared.activePackageIdentity
+    } catch { stateReadable = false }
+    const preparationFailed = (!installerInvoked || evidence.preservedBeforeSwitch === true) && stateReadable && !criticalArtifactsRemain && originalConfirmed
+    const rolledBack = installerInvoked && evidence.rollbackConfirmed === true && stateReadable && !criticalArtifactsRemain && !stagedPackageRemains && originalConfirmed
+    const manualRecoveryRequired = !preparationFailed && !rolledBack
+    const message = preparationFailed
+      ? `Помилка підготовки оновлення. Перемикання пакета не виконувалось; попередній сервер ${prepared.environment.serviceStatus === 'running' ? 'працює, API доступний' : 'залишається зупиненим'}.${stagedPackageRemains ? ' Server.next збережено для перевірки перед повторною спробою.' : ''}`
+      : rolledBack ? 'Оновлення не завершено. Попередній пакет і стан служби підтверджено після відкату.' : 'Оновлення не завершено. Стан потребує ручного відновлення адміністратора.'
+    return { operationId, success: false, rolledBack, manualRecoveryRequired, failureKind: preparationFailed ? 'preparation' : rolledBack ? 'rolled_back' : 'recovery_required', message, details: detail.slice(0, 4_000) }
   } finally { await adapters.cleanup(prepared.cleanupRoot).catch(() => undefined) }
 }

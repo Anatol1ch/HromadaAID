@@ -497,6 +497,7 @@ try {
         Wait-ServiceHealthy (Get-HealthUrl (Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json))
       }
       if ([IO.File]::Exists($journalPath)) { Invoke-PackageTransaction $stagedServer 'discard-prepared' }
+      [Console]::Out.WriteLine('HROMADAAID_UPDATE_OUTCOME|preserved-before-switch')
       [Console]::Error.WriteLine("Оновлення зупинено до перемикання пакета; попередній сервер залишено: $failure")
       exit 1
     } catch { $failure = 'Попередній пакет залишився на місці, але його стан служби потребує перевірки адміністратором.' }
@@ -521,6 +522,7 @@ try {
         }
         $rollbackToolRoot = if ([IO.Directory]::Exists($failedServer)) { $failedServer } elseif ([IO.Directory]::Exists($stagedServer)) { $stagedServer } else { $activeServer }
         Invoke-PackageTransaction $rollbackToolRoot 'finalize-rollback'
+        [Console]::Out.WriteLine('HROMADAAID_UPDATE_OUTCOME|rolled-back')
         [Console]::Error.WriteLine("Нове оновлення не пройшло перевірку. Попередній серверний пакет відновлено: $failure")
         exit 1
       } catch {

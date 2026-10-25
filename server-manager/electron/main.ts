@@ -55,6 +55,10 @@ function failedInspection(): InspectionSnapshot {
   }
 }
 
+function updateAdapters() {
+  return createWindowsServerUpdateAdapters({ installerScriptPath: app.isPackaged ? join(process.resourcesPath, 'server-payload', 'installer', 'install-server-service.ps1') : join(dirname(fileURLToPath(import.meta.url)), '../../packaging/install-server-service.ps1') })
+}
+
 async function inspectWithUpdateReadiness(): Promise<InspectionSnapshot> {
   const snapshot = await inspectEnvironment(createWindowsInspectionAdapters())
   const configuration = snapshot.configuration
@@ -68,7 +72,7 @@ async function inspectWithUpdateReadiness(): Promise<InspectionSnapshot> {
         catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && (error as NodeJS.ErrnoException).code !== 'ENOTDIR') throw error }
       }
       updateReadiness = existing.length
-        ? { ready: false, reason: `Виявлено залишки попередньої транзакції (${existing.join(', ')}). Спершу потрібне відновлення.` }
+        ? { ready: false, reason: `Виявлено службові файли (${existing.join(', ')}). Перевірте діагностику перед повторною спробою.` }
         : { ready: true, reason: 'Повну інсталяцію підтверджено; незавершених транзакцій не знайдено.' }
     } catch {
       updateReadiness = { ready: false, reason: 'Не вдалося перевірити службові файли транзакції; оновлення заблоковано.' }
@@ -141,7 +145,7 @@ else {
     if (selection.canceled || !selection.filePaths[0]) return { preview: null }
     updatePreparationInProgress = true
     try {
-      const adapters = createWindowsServerUpdateAdapters()
+      const adapters = updateAdapters()
       const prepared = await prepareServerUpdate(selection.filePaths[0], adapters)
       if (preparedServerUpdate) await adapters.cleanup(preparedServerUpdate.cleanupRoot)
       preparedServerUpdate = prepared
@@ -158,7 +162,7 @@ else {
     if (!isTrustedRenderer(event) || typeof previewId !== 'string' || preparedServerUpdate?.preview.id !== previewId || activeUpdateId) return false
     const current = preparedServerUpdate
     preparedServerUpdate = null
-    await createWindowsServerUpdateAdapters().cleanup(current.cleanupRoot).catch(() => undefined)
+    await updateAdapters().cleanup(current.cleanupRoot).catch(() => undefined)
     return true
   })
   ipcMain.handle('manager:apply-server-update', async (event, previewId: unknown) => {
@@ -170,7 +174,7 @@ else {
     activeUpdateId = operationId
     const send = (update: import('./server-update.js').ServerUpdateProgress) => { if (window && !window.isDestroyed() && isTrustedRenderer(event)) window.webContents.send('manager:server-update-progress', update) }
     try {
-      return await applyServerUpdate(prepared, createWindowsServerUpdateAdapters(), operationId, send)
+      return await applyServerUpdate(prepared, updateAdapters(), operationId, send)
     } finally {
       preparedServerUpdate = null
       activeUpdateId = null
@@ -269,7 +273,7 @@ else {
     app.exit(1)
   })
   app.on('window-all-closed', () => {
-    if (preparedServerUpdate) { void createWindowsServerUpdateAdapters().cleanup(preparedServerUpdate.cleanupRoot); preparedServerUpdate = null }
+    if (preparedServerUpdate) { void updateAdapters().cleanup(preparedServerUpdate.cleanupRoot); preparedServerUpdate = null }
     app.quit()
   })
 }
