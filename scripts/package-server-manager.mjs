@@ -60,6 +60,7 @@ const executable = join(unpacked, 'HromadaAID Server Manager.exe')
 const asarPath = join(unpacked, 'resources', 'app.asar')
 if (!(await stat(executable).catch(() => undefined))?.isFile()) throw new Error('Portable Server Manager executable was not produced.')
 if (!(await stat(asarPath).catch(() => undefined))?.isFile()) throw new Error('Packaged application archive is missing.')
+await writeFile(join(unpacked, 'resources', 'manager-version.ini'), `[manager]\nversion=${rootManifest.version}\n`, 'utf8')
 const icon = await readFile(join(root, 'assets', 'hromadaaid-server-manager.ico'))
 const executableBytes = await readFile(executable)
 for (let index = 0; index < icon.readUInt16LE(4); index++) {

@@ -273,6 +273,27 @@ function Wait-ServiceHealthy([string]$Url, [int]$TimeoutSeconds = 60) {
   } while ([DateTime]::UtcNow -lt $deadline)
   throw "Служба або Fastify не пройшли перевірку доступності за $TimeoutSeconds секунд. Перевірте порт, TLS, конфігурацію та журнали сервера."
 }
+function Get-StablePackageVersion([string]$PackageRoot) {
+  $manifestPath = Join-Path (Join-Path $PackageRoot 'app') 'package.json'
+  if (-not [IO.File]::Exists($manifestPath)) { throw 'Не вдалося достовірно визначити версію серверного пакета; оновлення зупинено.' }
+  try { $versionText = [string](Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json).version }
+  catch { throw 'Маніфест версії серверного пакета пошкоджений; оновлення зупинено.' }
+  # Stage 8.2 only permits an ordering decision for stable SemVer. Prerelease
+  # ordering is deliberately fail-closed until release channels are designed.
+  if ($versionText -notmatch '^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})(?:\+[0-9A-Za-z.-]+)?$') {
+    throw 'Версія серверного пакета не є підтримуваною стабільною SemVer; можливість downgrade неможливо безпечно виключити.'
+  }
+  return [long[]]@([long]$Matches[1], [long]$Matches[2], [long]$Matches[3])
+}
+function Assert-NoServerDowngrade([string]$CurrentPackage, [string]$CandidatePackage) {
+  if (-not [IO.Directory]::Exists($CurrentPackage)) { return }
+  $current = Get-StablePackageVersion $CurrentPackage
+  $candidate = Get-StablePackageVersion $CandidatePackage
+  for ($index = 0; $index -lt 3; $index++) {
+    if ($candidate[$index] -gt $current[$index]) { return }
+    if ($candidate[$index] -lt $current[$index]) { throw 'Встановлення старішої версії API Server заблоковано; наявний сервер і дані не змінено.' }
+  }
+}
 function Unregister-ServiceIfPresent([string]$Wrapper) {
   $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
   if ($null -eq $service) { return }
@@ -330,6 +351,10 @@ try {
   if (($databaseExists -xor $keyExists) -or ($hasArchives -and -not ($databaseExists -and $keyExists))) { throw 'Виявлено неповний комплект бази, DPAPI-ключа або архівів. Наявні дані збережено; потрібна окрема перевірка адміністратора.' }
 
   Set-InstallStage 'validate-server-preflight'
+  if ($hadOldPackage) {
+    Set-InstallStage 'validate-version-order'
+    Assert-NoServerDowngrade $activeServer $stagedServer
+  }
   $preflight = Join-Path $stagedServer 'app\dist\server\src\installer-preflight.js'
   & $newNode $preflight --config $config
   $exitCode = $LASTEXITCODE

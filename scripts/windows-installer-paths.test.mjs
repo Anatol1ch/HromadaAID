@@ -29,39 +29,88 @@ test('installer accepts the three choices and only validates server paths when n
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
-test('NSIS exposes the three install modes as independent client and server components', async () => {
+test('NSIS implements the three modes through a client section and inseparable server-manager section', async () => {
   const script = (await readFile(new URL('../packaging/windows-installer.nsi', import.meta.url), 'utf8')).replace(/^\uFEFF/, '')
   assert.match(script, /Section "Клієнт HromadaAID" SEC_CLIENT/)
-  assert.match(script, /Section "Сервер HromadaAID" SEC_SERVER/)
+  assert.match(script, /Section "API Server \+ Server Manager \(обов’язковий комплект\)" SEC_SERVER/)
+  assert.match(script, /manager-version\.ini/)
+  assert.match(script, /resources\\app\.asar/)
   assert.match(script, /SectionSetFlags \$\{SEC_CLIENT\} \$\{SF_SELECTED\}/)
   assert.match(script, /SectionSetFlags \$\{SEC_SERVER\} 0/)
-  assert.match(script, /StrCpy \$ValidationMode "client"/)
-  assert.match(script, /StrCpy \$ValidationMode "server-client"/)
+  assert.match(script, /IfFileExists "\$INSTDIR\\ServerManager\\HromadaAID Server Manager\.exe" selectInstalledServer/)
+  assert.match(script, /InstalledComponents/)
   assert.match(script, /-Mode "\$ValidationMode"/)
   assert.match(script, /Call TrimPathTrailingSeparator[\s\S]*?Pop \$PreflightProgramDirectory[\s\S]*?Pop \$PreflightDataDirectory[\s\S]*?Pop \$PreflightBackupDirectory/)
   assert.match(script, /nsExec::ExecToStack[\s\S]*?windows-installer-paths\.ps1[\s\S]*?-ProgramDirectory "\$PreflightProgramDirectory"[\s\S]*?-DataDirectory "\$PreflightDataDirectory"[\s\S]*?-BackupDirectory "\$PreflightBackupDirectory"/)
   assert.match(script, /Pop \$2\s+Pop \$3\s+DetailPrint "Попередня перевірка каталогів: код \$2"/)
-  assert.match(script, /DetailPrint "Діагностика підготовки служби: \$3"[\s\S]*?MessageBox[^\r\n]*Діагностика: \$3/)
-  assert.match(script, /--package-root "\$INSTDIR\\Server\.next"/)
+  assert.match(script, /-UpdateOnly/)
   assert.match(script, /CLIENT_PAYLOAD_BYTES/)
   assert.match(script, /SERVER_PAYLOAD_BYTES/)
+  assert.match(script, /MANAGER_PAYLOAD_BYTES/)
   assert.match(script, /INSTALLER_SUPPORT_BYTES/)
-  assert.match(script, /Function DataPage[\s\S]*Call IsServerSelected[\s\S]*FunctionEnd/)
-  assert.match(script, /Function BackupPage[\s\S]*Call IsServerSelected[\s\S]*FunctionEnd/)
-  assert.match(script, /Page custom AdminSetupPage AdminSetupLeave ": Створення адміністратора"/)
   assert.match(script, /SetOutPath "\$INSTDIR\\Server\.next"/)
   assert.ok(script.replace(/^\uFEFF/, '').startsWith('# -*- coding: utf-8 -*-\r\nUnicode true') || script.replace(/^\uFEFF/, '').startsWith('# -*- coding: utf-8 -*-\nUnicode true'))
   assert.match(script, /nsExec::ExecToStack/)
   assert.doesNotMatch(script, /ExecWait/)
   assert.match(script, /Pop \$2[\s\S]*?\$2 == 3[\s\S]*?\$2 == 4[\s\S]*?\$2 == 5[\s\S]*?\$2 == 6/)
-  assert.match(script, /Page custom DataPage DataLeave ": Серверні дані"/)
-  assert.match(script, /Page custom BackupPage BackupLeave ": Резервні копії"/)
-  assert.match(script, /Page custom AdminSetupPage AdminSetupLeave ": Створення адміністратора"/)
-  assert.match(script, /Page custom SummaryPage SummaryLeave ": Перевірка параметрів"/)
+  assert.doesNotMatch(script, /AdminSetupPage|AdminSetupLeave|DataPage|BackupPage/)
+  assert.match(script, /-UpdateOnly/)
+  assert.match(script, /Server\.next[\s\S]*?First configuration and service[\s\S]*?Server Manager wizard/i)
+  assert.match(script, /Section -RemoveDeselected[\s\S]*?Call RemoveServerComponent/)
+  assert.match(script, /WriteRegStr HKLM "\$\{UNINSTALL_KEY\}" "DisplayName" "HromadaAID"/)
+  assert.match(script, /WriteRegStr HKLM "\$\{UNINSTALL_KEY\}" "UninstallString"/)
   assert.match(script, /Preflight launch: powershell=\[\$SYSDIR\\WindowsPowerShell\\v1\.0\\powershell\.exe\] script=\[\$PLUGINSDIR\\Preflight\\windows-installer-paths\.ps1\] cwd=\[\$PLUGINSDIR\\Preflight\]/)
   assert.match(script, /Діагностика preflight: \$3/)
   assert.match(script, /Не вдалося перевірити вибрані параметри\. Код: \$2.*\$3/)
   assert.doesNotMatch(script, /ExecWait\s+'[^\r\n]*powershell\.exe/i)
+})
+
+test('component removal protects transactional artifacts and preserves server data on full uninstall', async () => {
+  const script = await readFile(new URL('../packaging/windows-installer.nsi', import.meta.url), 'utf8')
+  const control = await readFile(new URL('../packaging/windows-service-control.ps1', import.meta.url), 'utf8')
+  assert.match(script, /Call un\.RemoveServerComponent/)
+  assert.match(script, /DeleteRegKey HKLM "\$\{UNINSTALL_KEY\}"/)
+  assert.match(script, /DataDirectory and BackupDirectory remain as safe reinstall\/recovery locators/)
+  assert.doesNotMatch(script, /RMDir \/r "\$DataDirectory"|RMDir \/r "\$BackupDirectory"|Delete "\$DataDirectory\\server\.json"|Delete "\$DataDirectory\\Database/)
+  assert.match(control, /Action -eq 'uninstall'[\s\S]*?Server\.previous[\s\S]*?Server\.failed[\s\S]*?UpdateJournalPath[\s\S]*?не змінено/)
+  assert.match(control, /Server\.next уже існує[\s\S]*?Файли збережено/)
+})
+
+test('unified installer metadata and Manager first-setup fallback match the bundled layout', async () => {
+  const packager = await readFile(new URL('./package-windows.mjs', import.meta.url), 'utf8')
+  const manager = await readFile(new URL('../server-manager/electron/windows-installation.ts', import.meta.url), 'utf8')
+  assert.match(packager, /Server-only \(API Server \+ Server Manager\)/)
+  assert.match(packager, /clean server setup is completed through Server Manager/)
+  assert.match(manager, /const bundled = join\(process\.resourcesPath, 'server-payload'\)[\s\S]*?const staged = join\(installRoot, 'Server\.next'\)/)
+  assert.match(manager, /Не знайдено комплектний серверний пакет/)
+})
+
+test('server installer blocks stable SemVer downgrade and fails closed on prerelease ordering', { skip: process.platform !== 'win32' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'HromadaAID version order '))
+  const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const installer = readFileSync(new URL('../packaging/install-server-service.ps1', import.meta.url), 'utf8').replace(/^\uFEFF/, '')
+  const functions = installer.match(/function Get-StablePackageVersion[\s\S]*?function Unregister-ServiceIfPresent/)?.[0]?.replace(/function Unregister-ServiceIfPresent[\s\S]*$/, '')
+  assert.ok(functions, 'version ordering functions should be present in the installed server script')
+  const harness = join(root, 'version-order.ps1')
+  const source = [
+    "$ErrorActionPreference='Stop'",
+    functions,
+    "$current=Join-Path $PSScriptRoot 'current';$candidate=Join-Path $PSScriptRoot 'candidate';New-Item -ItemType Directory -Force -Path (Join-Path $current 'app'),(Join-Path $candidate 'app') | Out-Null",
+    "[IO.File]::WriteAllText((Join-Path $current 'app\\package.json'), '{\"version\":\"1.2.3\"}')",
+    "[IO.File]::WriteAllText((Join-Path $candidate 'app\\package.json'), '{\"version\":\"1.2.3\"}')",
+    'Assert-NoServerDowngrade $current $candidate',
+    "[IO.File]::WriteAllText((Join-Path $candidate 'app\\package.json'), '{\"version\":\"1.2.2\"}')",
+    "$blocked=$false;try { Assert-NoServerDowngrade $current $candidate } catch { $blocked=$true };if(-not $blocked){throw 'downgrade was not blocked'}",
+    "[IO.File]::WriteAllText((Join-Path $candidate 'app\\package.json'), '{\"version\":\"1.2.4-rc.1\"}')",
+    "$blocked=$false;try { Assert-NoServerDowngrade $current $candidate } catch { $blocked=$true };if(-not $blocked){throw 'prerelease ordering was not rejected'}",
+    "[Console]::Out.WriteLine('PASS: stable SemVer ordering fails closed')",
+  ].join('\r\n')
+  try {
+    writeFileSync(harness, '\uFEFF' + source, 'utf8')
+    const run = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', harness], { windowsHide: true, encoding: 'utf8', timeout: 30_000 })
+    assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`)
+    assert.match(run.stdout, /PASS: stable SemVer ordering fails closed/)
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
 test('installer text sources are explicitly UTF-8 and Unicode NSIS is enabled', async () => {
@@ -70,7 +119,8 @@ test('installer text sources are explicitly UTF-8 and Unicode NSIS is enabled', 
   const script = scriptBytes.subarray(3).toString('utf8')
   assert.match(script, /^Unicode true/m)
   assert.match(script, /Клієнт HromadaAID/)
-  assert.match(script, /Каталог серверних даних/)
+  assert.match(script, /Server Manager/)
+  assert.doesNotMatch(script, /створення адміністратора|Пароль не додається/i)
   assert.doesNotMatch(script, /\uFFFD|Рџ|СЂС/)
   const build = readFileSync(new URL('./build-windows-installer.mjs', import.meta.url), 'utf8')
   assert.match(build, /'\/INPUTCHARSET',[\s\S]*?'UTF8'/)
@@ -242,7 +292,7 @@ test('service path validation uses APIs available in Windows PowerShell 5.1 and 
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
-test('retry cleanup removes only an interrupted Server.next package and preserves synthetic server data', { skip: process.platform !== 'win32' }, (t) => {
+test('server update preparation refuses an existing Server.next and preserves synthetic server data', { skip: process.platform !== 'win32' }, (t) => {
   const root = mkdtempSync(join(tmpdir(), 'HromadaAID retry cleanup '))
   const program = join(root, 'Program Files', 'HromadaAID')
   const data = join(root, 'Persistent Data')
@@ -266,14 +316,10 @@ test('retry cleanup removes only an interrupted Server.next package and preserve
     writeFileSync(key, 'synthetic DPAPI sentinel')
     writeFileSync(archive, 'synthetic archive sentinel')
     writeFileSync(journal, JSON.stringify({ phase: 'initial-install-needs-review', hadPreviousPackage: false }))
-    const psSource = [
-      'function Get-Service { param([string]$Name, [string]$ErrorAction); return $null }',
-      `. '${serviceControl.replace(/'/g, "''")}' -Action stop-before-update -ProgramDirectory '${program.replace(/'/g, "''")}' -UpdateJournalPath '${journal.replace(/'/g, "''")}'`,
-    ].join('\r\n') + '\r\n'
-    writeFileSync(harness, '\uFEFF' + psSource, 'utf8')
-    const run = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', harness], { windowsHide: true, encoding: 'utf8', timeout: 30_000 })
-    assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`)
-    assert.equal(existsSync(staged), false, 'stale staging files are discarded before retry')
+    const run = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', serviceControl,
+      '-Action', 'stop-before-update', '-ProgramDirectory', program, '-UpdateJournalPath', journal], { windowsHide: true, encoding: 'utf8', timeout: 30_000 })
+    assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`)
+    assert.equal(existsSync(staged), true, 'staged package is preserved for inspection')
     for (const path of [database, config, key, archive, journal]) assert.equal(existsSync(path), true, `${path} must be preserved`)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
@@ -333,19 +379,13 @@ test('PowerShell path validator skips server data paths for client-only installa
   assert.match(validator, /'серверних даних' \{ 'data-directory'/)
 })
 
-test('folder browse callbacks preserve the complete selected path and never create directories', async () => {
+test('installer retains existing data paths and avoids separate configuration pages or early directory creation', async () => {
   const script = (await readFile(new URL('../packaging/windows-installer.nsi', import.meta.url), 'utf8')).replace(/^\uFEFF/, '')
-  const browseData = script.match(/Function BrowseData([\s\S]*?)FunctionEnd/)?.[1] ?? ''
-  const browseBackups = script.match(/Function BrowseBackups([\s\S]*?)FunctionEnd/)?.[1] ?? ''
-  const dataLeave = script.match(/Function DataLeave([\s\S]*?)FunctionEnd/)?.[1] ?? ''
-  const backupLeave = script.match(/Function BackupLeave([\s\S]*?)FunctionEnd/)?.[1] ?? ''
-  assert.match(browseData, /SelectFolderDialog "Каталог серверних даних" "\$DataDirectory"/)
-  assert.match(browseData, /\$\{NSD_SetText\} \$DataEdit "\$0"/)
-  assert.match(browseBackups, /SelectFolderDialog "Каталог резервних копій" "\$BackupDirectory"/)
-  assert.match(browseBackups, /\$\{NSD_SetText\} \$BackupEdit "\$0"/)
-  assert.match(dataLeave, /\$\{NSD_GetText\} \$DataEdit \$DataDirectory/)
-  assert.match(backupLeave, /\$\{NSD_GetText\} \$BackupEdit \$BackupDirectory/)
-  for (const body of [browseData, browseBackups]) assert.doesNotMatch(body, /CreateDirectory/)
+  assert.match(script, /StrCpy \$DataDirectory "\$0\\HromadaAID\\Data"/)
+  assert.match(script, /ReadRegStr \$0 HKLM "Software\\HromadaAID\\Installer" "DataDirectory"[\s\S]*?StrCpy \$DataDirectory \$0/)
+  assert.match(script, /ReadRegStr \$0 HKLM "Software\\HromadaAID\\Installer" "BackupDirectory"[\s\S]*?StrCpy \$BackupDirectory \$0/)
+  assert.doesNotMatch(script, /Page custom (?:DataPage|BackupPage|AdminSetupPage)/)
+  assert.doesNotMatch(script, /CreateDirectory "\$DataDirectory|CreateDirectory "\$BackupDirectory/)
 })
 
 test('PowerShell preflight accepts Unicode, not-yet-created sibling directories without creating them', { skip: process.platform !== 'win32' }, () => {

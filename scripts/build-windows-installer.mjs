@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -9,6 +9,8 @@ const release = join(root, 'release')
 const payload = join(release, 'installer-payload')
 const client = join(payload, 'Client')
 const server = join(payload, 'Server')
+const managerSource = join(release, 'server-manager', 'win-unpacked')
+const manager = join(payload, 'ServerManager')
 const script = join(root, 'packaging', 'windows-installer.nsi')
 
 function findFile(directory, name, depth = 8) {
@@ -37,9 +39,32 @@ function nsisDefine(name, value) {
   return '/D' + name + '=' + value
 }
 
+function directoryBytes(directory) {
+  let total = 0
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) total += directoryBytes(path)
+    else if (entry.isFile()) total += statSync(path).size
+  }
+  return total
+}
+
 function main() {
   if (process.platform !== 'win32') throw new Error('Єдиний Windows installer збирається на Windows.')
-  if (!existsSync(client) || !existsSync(server)) throw new Error('Спочатку виконайте pnpm windows:package для підготовки обох компонентів.')
+  if (!existsSync(client) || !existsSync(server) || !existsSync(join(managerSource, 'HromadaAID Server Manager.exe'))) {
+    throw new Error('Підготуйте Client, Server і Server Manager: pnpm windows:package, pnpm manager:build, pnpm manager:portable.')
+  }
+  rmSync(manager, { recursive: true, force: true })
+  mkdirSync(manager, { recursive: true })
+  // The installer keeps one copy of the server payload at Server.next. Server
+  // Manager uses that verified staged package for first setup; its normal
+  // portable build still carries resources/server-payload for standalone use.
+  cpSync(managerSource, manager, {
+    recursive: true,
+    filter: path => !path.replaceAll('\\', '/').includes('/resources/server-payload'),
+  })
+  const managerVersionPath = join(manager, 'resources', 'manager-version.ini')
+  if (!existsSync(managerVersionPath)) throw new Error('Server Manager package is missing its version marker.')
   const manifest = JSON.parse(readFileSync(join(payload, 'package-manifest.json'), 'utf8'))
   const cache = join(process.env.LOCALAPPDATA || '', 'electron-builder', 'Cache')
   let makensis = process.env.MAKENSIS_PATH
@@ -57,6 +82,7 @@ function main() {
   if (!makensis || !existsSync(makensis)) throw new Error('Не знайдено NSIS compiler. Використайте electron-builder NSIS target або задайте MAKENSIS_PATH.')
   const nsisHome = findNsisHome(makensis)
   const output = join(release, 'HromadaAID-Setup-' + manifest.appVersion + '.exe')
+  const managerBytes = directoryBytes(manager)
   execFileSync(makensis, [
     '/INPUTCHARSET',
     'UTF8',
@@ -65,6 +91,10 @@ function main() {
     nsisDefine('SERVER_PAYLOAD', server),
     nsisDefine('CLIENT_PAYLOAD_BYTES', String(manifest.client.sizeBytes)),
     nsisDefine('SERVER_PAYLOAD_BYTES', String(manifest.server.sizeBytes)),
+    nsisDefine('MANAGER_PAYLOAD', manager),
+    nsisDefine('MANAGER_PAYLOAD_BYTES', String(managerBytes)),
+    nsisDefine('APP_VERSION', manifest.appVersion),
+    nsisDefine('PUBLISHER', 'HromadaAID'),
     nsisDefine('INSTALLER_SUPPORT_BYTES', String(manifest.installer.supportFilesBytes)),
     nsisDefine('PROJECT_DIR', root),
     nsisDefine('OUTPUT_FILE', output),

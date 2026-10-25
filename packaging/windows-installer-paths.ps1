@@ -5,7 +5,8 @@
   [Parameter(Mandatory = $false)][string]$BackupDirectory,
   [Parameter(Mandatory = $true)][ValidateRange(0, 9007199254740991)][Int64]$ClientBytes,
   [Parameter(Mandatory = $true)][ValidateRange(0, 9007199254740991)][Int64]$ServerBytes,
-  [Parameter(Mandatory = $true)][ValidateRange(0, 9007199254740991)][Int64]$SupportBytes
+  [Parameter(Mandatory = $true)][ValidateRange(0, 9007199254740991)][Int64]$SupportBytes,
+  [Parameter(Mandatory = $false)][ValidateRange(0, 9007199254740991)][Int64]$ManagerBytes = 0
 )
 $ErrorActionPreference = 'Stop'
 $script:PreflightStage = 'arguments'
@@ -38,6 +39,7 @@ trap {
       clientBytes = $ClientBytes
       serverBytes = $ServerBytes
       supportBytes = $SupportBytes
+      managerBytes = $ManagerBytes
     }
     exceptions = $exceptionChain
   }
@@ -163,7 +165,7 @@ $includesClient = $Mode -ne 'server'
 $includesServer = $Mode -ne 'client'
 $programPayload = [Int64]0
 if ($includesClient) { $programPayload += $ClientBytes }
-if ($includesServer) { $programPayload += $ServerBytes }
+if ($includesServer) { $programPayload += $ServerBytes + $ManagerBytes }
 $programReserve = [Math]::Ceiling($programPayload * 0.15)
 Add-VolumeRequirement $resolved['програми'] ($programPayload + $programReserve)
 if ($includesServer) {

@@ -174,9 +174,9 @@ async function main() {
       files: completeServerFiles
     },
     installer: { supportFilesBytes: installerSupportBytes.reduce((sum, value) => sum + value, 0) },
-    installModes: ['Клієнт', 'Сервер', 'Сервер + клієнт'],
+    installModes: ['Client-only', 'Server-only (API Server + Server Manager)', 'Combined (Client + API Server + Server Manager)'],
     installerSource: 'packaging/windows-installer.nsi',
-    serviceRegistration: 'NSIS invokes the packaged service installer after path validation'
+    serviceRegistration: 'Existing server upgrades use the packaged transactional service installer; clean server setup is completed through Server Manager'
   }
   await writeFile(join(payloadRoot, 'package-manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8')
   console.log('Підготовлено окремі payload клієнта й сервера: ' + payloadRoot)

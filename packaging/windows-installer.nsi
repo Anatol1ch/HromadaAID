@@ -11,13 +11,16 @@ ShowUnInstDetails show
 
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
-!include "nsDialogs.nsh"
 !define MUI_CUSTOMFUNCTION_ABORT "HromadaAidRestoreServiceAfterAbort"
+!define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\HromadaAID"
 !ifndef CLIENT_PAYLOAD
   !error "CLIENT_PAYLOAD must point to the electron-builder win-unpacked directory"
 !endif
 !ifndef SERVER_PAYLOAD
   !error "SERVER_PAYLOAD must point to the staged Server component"
+!endif
+!ifndef MANAGER_PAYLOAD
+  !error "MANAGER_PAYLOAD must point to the staged Server Manager component"
 !endif
 !ifndef PROJECT_DIR
   !error "PROJECT_DIR must point to the HromadaAID source tree"
@@ -31,30 +34,36 @@ ShowUnInstDetails show
 !ifndef INSTALLER_SUPPORT_BYTES
   !error "INSTALLER_SUPPORT_BYTES must be emitted from package-manifest.json"
 !endif
+!ifndef MANAGER_PAYLOAD_BYTES
+  !error "MANAGER_PAYLOAD_BYTES must describe the Server Manager payload"
+!endif
+!ifndef APP_VERSION
+  !error "APP_VERSION must come from package-manifest.json"
+!endif
 
-Var Dialog
-Var DataEdit
-Var BackupEdit
 Var DataDirectory
 Var BackupDirectory
 Var PreflightProgramDirectory
 Var PreflightDataDirectory
 Var PreflightBackupDirectory
-Var DisplayDataDirectory
-Var DisplayBackupDirectory
-Var InstallMode
 Var ValidationMode
+Var ManagerVersion
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_COMPONENTS
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE SummaryLeave
 !insertmacro MUI_PAGE_DIRECTORY
-Page custom DataPage DataLeave ": Серверні дані"
-Page custom BackupPage BackupLeave ": Резервні копії"
-Page custom AdminSetupPage AdminSetupLeave ": Створення адміністратора"
-Page custom SummaryPage SummaryLeave ": Перевірка параметрів"
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_LANGUAGE "Ukrainian"
+
+Section -CloseApplications
+  ; taskkill without /F sends the normal close request; Windows file-copy errors
+  ; remain fatal if an application cannot close cleanly.
+  nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /IM HromadaAID.exe /T'
+  nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /IM "HromadaAID Server Manager.exe" /T'
+  Sleep 500
+SectionEnd
 
 Section "Клієнт HromadaAID" SEC_CLIENT
   SetOutPath "$INSTDIR\Client"
@@ -63,87 +72,144 @@ Section "Клієнт HromadaAID" SEC_CLIENT
   CreateShortcut "$DESKTOP\HromadaAID.lnk" "$INSTDIR\Client\HromadaAID.exe"
 SectionEnd
 
-Section "Сервер HromadaAID" SEC_SERVER
-  ; Stop an existing instance before replacing its runtime or WinSW files.
+Section "API Server + Server Manager (обов’язковий комплект)" SEC_SERVER
+  ; Refuse inconsistent server layouts before replacing even the Manager files.
+  IfFileExists "$INSTDIR\Server\service\HromadaAIDService.exe" serverLayoutValid
+  IfFileExists "$INSTDIR\Server\*.*" partialServerInstall
+  IfFileExists "$INSTDIR\Server.next\package-integrity.json" serverLayoutValid
+  IfFileExists "$INSTDIR\Server.next\*.*" partialServerInstall
+  IfFileExists "$INSTDIR\ServerManager\HromadaAID Server Manager.exe" partialServerInstall
+serverLayoutValid:
+  ; Keep the Manager binary untouched when its version marker is unchanged.
+  StrCpy $ManagerVersion ""
+  ReadINIStr $ManagerVersion "$INSTDIR\ServerManager\resources\manager-version.ini" "manager" "version"
+  ${If} $ManagerVersion == "${APP_VERSION}"
+    IfFileExists "$INSTDIR\ServerManager\HromadaAID Server Manager.exe" managerExecutablePresent managerNeedsCopy
+managerExecutablePresent:
+    IfFileExists "$INSTDIR\ServerManager\resources\app.asar" managerCopyDone managerNeedsCopy
+  ${Else}
+    Goto managerNeedsCopy
+  ${EndIf}
+managerNeedsCopy:
+  RMDir /r "$INSTDIR\ServerManager"
+  SetOutPath "$INSTDIR\ServerManager"
+  File /r "${MANAGER_PAYLOAD}\*"
+managerCopyDone:
+  CreateShortcut "$SMPROGRAMS\HromadaAID Server Manager.lnk" "$INSTDIR\ServerManager\HromadaAID Server Manager.exe"
+
+  ; A clean setup stages the verified payload. First configuration and service
+  ; registration then run through the existing Server Manager wizard.
+  IfFileExists "$INSTDIR\Server\service\HromadaAIDService.exe" updateExistingServer 0
+  IfFileExists "$INSTDIR\Server\*.*" partialServerInstall 0
+  IfFileExists "$INSTDIR\Server.next\package-integrity.json" keepExistingStage 0
+  IfFileExists "$INSTDIR\Server.next\*.*" partialServerInstall 0
+  SetOutPath "$INSTDIR\Server.next"
+  File /r "${SERVER_PAYLOAD}\*"
+  Goto serverSectionDone
+keepExistingStage:
+  DetailPrint "Наявний Server.next збережено для безпечного продовження у Server Manager."
+  Goto serverSectionDone
+partialServerInstall:
+  MessageBox MB_ICONSTOP|MB_OK "Знайдено часткову інсталяцію сервера без підтвердженої служби або повного Server.next. Файли не перезаписано; перевірте стан через Server Manager."
+  Abort
+updateExistingServer:
   SetOutPath "$PLUGINSDIR"
   File /oname=windows-service-control.ps1 "${PROJECT_DIR}\packaging\windows-service-control.ps1"
   nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-service-control.ps1" -Action stop-before-update -ProgramDirectory "$INSTDIR" -StateFile "$PLUGINSDIR\service-state.txt" -UpdateJournalPath "$DataDirectory\.hromadaaid-update-state.json"'
   Pop $1
   Pop $3
-  DetailPrint "Зупинення попередньої служби: код $1"
   ${If} $1 != 0
-    MessageBox MB_ICONSTOP|MB_OK "Не вдалося штатно зупинити попередню службу. Файли сервера не оновлено. Код: $1"
+    MessageBox MB_ICONSTOP|MB_OK "Не вдалося безпечно підготувати оновлення API Server. Чинні файли та дані не змінено. Код: $1"
     Abort
   ${EndIf}
   SetOutPath "$INSTDIR\Server.next"
   File /r "${SERVER_PAYLOAD}\*"
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Server.next\installer\install-server-service.ps1" -ProgramDirectory "$INSTDIR" -DataDirectory "$DataDirectory" -BackupDirectory "$BackupDirectory" -PreviousServiceStateFile "$PLUGINSDIR\service-state.txt" -UpdateOnly'
+  Pop $1
+  Pop $3
+  ${If} $1 != 0
+    MessageBox MB_ICONSTOP|MB_OK "Оновлення API Server не завершено. Перевірте стан у Server Manager; серверні дані не видалялися. Код: $1"
+    Abort
+  ${EndIf}
+serverSectionDone:
 SectionEnd
 
-Section -PrepareServer
+Section -RemoveDeselected
+  SectionGetFlags ${SEC_CLIENT} $0
+  IntOp $0 $0 & ${SF_SELECTED}
+  ${If} $0 == 0
+    Delete "$SMPROGRAMS\HromadaAID.lnk"
+    Delete "$DESKTOP\HromadaAID.lnk"
+    RMDir /r "$INSTDIR\Client"
+  ${EndIf}
   SectionGetFlags ${SEC_SERVER} $0
   IntOp $0 $0 & ${SF_SELECTED}
-  ${If} $0 != 0
-    SetOutPath "$PLUGINSDIR"
-    File /oname=prepare-server-install.mjs "${PROJECT_DIR}\packaging\prepare-server-install.mjs"
-    File /oname=windows-installer-config.mjs "${PROJECT_DIR}\packaging\windows-installer-config.mjs"
-    nsExec::ExecToStack '"$INSTDIR\Server.next\runtime\node.exe" "$PLUGINSDIR\prepare-server-install.mjs" --program-dir "$INSTDIR" --data-dir "$DataDirectory" --backup-dir "$BackupDirectory" --package-root "$INSTDIR\Server.next"'
-    Pop $1
-    Pop $3
-    DetailPrint "Підготовка каталогів і конфігурації: код $1"
-    ${If} $1 != 0
-      MessageBox MB_ICONSTOP|MB_OK "Не вдалося підготувати конфігурацію сервера. Каталоги та наявні дані залишено без видалення. Код: $1"
-      Abort
-    ${EndIf}
-    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Server.next\installer\install-server-service.ps1" -ProgramDirectory "$INSTDIR" -DataDirectory "$DataDirectory" -BackupDirectory "$BackupDirectory" -PreviousServiceStateFile "$PLUGINSDIR\service-state.txt"'
-    Pop $1
-    Pop $3
-    DetailPrint "Підготовка Windows Service: код $1"
-    ${If} $1 != 0
-      DetailPrint "Діагностика підготовки служби: $3"
-      MessageBox MB_ICONSTOP|MB_OK "Не вдалося підготувати Windows Service. Наявні бази, ключі та резервні копії збережено. Код: $1. Діагностика: $3"
-      Abort
-    ${EndIf}
-    Delete "$PLUGINSDIR\service-state.txt"
-    SectionGetFlags ${SEC_CLIENT} $0
-    IntOp $0 $0 & ${SF_SELECTED}
-    ${If} $0 != 0
-      CreateDirectory "$INSTDIR\Client\resources"
-      IfFileExists "$INSTDIR\Client\resources\server-connection.json" +3 0
-      FileOpen $4 "$INSTDIR\Client\resources\server-connection.json" w
-      FileWrite $4 '{"version":1,"apiUrl":"http://127.0.0.1:4310"}$\r$\n'
-      FileClose $4
-    ${EndIf}
+  ${If} $0 == 0
+    Call RemoveServerComponent
   ${EndIf}
 SectionEnd
 
 Section -UninstallMetadata
   WriteRegStr HKLM "Software\HromadaAID\Installer" "ProgramDirectory" "$INSTDIR"
+  WriteRegStr HKLM "Software\HromadaAID\Installer" "InstallVersion" "${APP_VERSION}"
   SectionGetFlags ${SEC_SERVER} $0
   IntOp $0 $0 & ${SF_SELECTED}
   ${If} $0 != 0
     WriteRegStr HKLM "Software\HromadaAID\Installer" "DataDirectory" "$DataDirectory"
     WriteRegStr HKLM "Software\HromadaAID\Installer" "BackupDirectory" "$BackupDirectory"
   ${EndIf}
+  SectionGetFlags ${SEC_CLIENT} $0
+  IntOp $0 $0 & ${SF_SELECTED}
+  StrCpy $1 ""
+  ${If} $0 != 0
+    StrCpy $1 "Client"
+  ${EndIf}
+  SectionGetFlags ${SEC_SERVER} $0
+  IntOp $0 $0 & ${SF_SELECTED}
+  ${If} $0 != 0
+    ${If} $1 == ""
+      StrCpy $1 "Server,ServerManager"
+    ${Else}
+      StrCpy $1 "$1,Server,ServerManager"
+    ${EndIf}
+  ${EndIf}
+  WriteRegStr HKLM "Software\HromadaAID\Installer" "InstalledComponents" "$1"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
+  WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayName" "HromadaAID"
+  WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
+  WriteRegStr HKLM "${UNINSTALL_KEY}" "Publisher" "${PUBLISHER}"
+  WriteRegStr HKLM "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKLM "${UNINSTALL_KEY}" "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
+  SectionGetFlags ${SEC_SERVER} $0
+  IntOp $0 $0 & ${SF_SELECTED}
+  ${If} $0 != 0
+    WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\ServerManager\HromadaAID Server Manager.exe"
+  ${Else}
+    WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\Client\HromadaAID.exe"
+  ${EndIf}
+  WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
+  WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1
 SectionEnd
 
 Section "Uninstall"
-  IfFileExists "$INSTDIR\Server\installer\windows-service-control.ps1" 0 unSkipServiceRemoval
-  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Server\installer\windows-service-control.ps1" -Action uninstall -ProgramDirectory "$INSTDIR"'
-  Pop $0
-  Pop $3
-  ${If} $0 != 0
-    MessageBox MB_ICONSTOP|MB_OK "Не вдалося штатно зупинити або видалити службу HromadaAIDApi. Файли та дані залишено. Код: $0"
-    Abort
-  ${EndIf}
-unSkipServiceRemoval:
+  nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /IM HromadaAID.exe /T'
+  nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /IM "HromadaAID Server Manager.exe" /T'
+  Sleep 500
+  Call un.RemoveServerComponent
   Delete "$SMPROGRAMS\HromadaAID.lnk"
+  Delete "$SMPROGRAMS\HromadaAID Server Manager.lnk"
   Delete "$DESKTOP\HromadaAID.lnk"
   RMDir /r "$INSTDIR\Client"
   RMDir /r "$INSTDIR\Server"
+  RMDir /r "$INSTDIR\Server.next"
+  RMDir /r "$INSTDIR\ServerManager"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
-  ; Persistent server data, backups, DPAPI material, and path settings are intentionally preserved.
+  DeleteRegKey HKLM "${UNINSTALL_KEY}"
+  DeleteRegValue HKLM "Software\HromadaAID\Installer" "ProgramDirectory"
+  DeleteRegValue HKLM "Software\HromadaAID\Installer" "InstalledComponents"
+  DeleteRegValue HKLM "Software\HromadaAID\Installer" "InstallVersion"
+  ; DataDirectory and BackupDirectory remain as safe reinstall/recovery locators.
 SectionEnd
 
 Function .onInit
@@ -170,6 +236,110 @@ Function .onInit
   ${If} $0 != ""
     StrCpy $BackupDirectory $0
   ${EndIf}
+  SectionSetFlags ${SEC_CLIENT} 0
+  SectionSetFlags ${SEC_SERVER} 0
+  IfFileExists "$INSTDIR\Client\HromadaAID.exe" selectInstalledClient 0
+  IfFileExists "$INSTDIR\ServerManager\HromadaAID Server Manager.exe" selectInstalledServer 0
+  IfFileExists "$INSTDIR\Server\service\HromadaAIDService.exe" selectInstalledServer 0
+  IfFileExists "$INSTDIR\Server.next\package-integrity.json" selectInstalledServer 0
+  IfFileExists "$INSTDIR\Server\package-integrity.json" selectInstalledServer 0
+  ReadRegStr $1 HKLM "Software\HromadaAID\Installer" "InstalledComponents"
+  ${If} $1 == "Server,ServerManager"
+  ${OrIf} $1 == "Client,Server,ServerManager"
+    MessageBox MB_ICONSTOP|MB_OK "Реєстр повідомляє про серверний компонент, але його файли не знайдено. Інсталятор зупинено, щоб не створити другу інсталяцію. Перевірте каталоги й Server Manager."
+    Abort
+  ${EndIf}
+  SectionSetFlags ${SEC_CLIENT} ${SF_SELECTED}
+  Goto initDone
+selectInstalledClient:
+  SectionSetFlags ${SEC_CLIENT} ${SF_SELECTED}
+  Goto initDone
+selectInstalledServer:
+  SectionSetFlags ${SEC_SERVER} ${SF_SELECTED}
+  IfFileExists "$INSTDIR\Client\HromadaAID.exe" 0 initDone
+  SectionSetFlags ${SEC_CLIENT} ${SF_SELECTED}
+initDone:
+FunctionEnd
+
+Function un.onInit
+  SetRegView 64
+  SetShellVarContext all
+  ReadRegStr $DataDirectory HKLM "Software\HromadaAID\Installer" "DataDirectory"
+  ReadRegStr $BackupDirectory HKLM "Software\HromadaAID\Installer" "BackupDirectory"
+FunctionEnd
+
+Function RemoveServerComponent
+  IfFileExists "$INSTDIR\Server\*.*" 0 checkStagedServer
+  Goto locateServiceControl
+checkStagedServer:
+  IfFileExists "$INSTDIR\Server.next\*.*" 0 checkPreviousServer
+  Goto locateServiceControl
+checkPreviousServer:
+  IfFileExists "$INSTDIR\Server.previous\*.*" 0 checkFailedServer
+  Goto locateServiceControl
+checkFailedServer:
+  IfFileExists "$INSTDIR\Server.failed\*.*" 0 checkManagerFiles
+  Goto locateServiceControl
+checkManagerFiles:
+  IfFileExists "$INSTDIR\ServerManager\HromadaAID Server Manager.exe" 0 removeServerDone
+locateServiceControl:
+  IfFileExists "$INSTDIR\Server\installer\windows-service-control.ps1" useActiveServiceControl
+  IfFileExists "$INSTDIR\Server.next\installer\windows-service-control.ps1" useStagedServiceControl
+  IfFileExists "$INSTDIR\ServerManager\resources\server-payload\installer\windows-service-control.ps1" useManagerServiceControl
+  MessageBox MB_ICONSTOP|MB_OK "Не знайдено перевірений сценарій керування Windows Service. Серверні файли залишено без змін."
+  Abort
+useActiveServiceControl:
+  StrCpy $0 "$INSTDIR\Server\installer\windows-service-control.ps1"
+  Goto runServiceRemoval
+useStagedServiceControl:
+  StrCpy $0 "$INSTDIR\Server.next\installer\windows-service-control.ps1"
+  Goto runServiceRemoval
+useManagerServiceControl:
+  StrCpy $0 "$INSTDIR\ServerManager\resources\server-payload\installer\windows-service-control.ps1"
+runServiceRemoval:
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$0" -Action uninstall -ProgramDirectory "$INSTDIR" -UpdateJournalPath "$DataDirectory\.hromadaaid-update-state.json"'
+  Pop $1
+  Pop $3
+  ${If} $1 != 0
+    MessageBox MB_ICONSTOP|MB_OK "Не вдалося безпечно видалити Windows Service або виявлено незавершену транзакцію. Усі серверні файли, дані й діагностику збережено. Перевірте стан через Server Manager. Код: $1"
+    Abort
+  ${EndIf}
+  Delete "$SMPROGRAMS\HromadaAID Server Manager.lnk"
+  RMDir /r "$INSTDIR\Server"
+  RMDir /r "$INSTDIR\Server.next"
+  RMDir /r "$INSTDIR\ServerManager"
+removeServerDone:
+FunctionEnd
+
+Function un.RemoveServerComponent
+  IfFileExists "$INSTDIR\Server\*.*" unLocateServiceControl
+  IfFileExists "$INSTDIR\Server.next\*.*" unLocateServiceControl
+  IfFileExists "$INSTDIR\Server.previous\*.*" unLocateServiceControl
+  IfFileExists "$INSTDIR\Server.failed\*.*" unLocateServiceControl
+  IfFileExists "$INSTDIR\ServerManager\HromadaAID Server Manager.exe" unLocateServiceControl
+  Return
+unLocateServiceControl:
+  IfFileExists "$INSTDIR\Server\installer\windows-service-control.ps1" unUseActiveServiceControl
+  IfFileExists "$INSTDIR\Server.next\installer\windows-service-control.ps1" unUseStagedServiceControl
+  IfFileExists "$INSTDIR\ServerManager\resources\server-payload\installer\windows-service-control.ps1" unUseManagerServiceControl
+  MessageBox MB_ICONSTOP|MB_OK "Не знайдено сценарій керування службою. Серверні файли й дані збережено."
+  Abort
+unUseActiveServiceControl:
+  StrCpy $0 "$INSTDIR\Server\installer\windows-service-control.ps1"
+  Goto unRunServiceRemoval
+unUseStagedServiceControl:
+  StrCpy $0 "$INSTDIR\Server.next\installer\windows-service-control.ps1"
+  Goto unRunServiceRemoval
+unUseManagerServiceControl:
+  StrCpy $0 "$INSTDIR\ServerManager\resources\server-payload\installer\windows-service-control.ps1"
+unRunServiceRemoval:
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$0" -Action uninstall -ProgramDirectory "$INSTDIR" -UpdateJournalPath "$DataDirectory\.hromadaaid-update-state.json"'
+  Pop $1
+  Pop $3
+  ${If} $1 != 0
+    MessageBox MB_ICONSTOP|MB_OK "Виявлено незавершену транзакцію або службу не вдалося штатно видалити. Серверні файли, дані й діагностику збережено. Код: $1"
+    Abort
+  ${EndIf}
 FunctionEnd
 
 Function .onInstFailed
@@ -188,12 +358,6 @@ Function HromadaAidRestoreServiceAfterAbort
 userAbortDone:
 FunctionEnd
 
-Function IsServerSelected
-  SectionGetFlags ${SEC_SERVER} $0
-  IntOp $0 $0 & ${SF_SELECTED}
-  Push $0
-FunctionEnd
-
 Function TrimPathTrailingSeparator
   Exch $0
 trimPathTrailingSeparatorLoop:
@@ -207,135 +371,6 @@ trimPathTrailingSeparatorLoop:
     ${EndIf}
   ${EndIf}
   Exch $0
-FunctionEnd
-
-Function DataPage
-  Call IsServerSelected
-  Pop $0
-  ${If} $0 == 0
-    Abort
-  ${EndIf}
-  nsDialogs::Create 1018
-  Pop $Dialog
-  ${If} $Dialog == error
-    Abort
-  ${EndIf}
-  ${NSD_CreateLabel} 0 0 100% 32u "Каталог серверних даних міститиме SQLite, конфігурацію та журнали. Він зберігається окремо від програми."
-  Pop $0
-  ${NSD_CreateText} 0 42u 76% 14u "$DataDirectory"
-  Pop $DataEdit
-  ${NSD_CreateButton} 78% 42u 22% 14u "Огляд..."
-  Pop $0
-  ${NSD_OnClick} $0 BrowseData
-  nsDialogs::Show
-FunctionEnd
-
-Function BrowseData
-  nsDialogs::SelectFolderDialog "Каталог серверних даних" "$DataDirectory"
-  Pop $0
-  ${If} $0 != "error"
-    ${NSD_SetText} $DataEdit "$0"
-  ${EndIf}
-FunctionEnd
-
-Function DataLeave
-  ${NSD_GetText} $DataEdit $DataDirectory
-FunctionEnd
-
-Function BackupPage
-  Call IsServerSelected
-  Pop $0
-  ${If} $0 == 0
-    Abort
-  ${EndIf}
-  nsDialogs::Create 1018
-  Pop $Dialog
-  ${If} $Dialog == error
-    Abort
-  ${EndIf}
-  ${NSD_CreateLabel} 0 0 100% 32u "Каталог резервних копій міститиме зашифровані .hraid. Рекомендовано окремий постійний диск NTFS."
-  Pop $0
-  ${NSD_CreateText} 0 42u 76% 14u "$BackupDirectory"
-  Pop $BackupEdit
-  ${NSD_CreateButton} 78% 42u 22% 14u "Огляд..."
-  Pop $0
-  ${NSD_OnClick} $0 BrowseBackups
-  nsDialogs::Show
-FunctionEnd
-
-Function BrowseBackups
-  nsDialogs::SelectFolderDialog "Каталог резервних копій" "$BackupDirectory"
-  Pop $0
-  ${If} $0 != "error"
-    ${NSD_SetText} $BackupEdit "$0"
-  ${EndIf}
-FunctionEnd
-
-Function BackupLeave
-  ${NSD_GetText} $BackupEdit $BackupDirectory
-FunctionEnd
-
-Function AdminSetupPage
-  Call IsServerSelected
-  Pop $0
-  ${If} $0 == 0
-    Abort
-  ${EndIf}
-  nsDialogs::Create 1018
-  Pop $Dialog
-  ${If} $Dialog == error
-    Abort
-  ${EndIf}
-  ${NSD_CreateLabel} 0 0 100% 44u "Під час встановлення відкриється захищена форма для логіна та пароля першого адміністратора. Пароль не додається до підсумку, параметрів запуску чи файлів інсталятора. Для наявної бази облікові записи не змінюються."
-  Pop $0
-  ${NSD_CreateLabel} 0 54u 100% 28u "Якщо перше налаштування буде перервано, повторний запуск продовжить його без повторного створення ключа або SQLite."
-  Pop $0
-  nsDialogs::Show
-FunctionEnd
-
-Function AdminSetupLeave
-FunctionEnd
-
-Function SummaryPage
-  Call IsServerSelected
-  Pop $0
-  SectionGetFlags ${SEC_CLIENT} $1
-  IntOp $1 $1 & ${SF_SELECTED}
-  ${If} $0 == 0
-    ${If} $1 == 0
-      StrCpy $InstallMode "Не вибрано"
-      StrCpy $DisplayDataDirectory "—"
-      StrCpy $DisplayBackupDirectory "—"
-    ${Else}
-      StrCpy $InstallMode "Клієнт"
-      StrCpy $DisplayDataDirectory "—"
-      StrCpy $DisplayBackupDirectory "—"
-    ${EndIf}
-  ${Else}
-    StrCpy $DisplayDataDirectory $DataDirectory
-    StrCpy $DisplayBackupDirectory $BackupDirectory
-    ${If} $1 == 0
-      StrCpy $InstallMode "Сервер"
-    ${Else}
-      StrCpy $InstallMode "Сервер + клієнт"
-    ${EndIf}
-  ${EndIf}
-  nsDialogs::Create 1018
-  Pop $Dialog
-  ${If} $Dialog == error
-    Abort
-  ${EndIf}
-  ${NSD_CreateLabel} 0 0 100% 20u "Перевірте параметри встановлення."
-  Pop $0
-  ${NSD_CreateLabel} 0 26u 100% 18u "Режим: $InstallMode"
-  Pop $0
-  ${NSD_CreateLabel} 0 44u 100% 18u "Програма: $INSTDIR"
-  Pop $0
-  ${NSD_CreateLabel} 0 62u 100% 18u "Серверні дані: $DisplayDataDirectory"
-  Pop $0
-  ${NSD_CreateLabel} 0 80u 100% 18u "Резервні копії: $DisplayBackupDirectory"
-  Pop $0
-  nsDialogs::Show
 FunctionEnd
 
 Function SummaryLeave
@@ -369,8 +404,8 @@ Function SummaryLeave
   ; Keep PowerShell CodeDom compilation away from NSIS/plugin DLLs in the PLUGINSDIR root.
   SetOutPath "$PLUGINSDIR\Preflight"
   File /oname=windows-installer-paths.ps1 "${PROJECT_DIR}\packaging\windows-installer-paths.ps1"
-  DetailPrint "Preflight launch: powershell=[$SYSDIR\WindowsPowerShell\v1.0\powershell.exe] script=[$PLUGINSDIR\Preflight\windows-installer-paths.ps1] cwd=[$PLUGINSDIR\Preflight] mode=[$ValidationMode] program=[$PreflightProgramDirectory] data=[$PreflightDataDirectory] backups=[$PreflightBackupDirectory] clientBytes=[${CLIENT_PAYLOAD_BYTES}] serverBytes=[${SERVER_PAYLOAD_BYTES}] supportBytes=[${INSTALLER_SUPPORT_BYTES}]"
-  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\Preflight\windows-installer-paths.ps1" -Mode "$ValidationMode" -ProgramDirectory "$PreflightProgramDirectory" -DataDirectory "$PreflightDataDirectory" -BackupDirectory "$PreflightBackupDirectory" -ClientBytes ${CLIENT_PAYLOAD_BYTES} -ServerBytes ${SERVER_PAYLOAD_BYTES} -SupportBytes ${INSTALLER_SUPPORT_BYTES}'
+  DetailPrint "Preflight launch: powershell=[$SYSDIR\WindowsPowerShell\v1.0\powershell.exe] script=[$PLUGINSDIR\Preflight\windows-installer-paths.ps1] cwd=[$PLUGINSDIR\Preflight] mode=[$ValidationMode] program=[$PreflightProgramDirectory] data=[$PreflightDataDirectory] backups=[$PreflightBackupDirectory] clientBytes=[${CLIENT_PAYLOAD_BYTES}] serverBytes=[${SERVER_PAYLOAD_BYTES}] managerBytes=[${MANAGER_PAYLOAD_BYTES}] supportBytes=[${INSTALLER_SUPPORT_BYTES}]"
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\Preflight\windows-installer-paths.ps1" -Mode "$ValidationMode" -ProgramDirectory "$PreflightProgramDirectory" -DataDirectory "$PreflightDataDirectory" -BackupDirectory "$PreflightBackupDirectory" -ClientBytes ${CLIENT_PAYLOAD_BYTES} -ServerBytes ${SERVER_PAYLOAD_BYTES} -SupportBytes ${INSTALLER_SUPPORT_BYTES} -ManagerBytes ${MANAGER_PAYLOAD_BYTES}'
   Pop $2
   Pop $3
   DetailPrint "Попередня перевірка каталогів: код $2"

@@ -11,16 +11,31 @@ $wrapper = Join-Path $serverDirectory 'service\HromadaAIDService.exe'
 
 try {
   if ($Action -eq 'stop-before-update') {
-    if ($UpdateJournalPath -and [IO.File]::Exists($UpdateJournalPath)) {
-      $journal = Get-Content -LiteralPath $UpdateJournalPath -Raw | ConvertFrom-Json
-      $servicePresent = $null -ne (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)
-      $previousPresent = [IO.Directory]::Exists((Join-Path $ProgramDirectory 'Server.previous'))
-      if ($journal.phase -ne 'initial-install-needs-review' -or $journal.hadPreviousPackage -or $servicePresent -or $previousPresent) {
-        throw 'Попередня операція оновлення сервера перервалася. Інсталяцію зупинено без змін; потрібне контрольоване відновлення за журналом.'
-      }
-    }
+    if ($UpdateJournalPath -and [IO.File]::Exists($UpdateJournalPath)) { throw 'Виявлено журнал попередньої операції сервера. Інсталяцію зупинено без змін; потрібне контрольоване відновлення за журналом.' }
     $staleStage = Join-Path $ProgramDirectory 'Server.next'
-    if ([IO.Directory]::Exists($staleStage)) { Remove-Item -LiteralPath $staleStage -Recurse -Force }
+    if ([IO.Directory]::Exists($staleStage)) { throw 'Server.next уже існує. Файли збережено; перевірте незавершене встановлення або оновлення перед повторною спробою.' }
+    $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    if ($null -eq $existingService) { throw 'Зареєстровану HromadaAIDApi не знайдено. Поточний стан не підтверджує безпечне оновлення сервера.' }
+  }
+  if ($Action -eq 'uninstall') {
+    $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    $transient = @(
+      (Join-Path $ProgramDirectory 'Server.previous'),
+      (Join-Path $ProgramDirectory 'Server.failed')
+    ) | Where-Object { [IO.Directory]::Exists($_) }
+    if ($UpdateJournalPath -and [IO.File]::Exists($UpdateJournalPath)) { $transient += $UpdateJournalPath }
+    if ($transient.Count -gt 0) { throw 'Виявлено незавершений або діагностичний стан сервера. Службу й файли не змінено; спочатку перевірте журнали та каталоги транзакції.' }
+    $stagedServer = Join-Path $ProgramDirectory 'Server.next'
+    $activeServer = Join-Path $ProgramDirectory 'Server'
+    if ([IO.Directory]::Exists($stagedServer) -and $null -ne $service) { throw 'Служба присутня разом із Server.next. Це може бути незавершене оновлення; усі файли збережено.' }
+    $unservedPackage = if ([IO.Directory]::Exists($stagedServer)) { $stagedServer } elseif ([IO.Directory]::Exists($activeServer) -and $null -eq $service) { $activeServer } else { $null }
+    if ($null -ne $unservedPackage) {
+      $node = Join-Path $unservedPackage 'runtime\node.exe'
+      $verifier = Join-Path $unservedPackage 'installer\verify-server-package.mjs'
+      if (-not [IO.File]::Exists($node) -or -not [IO.File]::Exists($verifier)) { throw 'Server.next неповний; файли збережено для ручної перевірки.' }
+      & $node $verifier $unservedPackage
+      if ($LASTEXITCODE -ne 0) { throw 'Пакет без зареєстрованої служби не пройшов перевірку цілісності; файли збережено.' }
+    }
   }
   if ($Action -eq 'restore-after-failure') {
     if (-not $StateFile -or -not [IO.File]::Exists($StateFile) -or [IO.File]::ReadAllText($StateFile).Trim() -ne 'Running') { exit 0 }

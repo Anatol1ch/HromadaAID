@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { cp, lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve, win32 } from 'node:path'
@@ -45,9 +46,16 @@ function payloadRoot(): string {
   return appResourcesServerRoot()
 }
 function appResourcesServerRoot(): string {
-  // The packaged manager receives the server package as a read-only extraResource.
-  // Development uses the same generated package as the existing Windows packager.
-  if (app.isPackaged) return join(process.resourcesPath, 'server-payload')
+  // Portable Manager carries a read-only server payload. The unified installer
+  // omits that duplicate and stages the same verified payload at Server.next.
+  if (app.isPackaged) {
+    const bundled = join(process.resourcesPath, 'server-payload')
+    if (existsSync(bundled)) return bundled
+    const installRoot = resolve(dirname(dirname(dirname(app.getAppPath()))))
+    const staged = join(installRoot, 'Server.next')
+    if (existsSync(staged)) return staged
+    throw new Error('Не знайдено комплектний серверний пакет. Повторіть встановлення або перевірте комплектність Server Manager.')
+  }
   return resolve('release', 'installer-payload', 'Server')
 }
 
