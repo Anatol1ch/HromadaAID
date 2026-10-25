@@ -126,6 +126,51 @@ export async function readPackageManifestIdentity(root: string): Promise<string>
   return hash.digest('hex')
 }
 
+/** Fingerprint an installed package only AFTER its integrity-listed bytes were verified.
+ * Older installer payloads have integrity v1 but no Deployment 2 component manifest.
+ * Absence is a format distinction, never a fabricated file or a weaker ZIP check. */
+export async function readInstalledPackageIdentity(root: string): Promise<string> {
+  const invalid = () => fail('INSTALLED_PACKAGE_INVALID', 'Маніфест установленого сервера некоректний або не описує повний серверний пакет.')
+  const integrityBytes = await readFile(join(root, 'package-integrity.json'))
+  const parseEntries = (entries: any[]) => {
+    if (!Array.isArray(entries) || !entries.length) throw invalid()
+    const result = new Map<string, { sizeBytes: number; sha256: string }>()
+    const folded = new Set<string>()
+    for (const entry of entries) {
+      const path = safeRelativePath(entry?.path), key = path.toLowerCase()
+      if (folded.has(key) || !Number.isSafeInteger(entry.sizeBytes) || entry.sizeBytes < 0 || !/^[a-f0-9]{64}$/i.test(entry.sha256)) throw invalid()
+      folded.add(key); result.set(path, entry)
+    }
+    return result
+  }
+  let integrity: any
+  try { integrity = JSON.parse(integrityBytes.toString('utf8')) } catch { throw invalid() }
+  if (integrity.formatVersion !== 1) throw invalid()
+  const entries = parseEntries(integrity.files)
+  for (const path of ['runtime/node.exe', 'service/HromadaAIDService.exe', 'app/package.json', 'app/dist/server/src/installed.js', 'app/dist/server/src/create-admin.js', 'app/dist/electron/database.js', 'app/dist/shared/api-compatibility.js', 'app/node_modules/argon2/package.json', 'app/node_modules/@phc/format/package.json', 'app/node_modules/fastify/package.json', 'installer/verify-server-package.mjs', 'installer/server-runtime-check.mjs']) {
+    if (!entries.has(path)) throw invalid()
+  }
+  let componentBytes: Buffer | null = null
+  try { componentBytes = await readFile(join(root, 'package-manifest.json')) }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+  if (componentBytes) {
+    let component: any
+    try { component = JSON.parse(componentBytes.toString('utf8')) } catch { throw invalid() }
+    if (component.formatVersion !== 1 || component.packageSchemaVersion !== 1 || component.component !== 'server' || component.platform !== 'win32' || component.architecture !== 'x64') throw invalid()
+    const componentEntries = parseEntries(component.files)
+    if (componentEntries.size !== entries.size + 1) throw invalid()
+    for (const [path, entry] of entries) {
+      const declared = componentEntries.get(path)
+      if (!declared || entry.sizeBytes !== declared.sizeBytes || entry.sha256 !== declared.sha256) throw invalid()
+    }
+    const declared = componentEntries.get('package-integrity.json')
+    if (!declared || declared.sizeBytes !== integrityBytes.length || declared.sha256 !== createHash('sha256').update(integrityBytes).digest('hex')) throw invalid()
+  }
+  const hash = createHash('sha256').update(integrityBytes).update('\0')
+  hash.update(componentBytes ?? 'HROMADAAID_INSTALLED_INTEGRITY_ONLY_V1').update('\0')
+  return hash.digest('hex')
+}
+
 export type PreparedServerUpdate = { preview: ServerUpdatePreview; extractedRoot: string; cleanupRoot: string; environment: ServerUpdateEnvironment; activePackageIdentity: string; candidatePackageIdentity: string }
 
 export async function prepareServerUpdate(zipPath: string, adapters: ServerUpdateAdapters): Promise<PreparedServerUpdate> {

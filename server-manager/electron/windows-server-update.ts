@@ -7,7 +7,7 @@ import { inspectEnvironment } from './inspection-engine.js'
 import { createWindowsInspectionAdapters } from './windows-inspection.js'
 import type { ServerUpdateAdapters, ServerUpdateEnvironment } from './server-update.js'
 import type { ServerUpdateStage } from './server-update-contract.js'
-import { verifyUpdatePackage, readPackageManifestIdentity } from './server-update.js'
+import { verifyUpdatePackage, readInstalledPackageIdentity } from './server-update.js'
 
 const extractionScript = String.raw`
 $ErrorActionPreference = 'Stop'
@@ -168,7 +168,7 @@ export function createWindowsServerUpdateAdapters(options: { installerScriptPath
       const script = `import {join} from 'node:path';import {pathToFileURL} from 'node:url';const root=process.argv[1];const {verifyServerPackage}=await import(pathToFileURL(join(root,'installer/verify-server-package.mjs')).href);await verifyServerPackage(root);console.log('PACKAGE_VERIFIED');`
       const result = await run(join(root, 'runtime', 'node.exe'), ['--input-type=module', '--eval', script, root], join(root, 'app'), 120_000)
       if (result.stdout.trim() !== 'PACKAGE_VERIFIED') throw new Error('Не вдалося підтвердити цілісність установленого пакета сервера.')
-      return readPackageManifestIdentity(root)
+      return readInstalledPackageIdentity(root)
     },
     prepare: async (environment, extractedPackage) => {
       const verified = await verifyUpdatePackage(extractedPackage)

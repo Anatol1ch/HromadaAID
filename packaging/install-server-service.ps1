@@ -190,8 +190,8 @@ function Assert-ServiceAccess {
   if ($settings.tls) { $protectedFiles += @([string]$settings.tls.certificatePath, [string]$settings.tls.privateKeyPath) }
   foreach ($path in $protectedFiles) { Assert-ServiceAcl $path $script:serviceSid $read }
 }
-function Invoke-PackageTransaction([string]$PackageRoot, [string]$Action, [string[]]$AdditionalArguments = @()) {
-  $node = Join-Path $PackageRoot 'runtime\node.exe'
+function Invoke-PackageTransaction([string]$PackageRoot, [string]$Action, [string[]]$AdditionalArguments = @(), [string]$NodeExecutable = '') {
+  $node = if ($NodeExecutable) { $NodeExecutable } else { Join-Path $PackageRoot 'runtime\node.exe' }
   $tool = Join-Path $PackageRoot 'installer\server-package-transaction.mjs'
   if (-not [IO.File]::Exists($node) -or -not [IO.File]::Exists($tool)) { throw 'Пакет не містить безпечного механізму перемикання серверних файлів.' }
   $arguments = @($tool, $Action, '--program-dir', $ProgramDirectory, '--data-dir', $DataDirectory) + $AdditionalArguments
@@ -521,7 +521,9 @@ try {
           Wait-ServiceHealthy (Get-HealthUrl (Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json))
         }
         $rollbackToolRoot = if ([IO.Directory]::Exists($failedServer)) { $failedServer } elseif ([IO.Directory]::Exists($stagedServer)) { $stagedServer } else { $activeServer }
-        Invoke-PackageTransaction $rollbackToolRoot 'finalize-rollback'
+        # Windows cannot delete Server.failed while its node.exe is running.
+        # Keep the candidate transaction tool, but run it with the restored runtime.
+        Invoke-PackageTransaction $rollbackToolRoot 'finalize-rollback' @() (Join-Path $activeServer 'runtime\node.exe')
         [Console]::Out.WriteLine('HROMADAAID_UPDATE_OUTCOME|rolled-back')
         [Console]::Error.WriteLine("Нове оновлення не пройшло перевірку. Попередній серверний пакет відновлено: $failure")
         exit 1
