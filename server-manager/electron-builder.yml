@@ -27,6 +27,9 @@ win:
       arch:
         - x64
 nsis:
+  shortcutName: HromadaAID Server Manager
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
   installerIcon: assets/hromadaaid-server-manager.ico
   uninstallerIcon: assets/hromadaaid-server-manager.ico
   installerHeaderIcon: assets/hromadaaid-server-manager.ico

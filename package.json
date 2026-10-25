@@ -25,7 +25,7 @@
     "server:test-backups": "pnpm server:build && node --test dist-server/server/src/backup-distribution.test.js dist-server/server/src/backup-restore.test.js dist-server/server/src/backup-restore-cli.test.js",
     "server:backup-restore": "pnpm server:build && node dist-server/server/src/backup-restore-cli.js",
     "server:test-installer": "pnpm server:build && node --test dist-server/server/src/installer-initialization.test.js",
-    "windows:test-installer": "pnpm server:build && node --test dist-server/server/src/create-admin.test.js packaging/component-package.test.mjs packaging/verify-server-package.test.mjs packaging/server-package-transaction.test.mjs scripts/deploy-server-package.test.mjs scripts/windows-installer-space.test.mjs scripts/windows-installer-paths.test.mjs",
+    "windows:test-installer": "pnpm server:build && node --test dist-server/server/src/create-admin.test.js packaging/windows-branding.test.mjs packaging/component-package.test.mjs packaging/verify-server-package.test.mjs packaging/server-package-transaction.test.mjs scripts/deploy-server-package.test.mjs scripts/windows-installer-space.test.mjs scripts/windows-installer-paths.test.mjs",
     "windows:package": "pnpm build && pnpm server:build && node scripts/prepare-server-package.mjs && node scripts/deploy-server-package.mjs && node node_modules/electron-builder/cli.js --win --x64 --dir && node scripts/package-windows.mjs",
     "client:portable": "pnpm build && node node_modules/electron-builder/cli.js --win --x64 --dir && node scripts/package-client-portable.mjs",
     "client:portable:smoke": "node scripts/smoke-portable-client.mjs",

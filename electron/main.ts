@@ -16,7 +16,7 @@ import { checkServerAddress, switchRemoteServer, type ServerConnectionState } fr
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, CatalogList, DashboardData, DecisionRecord, DecisionSummary, ProgramApproval, RecipientRecord, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from './api-contract.js'
 import { isAnnualAidPlanList, isAnnualPlanEntryList, isAssignmentChangeResult, isAssignmentListResult, isAssignmentRecordList, isAssignmentSaveResult, isBankDetailList, isBankRecordList, isBankSaveResult, isCatalogList, isCatalogOrderResult, isCatalogSaveResult, isDashboardData, isDecisionSaveResult, isDecisionSummaryList, isNullableBankRecord, isNullableDecisionRecord, isNullableRecipientRecord, isProgramApprovalList, isProgramApprovalSaveResult, isRecipientSaveResult, isRecipientSummaryList, isReportSourceRowList, isReportSummary, isStatementListResult } from '../shared/api-contract.js'
 
-// Match the future Windows package/shortcut identity without changing userData.
+// Match the Windows package/shortcut identity without changing userData.
 if (process.platform === 'win32') app.setAppUserModelId('local.hromadaaid')
 
 const isDev = !app.isPackaged
@@ -62,7 +62,7 @@ function createWindow() {
       minWidth: Math.min(800, area.width),
       minHeight: Math.min(480, area.height),
       backgroundColor: '#f5f6f8',
-      title: 'HromadaAid — Огляд',
+      title: 'HromadaAID — Огляд',
       icon: join(iconDirectory, process.platform === 'win32' ? 'hromadaaid.ico' : 'hromadaaid.png'),
       // Keep the native surface hidden until Chromium has a frame to show. This
       // prevents a small window from flashing before the normal maximized state.
@@ -110,13 +110,13 @@ function createWindow() {
       if (window.isDestroyed()) return
       window.maximize()
       window.show()
-      dialog.showErrorBox('HromadaAid — помилка завантаження', isDev
+      dialog.showErrorBox('HromadaAID — помилка завантаження', isDev
         ? `Не вдалося завантажити ${devServerUrl}\nПеревірте, чи працює Vite.\n${message}`
         : `Не вдалося завантажити інтерфейс застосунку.\n${message}`)
     })
   } catch (error) {
     console.error('[HromadaAid] Критична помилка створення вікна:', error)
-    dialog.showErrorBox('HromadaAid', 'Не вдалося створити головне вікно. Подробиці в терміналі запуску.')
+    dialog.showErrorBox('HromadaAID', 'Не вдалося створити головне вікно. Подробиці в терміналі запуску.')
     app.quit()
   }
 }
@@ -412,7 +412,7 @@ if (!hasSingleInstanceLock) {
         return http.getJson(path, isStatementListResult)
       })
     } catch (error) {
-      dialog.showErrorBox('HromadaAid', error instanceof ElectronRuntimeConfigError
+      dialog.showErrorBox('HromadaAID', error instanceof ElectronRuntimeConfigError
         ? error.message
         : 'Не вдалося підготувати підключення застосунку. Перевірте конфігурацію та перезапустіть застосунок.')
       app.quit()
@@ -425,7 +425,7 @@ if (!hasSingleInstanceLock) {
     })
   }).catch((error: unknown) => {
     console.error('[HromadaAid] Критична помилка запуску Electron:', error)
-    dialog.showErrorBox('HromadaAid', 'Не вдалося завершити запуск Electron. Подробиці в терміналі запуску.')
+    dialog.showErrorBox('HromadaAID', 'Не вдалося завершити запуск Electron. Подробиці в терміналі запуску.')
     app.quit()
   })
 

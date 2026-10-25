@@ -40,6 +40,9 @@ ShowUnInstDetails show
 !ifndef APP_VERSION
   !error "APP_VERSION must come from package-manifest.json"
 !endif
+!ifndef MANAGER_BRANDING_ID
+  !error "MANAGER_BRANDING_ID must come from the packaged manager-version.ini"
+!endif
 
 Var DataDirectory
 Var BackupDirectory
@@ -48,6 +51,26 @@ Var PreflightDataDirectory
 Var PreflightBackupDirectory
 Var ValidationMode
 Var ManagerVersion
+Var ManagerBranding
+
+!define MUI_ICON "${PROJECT_DIR}\assets\hromadaaid.ico"
+!define MUI_UNICON "${PROJECT_DIR}\assets\hromadaaid.ico"
+
+; Both installer and uninstaller use the same four exact, target-checked links.
+; Isolate PowerShell Add-Type from native NSIS plugin DLLs in PLUGINSDIR.
+!macro SyncApplicationShortcuts CLIENT_SELECTED MANAGER_SELECTED
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR\WindowsIntegration"
+  File /oname=windows-shortcuts.ps1 "${PROJECT_DIR}\packaging\windows-shortcuts.ps1"
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\WindowsIntegration\windows-shortcuts.ps1" -ProgramDirectory "$INSTDIR" -ClientSelected ${CLIENT_SELECTED} -ManagerSelected ${MANAGER_SELECTED}'
+  Pop $2
+  Pop $3
+  DetailPrint "$3"
+  ${If} $2 != 0
+    MessageBox MB_ICONSTOP|MB_OK "Не вдалося налаштувати ярлики HromadaAID. Програмні файли й дані збережено. Повторіть операцію після перевірки доступу до спільних каталогів ярликів."
+    Abort
+  ${EndIf}
+!macroend
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_COMPONENTS
@@ -65,11 +88,15 @@ Section -CloseApplications
   Sleep 500
 SectionEnd
 
+Section -ProductBranding
+  ; Always available for Installed Apps, including Server-only.
+  SetOutPath "$INSTDIR\assets"
+  File /oname=hromadaaid.ico "${PROJECT_DIR}\assets\hromadaaid.ico"
+SectionEnd
+
 Section "Клієнт HromadaAID" SEC_CLIENT
   SetOutPath "$INSTDIR\Client"
   File /r "${CLIENT_PAYLOAD}\*"
-  CreateShortcut "$SMPROGRAMS\HromadaAID.lnk" "$INSTDIR\Client\HromadaAID.exe"
-  CreateShortcut "$DESKTOP\HromadaAID.lnk" "$INSTDIR\Client\HromadaAID.exe"
 SectionEnd
 
 Section "API Server + Server Manager (обов’язковий комплект)" SEC_SERVER
@@ -80,10 +107,13 @@ Section "API Server + Server Manager (обов’язковий комплект
   IfFileExists "$INSTDIR\Server.next\*.*" partialServerInstall
   IfFileExists "$INSTDIR\ServerManager\HromadaAID Server Manager.exe" partialServerInstall
 serverLayoutValid:
-  ; Keep the Manager binary untouched when its version marker is unchanged.
+  ; Reuse an unchanged Manager, but deliver a new icon even at the same SemVer.
   StrCpy $ManagerVersion ""
+  StrCpy $ManagerBranding ""
   ReadINIStr $ManagerVersion "$INSTDIR\ServerManager\resources\manager-version.ini" "manager" "version"
+  ReadINIStr $ManagerBranding "$INSTDIR\ServerManager\resources\manager-version.ini" "manager" "brandingId"
   ${If} $ManagerVersion == "${APP_VERSION}"
+  ${AndIf} $ManagerBranding == "${MANAGER_BRANDING_ID}"
     IfFileExists "$INSTDIR\ServerManager\HromadaAID Server Manager.exe" managerExecutablePresent managerNeedsCopy
 managerExecutablePresent:
     IfFileExists "$INSTDIR\ServerManager\resources\app.asar" managerCopyDone managerNeedsCopy
@@ -95,7 +125,6 @@ managerNeedsCopy:
   SetOutPath "$INSTDIR\ServerManager"
   File /r "${MANAGER_PAYLOAD}\*"
 managerCopyDone:
-  CreateShortcut "$SMPROGRAMS\HromadaAID Server Manager.lnk" "$INSTDIR\ServerManager\HromadaAID Server Manager.exe"
 
   ; A clean setup stages the verified payload. First configuration and service
   ; registration then run through the existing Server Manager wizard.
@@ -138,8 +167,6 @@ Section -RemoveDeselected
   SectionGetFlags ${SEC_CLIENT} $0
   IntOp $0 $0 & ${SF_SELECTED}
   ${If} $0 == 0
-    Delete "$SMPROGRAMS\HromadaAID.lnk"
-    Delete "$DESKTOP\HromadaAID.lnk"
     RMDir /r "$INSTDIR\Client"
   ${EndIf}
   SectionGetFlags ${SEC_SERVER} $0
@@ -147,6 +174,14 @@ Section -RemoveDeselected
   ${If} $0 == 0
     Call RemoveServerComponent
   ${EndIf}
+SectionEnd
+
+Section -ApplicationShortcuts
+  SectionGetFlags ${SEC_CLIENT} $0
+  IntOp $0 $0 & ${SF_SELECTED}
+  SectionGetFlags ${SEC_SERVER} $1
+  IntOp $1 $1 & ${SF_SELECTED}
+  !insertmacro SyncApplicationShortcuts $0 $1
 SectionEnd
 
 Section -UninstallMetadata
@@ -180,13 +215,7 @@ Section -UninstallMetadata
   WriteRegStr HKLM "${UNINSTALL_KEY}" "Publisher" "${PUBLISHER}"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
-  SectionGetFlags ${SEC_SERVER} $0
-  IntOp $0 $0 & ${SF_SELECTED}
-  ${If} $0 != 0
-    WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\ServerManager\HromadaAID Server Manager.exe"
-  ${Else}
-    WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\Client\HromadaAID.exe"
-  ${EndIf}
+  WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayIcon" "$\"$INSTDIR\assets\hromadaaid.ico$\",0"
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1
 SectionEnd
@@ -196,13 +225,13 @@ Section "Uninstall"
   nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /IM "HromadaAID Server Manager.exe" /T'
   Sleep 500
   Call un.RemoveServerComponent
-  Delete "$SMPROGRAMS\HromadaAID.lnk"
-  Delete "$SMPROGRAMS\HromadaAID Server Manager.lnk"
-  Delete "$DESKTOP\HromadaAID.lnk"
+  !insertmacro SyncApplicationShortcuts 0 0
   RMDir /r "$INSTDIR\Client"
   RMDir /r "$INSTDIR\Server"
   RMDir /r "$INSTDIR\Server.next"
   RMDir /r "$INSTDIR\ServerManager"
+  Delete "$INSTDIR\assets\hromadaaid.ico"
+  RMDir "$INSTDIR\assets"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
   DeleteRegKey HKLM "${UNINSTALL_KEY}"
@@ -238,11 +267,12 @@ Function .onInit
   ${EndIf}
   SectionSetFlags ${SEC_CLIENT} 0
   SectionSetFlags ${SEC_SERVER} 0
-  IfFileExists "$INSTDIR\Client\HromadaAID.exe" selectInstalledClient 0
+  ; The server branch also selects an existing Client; preserve Combined on rerun.
   IfFileExists "$INSTDIR\ServerManager\HromadaAID Server Manager.exe" selectInstalledServer 0
   IfFileExists "$INSTDIR\Server\service\HromadaAIDService.exe" selectInstalledServer 0
   IfFileExists "$INSTDIR\Server.next\package-integrity.json" selectInstalledServer 0
   IfFileExists "$INSTDIR\Server\package-integrity.json" selectInstalledServer 0
+  IfFileExists "$INSTDIR\Client\HromadaAID.exe" selectInstalledClient 0
   ReadRegStr $1 HKLM "Software\HromadaAID\Installer" "InstalledComponents"
   ${If} $1 == "Server,ServerManager"
   ${OrIf} $1 == "Client,Server,ServerManager"
@@ -304,7 +334,6 @@ runServiceRemoval:
     MessageBox MB_ICONSTOP|MB_OK "Не вдалося безпечно видалити Windows Service або виявлено незавершену транзакцію. Усі серверні файли, дані й діагностику збережено. Перевірте стан через Server Manager. Код: $1"
     Abort
   ${EndIf}
-  Delete "$SMPROGRAMS\HromadaAID Server Manager.lnk"
   RMDir /r "$INSTDIR\Server"
   RMDir /r "$INSTDIR\Server.next"
   RMDir /r "$INSTDIR\ServerManager"

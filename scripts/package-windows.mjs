@@ -160,8 +160,9 @@ async function main() {
   const installerSupportBytes = await Promise.all([
     'windows-installer-paths.ps1', 'windows-service-control.ps1', 'prepare-server-install.mjs',
     'windows-installer-config.mjs', 'install-server-service.ps1', 'admin-setup.ps1',
-    'write-installation-locator.ps1',
+    'write-installation-locator.ps1', 'windows-shortcuts.ps1',
   ].map(path => stat(join(root, 'packaging', path)).then(info => info.size)))
+  installerSupportBytes.push((await stat(join(root, 'assets', 'hromadaaid.ico'))).size)
   const manifest = {
     formatVersion: 1,
     appVersion: packageJson.version,

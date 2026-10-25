@@ -65,6 +65,8 @@ function main() {
   })
   const managerVersionPath = join(manager, 'resources', 'manager-version.ini')
   if (!existsSync(managerVersionPath)) throw new Error('Server Manager package is missing its version marker.')
+  const managerBrandingId = /^brandingId=([a-f0-9]{64})\r?$/m.exec(readFileSync(managerVersionPath, 'utf8'))?.[1]
+  if (!managerBrandingId) throw new Error('Server Manager package is missing its branding marker. Rebuild the Manager before preparing the installer.')
   const manifest = JSON.parse(readFileSync(join(payload, 'package-manifest.json'), 'utf8'))
   const cache = join(process.env.LOCALAPPDATA || '', 'electron-builder', 'Cache')
   let makensis = process.env.MAKENSIS_PATH
@@ -94,6 +96,7 @@ function main() {
     nsisDefine('MANAGER_PAYLOAD', manager),
     nsisDefine('MANAGER_PAYLOAD_BYTES', String(managerBytes)),
     nsisDefine('APP_VERSION', manifest.appVersion),
+    nsisDefine('MANAGER_BRANDING_ID', managerBrandingId),
     nsisDefine('PUBLISHER', 'HromadaAID'),
     nsisDefine('INSTALLER_SUPPORT_BYTES', String(manifest.installer.supportFilesBytes)),
     nsisDefine('PROJECT_DIR', root),
