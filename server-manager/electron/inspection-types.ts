@@ -42,6 +42,7 @@ export type InspectionSnapshot = {
 
 export type ManagerInspectionApi = {
   inspectEnvironment(): Promise<InspectionSnapshot>
+  controlService(operation: import('./service-control.js').ServiceControlOperation): Promise<import('./service-control.js').ServiceControlHandlerResult>
   getInstallDefaults(): Promise<{ programDirectory: string; dataDirectory: string; backupDirectory: string }>
   selectInstallDirectory(kind: import('./installation-contract.js').InstallDirectoryKind): Promise<string | null>
   installServer(request: import('./installation-contract.js').ServerInstallRequest): Promise<{ operationId: string; success: boolean; message?: string }>

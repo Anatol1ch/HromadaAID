@@ -44,11 +44,10 @@ app.on('browser-window-created', (_event, window) => {
         check(document.title === 'HromadaAID Server Manager', 'Window title')
         check(typeof window.require === 'undefined' && typeof window.hromadaAid === 'undefined', 'No Node or client bridge')
         check(typeof window.hromadaManager?.inspectEnvironment === 'function', 'Narrow read-only inspection bridge')
-        check(Object.keys(window.hromadaManager).join(',') === 'inspectEnvironment,getInstallDefaults,selectInstallDirectory,installServer,saveRecoveryKey,confirmRecoveryKeySaved,cancelRecoveryKey,onInstallationUpdate,onRecoveryKeyRequired', 'Only narrow inspection, directory-selection and first-install methods are exposed')
-        check(document.querySelector('#real-state-title')?.textContent === 'Стан сервера ще не перевірено', 'Initial inspection state is clear')
-        const initialStatuses = [...document.querySelectorAll('.sm-health-summary .sm-status')]
-        check(initialStatuses.length === 3 && initialStatuses.every(status => status.classList.contains('sm-status-info')), 'Unchecked installation, service and API use neutral information status')
-        check(document.querySelector('.sm-health-summary .sm-status-error') === null, 'Initial state does not imply an error')
+        check(Object.keys(window.hromadaManager).join(',') === 'inspectEnvironment,controlService,getInstallDefaults,selectInstallDirectory,installServer,saveRecoveryKey,confirmRecoveryKeySaved,cancelRecoveryKey,onInstallationUpdate,onRecoveryKeyRequired', 'Only narrow inspection, service-control, directory-selection and first-install methods are exposed')
+        for (let attempt = 0; attempt < 80 && document.querySelector('.sm-health-footer')?.textContent.includes('Не виконувалась'); attempt++) await pause()
+        check(!document.querySelector('.sm-health-footer')?.textContent.includes('Не виконувалась'), 'Read-only inspection runs automatically on startup')
+        check(document.querySelector('.sm-health-footer')?.textContent.includes('Остання перевірка:'), 'Startup inspection timestamp is displayed')
         const buttons = [...document.querySelectorAll('nav button')]
         check(buttons.length === 4, 'Four navigation items')
         const expectedHeadings = ['Стан сервера', 'Конфігурація', 'Діагностика', 'Оновлення сервера']

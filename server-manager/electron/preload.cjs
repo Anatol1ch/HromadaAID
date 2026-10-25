@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('hromadaManager', Object.freeze({
   inspectEnvironment: () => ipcRenderer.invoke('manager:inspect-environment'),
+  controlService: operation => ipcRenderer.invoke('manager:control-service', operation),
   getInstallDefaults: () => ipcRenderer.invoke('manager:get-install-defaults'),
   selectInstallDirectory: kind => ipcRenderer.invoke('manager:select-install-directory', kind),
   installServer: request => ipcRenderer.invoke('manager:install-server', request),

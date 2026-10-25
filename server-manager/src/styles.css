@@ -57,6 +57,12 @@
 .sm-state-content h3 { margin: 0 0 7px; color: var(--color-text-control); font-size: 12px; font-weight: 500; }
 .sm-state-content > strong { display: block; color: var(--color-text); font-size: 15px; font-weight: 700; line-height: 1.4; }
 .sm-state-content p { color: var(--color-text-secondary); font-size: 11px; line-height: 1.5; margin: 7px 0 0; }
+.sm-service-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.sm-service-actions .primary-button, .sm-service-actions .secondary-button { min-height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 5px 9px; font-size: 11px; }
+.sm-service-actions button:disabled { cursor: wait; opacity: .62; }
+.sm-service-spinner { color: var(--feedback-warning-text); animation: sm-service-spin 1s linear infinite; }
+@keyframes sm-service-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sm-service-spinner { animation-duration: 3s; } }
 .sm-icon-button { display: grid; place-items: center; flex: none; width: 30px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: var(--radius-control); color: var(--color-text-control); background: var(--surface-app); }
 .sm-icon-button:hover { background: var(--accent-green-soft); color: var(--accent-green); border-color: var(--border-accent); }
 .sm-state-card > .sm-icon-button { position: absolute; right: 10px; top: 45px; width: 26px; height: 30px; }
@@ -159,6 +165,7 @@
 .sm-update-steps strong { color: var(--color-text-control); font-size: 13px; font-weight: 600; }
 .sm-update-steps p { margin: 3px 0 0; color: var(--color-text-secondary); font-size: 12px; }
 .sm-local-notice { padding: 8px 12px; margin: 0; border-radius: var(--radius-control); background: var(--feedback-success-bg); color: var(--feedback-success-text); font-size: 12px; }
+.sm-local-notice.is-error { background: var(--feedback-error-bg); color: var(--feedback-error-text); }
 .sm-skip { position: fixed; top: -100px; left: 20px; z-index: 3000; padding: 12px 20px; background: var(--surface-card); color: var(--accent-green); }
 .sm-skip:focus { top: 10px; }
 .sm-start-error { padding: 40px; }

@@ -10,6 +10,8 @@ import type { InspectionSnapshot } from './inspection-types.js'
 import type { InstallDirectoryKind, ServerInstallRequest, ServerInstallUpdate } from './installation-contract.js'
 import { runServerInstallation } from './installation-engine.js'
 import { createWindowsInstallationAdapters } from './windows-installation.js'
+import { createServiceControlRequestHandler, runServiceControl, type ServiceControlOperation } from './service-control.js'
+import { controlWindowsService } from './windows-service-control.js'
 
 // An independent process and profile; only a narrow read-only inspection bridge is exposed.
 app.setName('HromadaAID Server Manager')
@@ -20,6 +22,7 @@ const page = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), '../ren
 const devOrigin = 'http://127.0.0.1:5176'
 let window: BrowserWindow | null = null
 let activeInstallId: string | null = null
+let serviceOperationInProgress = false
 let recoveryPrompt: { operationId: string; key: string; savedPath: string | null; resolve: (saved: boolean) => void } | null = null
 
 function isTrustedRenderer(event: Electron.IpcMainInvokeEvent): boolean {
@@ -78,6 +81,24 @@ if (!app.requestSingleInstanceLock()) app.quit()
 else {
   const inspectRequest = createInspectionRequestHandler(() => inspectEnvironment(createWindowsInspectionAdapters()), isTrustedRenderer, failedInspection)
   ipcMain.handle('manager:inspect-environment', event => inspectRequest(event))
+  const serviceControlRequest = createServiceControlRequestHandler(
+    async (operation: ServiceControlOperation, operationId) => {
+      serviceOperationInProgress = true
+      try {
+        return await runServiceControl(operation, operationId, {
+          platform: process.platform,
+          control: controlWindowsService,
+          inspect: () => inspectEnvironment(createWindowsInspectionAdapters()),
+          failedInspection,
+        })
+      } finally { serviceOperationInProgress = false }
+    },
+    isTrustedRenderer,
+    () => activeInstallId !== null || serviceOperationInProgress,
+    randomUUID,
+    failedInspection,
+  )
+  ipcMain.handle('manager:control-service', (event, operation: unknown) => serviceControlRequest(event, operation))
   ipcMain.handle('manager:select-install-directory', async (event, kind: InstallDirectoryKind) => {
     if (!isTrustedRenderer(event) || !['program', 'data', 'backups'].includes(kind)) throw new Error('UNTRUSTED_RENDERER')
     const labels: Record<InstallDirectoryKind, string> = { program: 'Каталог програми сервера', data: 'Каталог серверних даних', backups: 'Каталог резервних копій' }
@@ -96,7 +117,7 @@ else {
   })
   ipcMain.handle('manager:install-server', async (event, input: unknown) => {
     if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
-    if (activeInstallId) throw new Error('INSTALLATION_ALREADY_RUNNING')
+    if (activeInstallId || serviceOperationInProgress) throw new Error('INSTALLATION_ALREADY_RUNNING')
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('INSTALL_OPTIONS_INVALID')
     const request = input as ServerInstallRequest
     if (Object.keys(request).some(key => !['programDirectory', 'dataDirectory', 'backupDirectory', 'host', 'port', 'administrator'].includes(key)) ||
