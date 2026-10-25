@@ -295,13 +295,13 @@ test('access failure while checking default roots is unknown, never a false not-
   assert.equal(result.installation.status, 'unknown')
 })
 
-test('PowerShell provider is constrained to a read-only named-service query and bounded child process', () => {
+test('service adapter uses fixed absolute SCM query, bounded processes and no CIM dependency', () => {
   const source = readFileSync(new URL('../electron/windows-inspection.ts', import.meta.url), 'utf8')
-  assert.match(source, /Get-CimInstance -ClassName Win32_Service -Filter/)
+  assert.doesNotMatch(source, /Get-CimInstance|Win32_Service/)
+  assert.match(source, /join\(systemRoot, 'System32', 'sc.exe'\)/)
   assert.match(source, /execFileAsync\(sc, \['query', 'HromadaAIDApi'\]/)
   assert.match(source, /Number\(failure\.code\) === 1060/)
   assert.match(source, /System\.Text\.UTF8Encoding/)
-  assert.match(source, /SERVICE_ACCESS_DENIED/)
   assert.match(source, /timeout:\s*5_000/)
   assert.match(source, /windowsHide:\s*true/)
   assert.match(source, /HKEY_LOCAL_MACHINE\\Software\\HromadaAID\\Installer/)
@@ -310,38 +310,54 @@ test('PowerShell provider is constrained to a read-only named-service query and 
   assert.match(source, /Get-Acl -LiteralPath/)
   assert.doesNotMatch(source, /Start-Service|Stop-Service|New-Service|Remove-Service|sc\.exe\s+(?:start|stop|create|delete)|Set-Acl|Set-NetFirewall/)
   assert.doesNotMatch(source, /Set-ItemProperty|New-ItemProperty|Remove-ItemProperty|New-Item\s+-Path\s+Registry|Remove-Item\s+-Path\s+Registry/)
-  assert.match(source, /queryServiceWithInitialTimeoutRetry\(\(\) => execFileAsync/)
-  assert.match(source, /code !== 'ETIMEDOUT'/)
   assert.match(source, /redirect:\s*'manual'/)
   assert.match(source, /AbortController/)
 })
 
-test('Windows service query retries exactly once only after a child-process timeout', async () => {
-  const { queryServiceWithInitialTimeoutRetry } = await import('../../dist-server-manager/main/windows-inspection.js')
-  let calls = 0
-  const waits = []
-  const result = await queryServiceWithInitialTimeoutRetry(async () => {
-    calls++
-    if (calls === 1) throw Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' })
-    return 'missing-service-result'
-  }, async milliseconds => waits.push(milliseconds))
-  assert.equal(result, 'missing-service-result')
-  assert.equal(calls, 2)
-  assert.deepEqual(waits, [250])
+test('SCM numeric states are independent of localized captions and include every transition', async () => {
+  const { parseScServiceState, inspectWindowsService } = await import('../../dist-server-manager/main/windows-inspection.js')
+  const states = ['Stopped', 'StartPending', 'StopPending', 'Running', 'ContinuePending', 'PausePending', 'Paused']
+  for (const [index, state] of states.entries()) {
+    const output = `ІМ’Я: HromadaAIDApi\n ТИП: 10 довільна локалізація\n СТАН: ${index + 1} інший підпис\n КОД: 0 (0x0)`
+    assert.equal(parseScServiceState(output), state)
+    const result = await inspectWindowsService({ query: async () => output, metadata: async () => JSON.stringify({ binaryPath: `"${wrapper}"`, start: 2, startName: 'NT AUTHORITY\\LocalService' }) })
+    assert.equal(result.installed, true)
+    assert.equal(result.state, state)
+    assert.equal(result.startMode, 'Auto')
+    assert.equal(result.binaryPath, `"${wrapper}"`)
+  }
+  assert.throws(() => parseScServiceState('STATE: 4 RUNNING'), /numeric service state/)
+  assert.throws(() => parseScServiceState('TYPE: 10 WIN32\nSTATE: 99 UNKNOWN'), /numeric service state/)
+})
 
-  calls = 0
-  await assert.rejects(queryServiceWithInitialTimeoutRetry(async () => {
-    calls++
-    throw Object.assign(new Error('access denied'), { code: 'EACCES' })
-  }, async () => assert.fail('non-timeout error must not retry')))
-  assert.equal(calls, 1)
+test('SCM existence and state survive missing, malformed or unavailable auxiliary metadata', async () => {
+  const { inspectWindowsService } = await import('../../dist-server-manager/main/windows-inspection.js')
+  for (const metadata of [async () => '{"installed":false}', async () => 'invalid json', async () => { throw Object.assign(new Error('private contents'), { code: 'EACCES' }) }]) {
+    const result = await inspectWindowsService({ query: async () => 'TYPE: 10 WIN32\nSTATE: 4 RUNNING', metadata })
+    assert.equal(result.installed, true)
+    assert.equal(result.state, 'Running')
+    assert.equal(result.error, undefined)
+    assert.equal(result.metadataUnavailable, true)
+    assert.equal(result.diagnostics[0].operation, 'service.metadata')
+    assert.doesNotMatch(JSON.stringify(result), /private contents/)
+  }
+})
 
-  calls = 0
-  await assert.rejects(queryServiceWithInitialTimeoutRetry(async () => {
-    calls++
-    throw Object.assign(new Error('still timed out'), { code: 'ETIMEDOUT' })
-  }, async () => {}))
-  assert.equal(calls, 2)
+test('missing SCM service, access error, execFile timeout and transient query failures remain distinct', async () => {
+  const { inspectWindowsService } = await import('../../dist-server-manager/main/windows-inspection.js')
+  for (const [error, expected, code] of [
+    [{ code: 1060 }, undefined, undefined], [{ code: 5 }, 'access_denied', '5'],
+    [{ code: 'ENOENT' }, 'query_failed', 'ENOENT'], [{ killed: true, signal: 'SIGTERM', code: null }, 'query_failed', 'ETIMEDOUT'],
+  ]) {
+    let calls = 0
+    const result = await inspectWindowsService({ query: async () => { calls++; throw error }, metadata: async () => assert.fail('SCM failure must not query metadata') })
+    assert.equal(result.error, expected)
+    assert.equal(result.installed, false)
+    assert.equal(result.diagnostics?.[0].code, code)
+    assert.equal(calls, 1, 'Query has no unbounded retries')
+  }
+  const later = await inspectWindowsService({ query: async () => 'TYPE: 10 WIN32\nSTATE: 4 RUNNING', metadata: async () => JSON.stringify({ binaryPath: wrapper }) })
+  assert.equal(later.state, 'Running')
 })
 
 test('SCM exit codes distinguish an absent service from access denied and an actual query failure', async () => {
@@ -350,6 +366,36 @@ test('SCM exit codes distinguish an absent service from access denied and an act
   assert.equal(classifyScQueryFailure(Object.assign(new Error('[SC] OpenService FAILED 1060'), { code: 1060 })), 'missing')
   assert.equal(classifyScQueryFailure(Object.assign(new Error('Access is denied'), { code: 5 })), 'access_denied')
   assert.equal(classifyScQueryFailure(Object.assign(new Error('query process failed'), { code: 'ENOENT' })), 'query_failed')
+  assert.equal(classifyScQueryFailure(Object.assign(new Error('[SC] OpenService FAILED 1060 access denied'), { code: 123 })), 'query_failed', 'Console text cannot override the system code')
+})
+
+test('SCM failure preserves independent package/configuration and probes API only through a trusted locator', async () => {
+  const locator = { status: 'available', programDirectory: program, dataDirectory: data, backupDirectory: backups, writableByUnprivileged: false }
+  const f = fixture({ service: { installed: false, error: 'query_failed' }, locator })
+  const originalExists = f.adapter.exists
+  f.adapter.exists = async path => path.toLowerCase() === configPath.toLowerCase() || originalExists(path)
+  const result = await inspectEnvironment(f.adapter)
+  assert.equal(result.installation.status, 'unknown')
+  assert.equal(result.service.status, 'unknown')
+  assert.equal(result.api.status, 'available')
+  assert.equal(result.configuration.serverVersion, '0.1.0')
+  assert.equal(result.configuration.apiAddress, 'http://127.0.0.1:4310')
+  assert.equal(result.checks.find(check => check.id === 'configuration').status, 'passed')
+  const denied = fixture({ service: { installed: false, error: 'query_failed' }, locator: { ...locator, writableByUnprivileged: true } })
+  assert.equal((await inspectEnvironment(denied.adapter)).api.status, 'not_configured')
+  assert.equal(denied.trace.lastUrl, undefined)
+})
+
+test('SCM running state with unavailable metadata uses corroborated paths without changing the service state', async () => {
+  const f = fixture({ service: { installed: true, state: 'Running', metadataUnavailable: true }, locator: { status: 'available', programDirectory: program, dataDirectory: data, backupDirectory: backups, writableByUnprivileged: false } })
+  const originalExists = f.adapter.exists
+  f.adapter.exists = async path => path.toLowerCase() === configPath.toLowerCase() || originalExists(path)
+  const result = await inspectEnvironment(f.adapter)
+  assert.equal(result.service.status, 'running')
+  assert.equal(result.installation.status, 'unknown', 'Missing metadata cannot fully confirm which package the running service uses')
+  assert.equal(result.api.status, 'available')
+  assert.equal(result.discovery.source, 'installer_registry')
+  assert.equal(result.discovery.confidence, 'corroborated')
 })
 
 test('IPC handler accepts only the trusted renderer, coalesces refreshes and returns a safe failure state', async () => {

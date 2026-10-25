@@ -21,6 +21,7 @@ function fixture({ installation = 'not_installed', users = 0, marker = true, fai
     return undefined
   }
   const adapters = {}
+  adapters.wait = async () => {}
   adapters.inspect = async () => { calls.push('inspect'); return { installation: { status: serviceInstalled ? 'installed' : installation }, service: { status: serviceInstalled ? finalServiceStatus : 'missing' }, api: { status: serviceInstalled ? finalApiStatus : 'not_configured' }, configuration: { serverVersion: serviceInstalled ? '0.1.0' : null, apiAddress: serviceInstalled ? 'http://127.0.0.1:4310' : null } } }
   adapters.canResume = async () => { calls.push('canResume'); return resumable }
   for (const name of ['preflight', 'stagePackage', 'prepareConfiguration', 'recordLocator', 'initialize', 'databaseStatus', 'hasPendingAdminMarker', 'createAdministrator', 'installService']) adapters[name] = step(name)
@@ -100,9 +101,67 @@ test('a failed operation stops subsequent steps, preserves data and clears passw
   assert.equal(f.events.at(-1).status, 'failed')
 })
 
-test('installation is not reported successful when service health or API availability is not confirmed', async () => {
+test('completed installer with unconfirmed API becomes verification-required, never a clean-install retry', async () => {
   const f = fixture({ finalApiStatus: 'unavailable' })
-  await assert.rejects(f.run(), /не вдалося фактично підтвердити/)
-  assert.equal(f.events.at(-1).status, 'failed')
-  assert.equal(f.events.at(-1).errorCode, 'INSTALLATION_VERIFY_FAILED')
+  await f.run()
+  assert.equal(f.events.at(-1).status, 'verification-required')
+  assert.equal(f.events.at(-1).errorCode, 'INSTALLATION_VERIFY_PENDING')
+  assert.match(f.events.at(-1).message, /API недоступний/)
+  assert.equal(f.events.some(event => event.status === 'succeeded'), false)
+  assert.equal(f.calls.filter(name => name === 'inspect').length, 4)
+  assert.equal(f.calls.filter(name => name === 'initialize').length, 1)
+  await assert.rejects(f.run(), /наявну або неповну інсталяцію/)
+  assert.equal(f.calls.filter(name => name === 'initialize').length, 1)
+})
+
+test('transient post-install query failure and pending service are retried read-only, preserving all installer operations', async () => {
+  const f = fixture()
+  const original = f.adapters.inspect
+  let attempts = 0
+  const waits = []
+  f.adapters.wait = async milliseconds => waits.push(milliseconds)
+  f.adapters.inspect = async () => {
+    const state = await original()
+    attempts++
+    if (attempts === 2) throw Object.assign(new Error('SCM timeout'), { code: 'ETIMEDOUT' })
+    if (attempts === 3) return { ...state, service: { status: 'other' }, api: { status: 'unavailable' } }
+    return state
+  }
+  await f.run()
+  assert.equal(f.events.at(-1).status, 'succeeded')
+  assert.deepEqual(waits, [1000, 2000])
+  for (const operation of ['preflight', 'recordLocator', 'stagePackage', 'prepareConfiguration', 'initialize', 'createAdministrator', 'installService']) {
+    assert.equal(f.calls.filter(name => name === operation).length, 1, operation)
+  }
+})
+
+test('unavailable final SCM retains completed installation and permits later read-only confirmation', async () => {
+  const { installationVerificationIssues } = await import('../../dist-server-manager/main/installation-contract.js')
+  const f = fixture()
+  const original = f.adapters.inspect
+  let attempts = 0
+  f.adapters.inspect = async () => {
+    const state = await original()
+    return ++attempts > 1 ? { ...state, installation: { status: 'unknown' }, service: { status: 'unknown' } } : state
+  }
+  await f.run()
+  assert.equal(f.events.at(-1).status, 'verification-required')
+  assert.match(f.events.at(-1).message, /стан служби невідомий/)
+  assert.doesNotMatch(f.events.at(-1).message, /API недоступний/)
+  f.adapters.inspect = original
+  assert.deepEqual(installationVerificationIssues(await f.adapters.inspect()), [])
+  assert.equal(f.calls.filter(name => name === 'installService').length, 1)
+  assert.equal(f.calls.filter(name => name === 'createAdministrator').length, 1)
+})
+
+test('verification identifies service/system code, configuration and package failures without exposing raw diagnostics', async () => {
+  const { installationVerificationIssues } = await import('../../dist-server-manager/main/installation-contract.js')
+  const issues = installationVerificationIssues({ installation: { status: 'unknown' }, service: { status: 'unknown' }, api: { status: 'available' }, configuration: { serverVersion: null, apiAddress: 'http://127.0.0.1:4310' }, checks: [
+    { id: 'service', status: 'unknown', diagnostics: [{ operation: 'service.query', target: 'HromadaAIDApi', code: 'ETIMEDOUT', message: 'private contents' }] },
+    { id: 'configuration', status: 'failed' }, { id: 'package', status: 'failed' },
+  ] }).join(' ')
+  assert.match(issues, /стан служби невідомий \(ETIMEDOUT\)/)
+  assert.match(issues, /server.json/)
+  assert.match(issues, /серверного пакета/)
+  assert.doesNotMatch(issues, /private contents|API недоступний/)
 })

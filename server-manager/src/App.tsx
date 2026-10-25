@@ -81,6 +81,7 @@ function RealContent({ section, inspection, checking, serviceOperation, controlS
   const reasonFor = (checkId: string) => snapshot?.checks.find(item => item.id === checkId)?.message ?? 'Причину не надано окремою перевіркою.'
   const value = (item: string | null | undefined, checkId = 'configuration') => item ?? <span className="sm-unavailable-value"><span>Не визначено</span>{snapshot && !notInstalled && <details><summary>Причина</summary><span>{reasonFor(checkId)}</span></details>}</span>
   const config = snapshot?.configuration
+  const fullyReady = snapshot?.installation.status === 'installed' && snapshot.service.status === 'running' && snapshot.api.status === 'available'
   const directoryRows = [
     ['Каталог програми', config?.programDirectory ?? null, 'service'],
     ['Каталог серверних даних', config?.dataDirectory ?? null, 'configuration'],
@@ -93,7 +94,8 @@ function RealContent({ section, inspection, checking, serviceOperation, controlS
   ] as const
   const overall = serviceOperation ? { label: serviceOperation === 'start' ? 'Запускається' : serviceOperation === 'stop' ? 'Зупиняється' : 'Перезапускається', tone: 'warning' }
     : !snapshot ? pending
-      : snapshot.service.status === 'running' && snapshot.api.status === 'available' ? { label: 'Працює', tone: 'success' }
+      : fullyReady ? { label: 'Працює', tone: 'success' }
+        : snapshot.installation.status !== 'installed' ? installationDisplay(snapshot.installation.status)
         : snapshot.service.status === 'running' ? { label: 'API недоступний', tone: 'error' }
           : snapshot.service.status === 'stopped' ? { label: 'Зупинено', tone: 'warning' }
             : installationDisplay(snapshot.installation.status)
@@ -101,14 +103,16 @@ function RealContent({ section, inspection, checking, serviceOperation, controlS
     : serviceOperation === 'start' ? 'Запускається'
       : serviceOperation === 'stop' ? 'Зупиняється'
         : serviceOperation === 'restart' ? 'Перезапускається'
-          : snapshot.service.status === 'running' && snapshot.api.status === 'available' ? 'Сервер працює'
+          : fullyReady ? 'Сервер працює'
+            : snapshot.installation.status !== 'installed' ? snapshot.installation.message
             : snapshot.service.status === 'running' ? 'Служба працює, але API недоступний'
               : snapshot.service.status === 'stopped' ? 'Сервер зупинено'
                 : snapshot.installation.message
   const statusExplanation = !snapshot
     ? 'Натисніть «Перевірити зараз», щоб отримати актуальні відомості про службу, конфігурацію та доступність API.'
     : serviceOperation ? 'Очікуємо підтвердження від Windows Service Control Manager, після чого перевіримо health endpoint.'
-      : snapshot.service.status === 'running' && snapshot.api.status !== 'available' ? `${snapshot.service.message} ${snapshot.api.message}`
+      : snapshot.installation.status !== 'installed' ? `${snapshot.installation.message} ${snapshot.api.message}`
+        : snapshot.service.status === 'running' && snapshot.api.status !== 'available' ? `${snapshot.service.message} ${snapshot.api.message}`
         : snapshot.service.status === 'running' && snapshot.api.status === 'available' ? 'Сервер готовий до підключення користувачів HromadaAID.' : snapshot.service.status === 'stopped' ? 'Запустіть сервер, щоб користувачі могли підключитися до HromadaAID.' : snapshot.installation.message
   const serviceCanControl = snapshot?.installation.status === 'installed' && (snapshot.service.status === 'running' || snapshot.service.status === 'stopped')
   const serviceState = serviceOperation === 'start' ? { label: 'Запускається', tone: 'warning' }
@@ -193,6 +197,12 @@ export default function App() {
   const scenario = scenarios[scenarioId]
   const operation = scenario.operation
   const isDevelopment = import.meta.env.DEV
+  const acceptInspection = useCallback((result: InspectionSnapshot) => {
+    setInspection(result)
+    const feedback = inspectionFeedback(result)
+    setNotice(feedback.message)
+    setNoticeTone(feedback.tone)
+  }, [])
   const inspectReal = useCallback(async (manual = false) => {
     if (inspectionInFlight.current || serviceOperationInFlight.current || updateOperationInFlight.current) return
     inspectionInFlight.current = true
@@ -200,14 +210,13 @@ export default function App() {
     if (manual) { setNotice('Перевіряємо службу та доступність API…'); setNoticeTone('info') }
     try {
       const result = await window.hromadaManager.inspectEnvironment()
-      setInspection(result)
-      if (manual) { const feedback = inspectionFeedback(result); setNotice(feedback.message); setNoticeTone(feedback.tone) }
+      acceptInspection(result)
     } catch {
       setInspection(null)
       setNoticeTone('error')
       setNotice('Не вдалося запустити перевірку Server Manager. Перезапустіть програму та повторіть спробу.')
     } finally { inspectionInFlight.current = false; setChecking(false) }
-  }, [])
+  }, [acceptInspection])
   const controlService = useCallback(async (operation: ServiceControlOperation) => {
     if (serviceOperationInFlight.current || updateOperationInFlight.current || updatePreview) return
     if (operation === 'stop' && !window.confirm('Зупинити сервер? Підключені користувачі тимчасово втратять доступ до HromadaAID.')) return
@@ -217,7 +226,7 @@ export default function App() {
     setNoticeTone('info')
     try {
       const result = await window.hromadaManager.controlService(operation)
-      setInspection(result.inspection)
+      acceptInspection(result.inspection)
       setNoticeTone(result.success ? 'success' : 'error')
       setNotice(result.message)
     } catch {
@@ -227,7 +236,7 @@ export default function App() {
       serviceOperationInFlight.current = false
       setServiceOperation(null)
     }
-  }, [updatePreview])
+  }, [updatePreview, acceptInspection])
   const chooseUpdate = useCallback(async () => {
     if (updateOperationInFlight.current) return
     updateOperationInFlight.current = true
@@ -254,11 +263,11 @@ export default function App() {
       setUpdateResult(result)
       setUpdatePreview(null)
       if (!result.success) setUpdateError('')
-      try { setInspection(await window.hromadaManager.inspectEnvironment()) } catch { /* Keep the operation result visible if the follow-up inspection fails. */ }
+      try { acceptInspection(await window.hromadaManager.inspectEnvironment()) } catch { setNotice('Не вдалося оновити діагностику після операції. Повторіть перевірку стану.'); setNoticeTone('error') }
     } catch {
       setUpdateError('Операцію оновлення перервано. Не видаляйте службові файли транзакції; запустіть перевірку стану сервера.')
     } finally { updateOperationInFlight.current = false; setUpdateBusy(false) }
-  }, [updatePreview])
+  }, [updatePreview, acceptInspection])
   useEffect(() => window.hromadaManager.onServerUpdateProgress(value => setUpdateProgress(value)), [])
   useEffect(() => {
     if (mode !== 'real' || installWizard) return
@@ -300,8 +309,8 @@ export default function App() {
       <header className="sm-topbar"><div><strong>HromadaAID Server Manager</strong><span>Керування серверною службою та технічна діагностика</span></div><div className="sm-topbar-meta"><span className="sm-version">Версія {__MANAGER_VERSION__}</span><Status tone={mode === 'real' ? 'success' : 'info'}>{mode === 'real' ? 'Реальний стан' : 'Демонстраційний режим'}</Status>{isDevelopment && <button className="sm-mode-toggle" type="button" onClick={() => { setMode(current => current === 'real' ? 'demo' : 'real'); setNotice('') }}>{mode === 'real' ? 'Показати демо' : 'Повернути реальний стан'}</button>}</div></header>
       <main id="manager-content" className="sm-main" tabIndex={-1}>
         {mode === 'demo' ? <div className="sm-demo-banner"><Info size={17} aria-hidden="true"/><span><strong>Демонстраційний режим.</strong> Усі стани, шляхи й події тестові. Системні операції недоступні.</span></div> : null}
-        <div className="sm-page-heading"><div><h1 ref={heading} tabIndex={-1}>{headings[section][0]}</h1><p>{headings[section][1]}</p></div><div className="sm-heading-controls">{scenarioPicker}{section === 'overview' && (mode === 'demo' ? <button className="secondary-button" type="button" onClick={inspect}><RefreshCw size={16} aria-hidden="true"/>Демоперевірка</button> : <button className="secondary-button" type="button" onClick={() => void inspectReal(true)} disabled={checking || updateBusy || Boolean(serviceOperation)} aria-busy={checking}><RefreshCw size={16} aria-hidden="true"/>{checking ? 'Перевірка…' : 'Перевірити зараз'}</button>)}</div></div>
-        {notice && <p className={`sm-local-notice sm-local-notice-${noticeTone}`} role={noticeTone === 'error' ? 'alert' : 'status'}>{notice}</p>}
+        <div className="sm-page-heading"><div><h1 ref={heading} tabIndex={-1}>{headings[section][0]}</h1><p>{headings[section][1]}</p></div><div className="sm-heading-controls">{scenarioPicker}{section === 'overview' && (mode === 'demo' ? <button className="secondary-button" type="button" onClick={inspect}><RefreshCw size={16} aria-hidden="true"/>Демоперевірка</button> : <button className="secondary-button" type="button" onClick={() => void inspectReal(true)} disabled={installWizard || checking || updateBusy || Boolean(serviceOperation)} aria-busy={checking}><RefreshCw size={16} aria-hidden="true"/>{checking ? 'Перевірка…' : 'Перевірити зараз'}</button>)}</div></div>
+        {!installWizard && notice && <p className={`sm-local-notice sm-local-notice-${noticeTone}`} role={noticeTone === 'error' ? 'alert' : 'status'}>{notice}</p>}
 
         {installWizard ? <InstallWizard onClose={() => setInstallWizard(false)} onInstalled={() => { setInstallWizard(false); setSection('overview'); void inspectReal() }} initial={inspection?.installation.status === 'partial_installation' || inspection?.installation.status === 'ready_to_configure' ? inspection.configuration : undefined}/> : mode === 'real' ? <RealContent section={section} inspection={inspection} checking={checking} serviceOperation={serviceOperation} controlService={operation => void controlService(operation)} refresh={() => void inspectReal(true)} filter={filter} setFilter={setFilter} startInstall={() => setInstallWizard(true)} updatePreview={updatePreview} updateBusy={updateBusy} updateProgress={updateProgress} updateResult={updateResult} updateError={updateError} updateErrorDetails={updateErrorDetails} chooseUpdate={() => void chooseUpdate()} cancelUpdate={cancelUpdate} applyUpdate={() => void applyUpdate()}/> : <>
         {section === 'overview' && <>

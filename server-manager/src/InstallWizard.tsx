@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, Check, Folder, LockKeyhole, ShieldAlert } from '
 import Alert from '../../src/components/Alert'
 import type { InspectionSnapshot } from '../electron/inspection-types'
 import type { InstallDirectoryKind, ServerInstallRequest, ServerInstallUpdate } from '../electron/installation-contract'
+import { installationVerificationIssues } from '../electron/installation-contract'
 
 type Props = { onClose: () => void; onInstalled: () => void; initial?: Partial<Pick<InspectionSnapshot['configuration'], 'programDirectory' | 'dataDirectory' | 'backupDirectory' | 'host' | 'port'>> }
 type RecoveryPrompt = { operationId: string; key: string }
@@ -42,6 +43,8 @@ export default function InstallWizard({ onClose, onInstalled, initial }: Props) 
   const [confirmation, setConfirmation] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const installationCompleted = useRef(false)
+  const verificationInFlight = useRef(false)
   const [update, setUpdate] = useState<ServerInstallUpdate | null>(null)
   const [recovery, setRecovery] = useState<RecoveryPrompt | null>(null)
   const [savedPath, setSavedPath] = useState('')
@@ -50,7 +53,10 @@ export default function InstallWizard({ onClose, onInstalled, initial }: Props) 
   const request = useMemo<ServerInstallRequest>(() => ({ ...paths, host, port: parsedPort, administrator: { displayName, username, password, confirmation } }), [paths, host, parsedPort, displayName, username, password, confirmation])
 
   useEffect(() => {
-    const stopUpdates = window.hromadaManager.onInstallationUpdate(setUpdate)
+    const stopUpdates = window.hromadaManager.onInstallationUpdate(value => {
+      if (value.status === 'succeeded' || value.status === 'verification-required') installationCompleted.current = true
+      setUpdate(value)
+    })
     const stopRecovery = window.hromadaManager.onRecoveryKeyRequired(value => { setRecovery(value); setSavedPath(''); setSaveMessage('') })
     if (!initial) void window.hromadaManager.getInstallDefaults().then(value => {
       if (!directoriesEdited.current) setPaths(value)
@@ -87,6 +93,7 @@ export default function InstallWizard({ onClose, onInstalled, initial }: Props) 
   }
 
   const start = async () => {
+    if (installationCompleted.current || busy) return
     if (!validateCurrentStep()) return
     setBusy(true); setError(''); setUpdate({ operationId: 'pending', stage: 'validation', status: 'running', message: 'Підготовка до встановлення.' })
     try {
@@ -99,6 +106,22 @@ export default function InstallWizard({ onClose, onInstalled, initial }: Props) 
     } finally {
       setPassword(''); setConfirmation('')
     }
+  }
+
+  const recheck = async () => {
+    if (!installationCompleted.current || verificationInFlight.current || !update) return
+    verificationInFlight.current = true
+    setBusy(true)
+    setUpdate({ ...update, stage: 'health', message: 'Повторно перевіряємо стан служби, конфігурацію, пакет і доступність API.' })
+    try {
+      const snapshot = await window.hromadaManager.inspectEnvironment()
+      const issues = installationVerificationIssues(snapshot)
+      setUpdate(issues.length === 0 && snapshot.configuration.serverVersion && snapshot.configuration.apiAddress
+        ? { operationId: update.operationId, stage: 'complete', status: 'succeeded', message: 'Встановлення та готовність сервера підтверджено.', result: { service: 'running', api: 'available', serverVersion: snapshot.configuration.serverVersion, apiAddress: snapshot.configuration.apiAddress } }
+        : { operationId: update.operationId, stage: 'health', status: 'verification-required', message: `Встановлення виконано. ${issues.join(' ')} Повторна ініціалізація не потрібна; повторіть перевірку після усунення причини.` })
+    } catch {
+      setUpdate({ operationId: update.operationId, stage: 'health', status: 'verification-required', message: 'Встановлення виконано. Додаткова діагностика недоступна. Повторіть перевірку; дані повторно не ініціалізуються.' })
+    } finally { verificationInFlight.current = false; setBusy(false) }
   }
 
   const saveKey = async () => {
@@ -126,7 +149,7 @@ export default function InstallWizard({ onClose, onInstalled, initial }: Props) 
     <header className="sm-install-header"><div><span className="sm-install-step-count">Налаштування сервера · крок {step + 1} з {steps.length}</span><h2 id="install-title">Встановлення сервера HromadaAID</h2><p>Виконується локальна конфігурація HTTP на loopback. Мережевий режим HTTPS поки недоступний у майстрі.</p></div><button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Закрити майстер</button></header>
     <ol className="sm-install-steps" aria-label="Кроки встановлення">{steps.map((label, index) => <li key={label} className={index === step ? 'active' : index < step ? 'complete' : ''}><span>{index < step ? <Check size={14}/> : index + 1}</span>{label}</li>)}</ol>
 
-    {!busy && !update?.status.includes('succeeded') && <>
+    {!busy && update?.status !== 'succeeded' && update?.status !== 'verification-required' && <>
       {step === 0 && <div className="sm-install-fields">
         <p className="sm-form-intro">Каталоги можна розмістити на різних локальних дисках NTFS. Вони не створюються, доки ви не натиснете «Встановити сервер».</p>
         {([['programDirectory', 'Каталог програми', 'Виконувані файли сервера та WinSW.'], ['dataDirectory', 'Каталог серверних даних', 'server.json, SQLite, журнали й захищені службові файли.'], ['backupDirectory', 'Каталог резервних копій', 'Архіви .hraid зберігатимуться окремо.']] as const).map(([field, label, hint]) => <label className="sm-install-path" key={field}><span>{label}<small>{hint}</small></span><input value={paths[field]} onChange={event => { directoriesEdited.current = true; setPaths(current => ({ ...current, [field]: event.target.value })) }}/><button className="secondary-button" type="button" onClick={() => void choose(field === 'programDirectory' ? 'program' : field === 'dataDirectory' ? 'data' : 'backups', field)}><Folder size={16}/>Огляд</button></label>)}
@@ -140,6 +163,7 @@ export default function InstallWizard({ onClose, onInstalled, initial }: Props) 
     </>}
 
     {busy && <div className="sm-install-progress" role="status" aria-live="polite"><div className="sm-install-progress-icon"><Folder size={24}/></div><h3>{stageLabels[update?.stage ?? 'validation']}</h3><p>{update?.message ?? 'Виконується встановлення серверного середовища.'}</p><div className="sm-progress-track"><span/></div><small>Не закривайте Server Manager до завершення перевірки.</small></div>}
+    {!busy && update?.status === 'verification-required' && <div className="sm-install-review" role="status"><h3>Встановлення виконано. Потрібна перевірка</h3><Alert variant="warning">{update.message}</Alert><div className="sm-form-actions"><button type="button" className="primary-button" onClick={() => void recheck()}>Повторити перевірку</button><button type="button" className="secondary-button" onClick={onInstalled}>Перейти до огляду</button></div></div>}
     {!busy && update?.status === 'succeeded' && update.result && <div className="sm-install-success"><span><Check size={26}/></span><h3>Сервер встановлено</h3><p>{update.message}</p><dl className="sm-details sm-summary-rows"><div><dt>Windows Service</dt><dd>HromadaAIDApi · працює</dd></div><div><dt>API</dt><dd>{update.result.apiAddress} · доступний</dd></div><div><dt>Версія сервера</dt><dd>{update.result.serverVersion}</dd></div></dl><button className="primary-button" type="button" onClick={onInstalled}>Перейти до огляду</button></div>}
   </section>
 }

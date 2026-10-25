@@ -6,23 +6,20 @@ import type { InspectionAdapters, InstallationLocator, ServiceMetadata } from '.
 import { inspectionDiagnostic } from './inspection-engine.js'
 
 const execFileAsync = promisify(execFile)
-const serviceQueryScript = String.raw`
+export const serviceMetadataScript = String.raw`
 $ErrorActionPreference = 'Stop'
 $utf8 = New-Object System.Text.UTF8Encoding -ArgumentList $false
 [Console]::OutputEncoding = $utf8
 try {
-  $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='HromadaAIDApi'" -ErrorAction Stop
-  if ($null -eq $service) {
-    [Console]::Out.WriteLine('{"installed":false}')
-  } else {
-    $result = [ordered]@{ installed = $true; state = [string]$service.State; startMode = [string]$service.StartMode; startName = [string]$service.StartName; binaryPath = [string]$service.PathName }
+  $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Services\HromadaAIDApi', $false)
+  if ($null -eq $key) { exit 2 }
+  try {
+    $result = [ordered]@{ binaryPath = [string]$key.GetValue('ImagePath'); startName = [string]$key.GetValue('ObjectName'); start = $key.GetValue('Start') }
     [Console]::Out.WriteLine((ConvertTo-Json -InputObject $result -Compress -Depth 3))
-  }
+  } finally { $key.Dispose() }
 } catch {
   $failure = $_.Exception
-  $accessDenied = ($failure -is [System.UnauthorizedAccessException]) -or ($failure -is [System.Security.SecurityException]) -or ($failure.HResult -eq -2147024891)
-  if ($accessDenied) { [Console]::Error.WriteLine('SERVICE_ACCESS_DENIED'); exit 13 }
-  [Console]::Error.WriteLine('SERVICE_QUERY_FAILED')
+  if (($failure -is [System.UnauthorizedAccessException]) -or ($failure -is [System.Security.SecurityException]) -or ($failure.HResult -eq -2147024891)) { exit 5 }
   exit 2
 }`
 
@@ -76,61 +73,68 @@ try {
 
 function psEncodedCommand(script: string): string { return Buffer.from(script, 'utf16le').toString('base64') }
 
-/** A single bounded retry for a cold PowerShell/CIM startup timeout only. */
-export async function queryServiceWithInitialTimeoutRetry<T>(query: () => Promise<T>, wait: (milliseconds: number) => Promise<void> = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))): Promise<T> {
-  try {
-    return await query()
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ETIMEDOUT') throw error
-    await wait(250)
-    return query()
-  }
+/** Classify Win32/process codes, never localized console messages. */
+export function classifyScQueryFailure(error: unknown): 'missing' | 'access_denied' | 'query_failed' {
+  const failure = error as NodeJS.ErrnoException
+  if (Number(failure.code) === 1060) return 'missing'
+  if (Number(failure.code) === 5 || failure.code === 'EACCES' || failure.code === 'EPERM') return 'access_denied'
+  return 'query_failed'
 }
 
-/** `sc.exe query` returns a stable Win32 exit code for service absence (1060).
- * Probe SCM first so an absent service is not mistaken for a CIM/WMI failure.
- * Access denied and all other failures remain errors; they never imply absence.
+/** sc query emits numeric TYPE then STATE fields. Ignore localized labels/captions.
+ * TYPE is hexadecimal; only a Win32 service response is accepted for our WinSW service.
  */
-export function classifyScQueryFailure(error: unknown): 'missing' | 'access_denied' | 'query_failed' {
-  const failure = error as NodeJS.ErrnoException & { stderr?: string; stdout?: string }
-  const text = `${failure.message ?? ''} ${failure.stderr ?? ''} ${failure.stdout ?? ''}`
-  if (Number(failure.code) === 1060 || /(?:error|failed)\s*[:=]?\s*1060\b/i.test(text)) return 'missing'
-  if (Number(failure.code) === 5 || /(?:error|failed)\s*[:=]?\s*5\b/i.test(text) || /access is denied|access denied|0x80070005/i.test(text)) return 'access_denied'
-  return 'query_failed'
+export function parseScServiceState(stdout: string): string {
+  const fields = [...stdout.matchAll(/^\s*[^:\r\n]+:\s*([0-9a-fA-F]+)(?=\s|$)[^\r\n]*$/gm)]
+  const type = fields[0] ? Number.parseInt(fields[0][1], 16) : 0
+  const states: Record<string, string> = { '1': 'Stopped', '2': 'StartPending', '3': 'StopPending', '4': 'Running', '5': 'ContinuePending', '6': 'PausePending', '7': 'Paused' }
+  const state = fields[1] && states[fields[1][1]]
+  if (!(type & 0x30) || !state) throw Object.assign(new Error('SCM response has no valid numeric service state.'), { code: 'SCM_INVALID_RESPONSE' })
+  return state
+}
+
+type ReadOnlyServiceQueries = { query(): Promise<string>; metadata(): Promise<string> }
+function serviceProcessFailure(error: unknown): NodeJS.ErrnoException {
+  const failure = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string }
+  // execFile timeout errors normally have killed/signal and a null code, not ETIMEDOUT.
+  return failure.killed && failure.signal && !failure.code ? Object.assign(new Error('Service query timed out.'), { code: 'ETIMEDOUT' }) : failure
+}
+export async function inspectWindowsService(queries: ReadOnlyServiceQueries): Promise<ServiceMetadata> {
+  let state: string
+  try {
+    state = parseScServiceState(await queries.query())
+  } catch (error) {
+    const failure = serviceProcessFailure(error)
+    const classification = classifyScQueryFailure(failure)
+    if (classification === 'missing') return { installed: false }
+    return { installed: false, error: classification, diagnostics: [inspectionDiagnostic('service.query', 'HromadaAIDApi', failure)] }
+  }
+  try {
+    const value = JSON.parse(await queries.metadata()) as Record<string, unknown>
+    if (typeof value.binaryPath !== 'string' || !value.binaryPath.trim()) throw Object.assign(new Error('Service configuration is incomplete.'), { code: 'SERVICE_METADATA_INVALID' })
+    const modes: Record<string, string> = { '0': 'Boot', '1': 'System', '2': 'Auto', '3': 'Manual', '4': 'Disabled' }
+    return {
+      installed: true, state,
+      ...(modes[String(value.start)] ? { startMode: modes[String(value.start)] } : {}),
+      ...(typeof value.startName === 'string' ? { startName: value.startName } : {}),
+      binaryPath: value.binaryPath,
+    }
+  } catch (error) {
+    // SCM already confirmed existence/state. Auxiliary metadata cannot undo that fact.
+    return { installed: true, state, metadataUnavailable: true, diagnostics: [inspectionDiagnostic('service.metadata', 'HKLM\\SYSTEM\\CurrentControlSet\\Services\\HromadaAIDApi', serviceProcessFailure(error))] }
+  }
 }
 
 async function queryWindowsService(): Promise<ServiceMetadata> {
   if (process.platform !== 'win32') return { installed: false, error: 'query_failed' }
   const systemRoot = process.env.SystemRoot || 'C:\\Windows'
   const sc = join(systemRoot, 'System32', 'sc.exe')
-  try {
-    await execFileAsync(sc, ['query', 'HromadaAIDApi'], { windowsHide: true, timeout: 5_000, killSignal: 'SIGTERM', maxBuffer: 32 * 1024, encoding: 'utf8' })
-  } catch (error) {
-    const classification = classifyScQueryFailure(error)
-    if (classification === 'missing') return { installed: false }
-    return { installed: false, error: classification }
-  }
-
   const executable = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
-  try {
-    const result = await queryServiceWithInitialTimeoutRetry(() => execFileAsync(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', psEncodedCommand(serviceQueryScript)], {
-      windowsHide: true, timeout: 5_000, killSignal: 'SIGTERM', maxBuffer: 32 * 1024, encoding: 'utf8',
-    }))
-    const value = JSON.parse(result.stdout.trim()) as Record<string, unknown>
-    if (value.installed === false) return { installed: false }
-    if (value.installed !== true || typeof value.state !== 'string' || typeof value.binaryPath !== 'string') return { installed: false, error: 'query_failed' }
-    return {
-      installed: true,
-      state: value.state,
-      ...(typeof value.startMode === 'string' ? { startMode: value.startMode } : {}),
-      ...(typeof value.startName === 'string' ? { startName: value.startName } : {}),
-      binaryPath: value.binaryPath,
-    }
-  } catch (error) {
-    const failure = error as NodeJS.ErrnoException & { stderr?: string }
-    const text = `${failure.message || ''} ${failure.stderr || ''}`
-    return { installed: false, error: /SERVICE_ACCESS_DENIED|access is denied|access denied|unauthorized|0x80070005/i.test(text) ? 'access_denied' : 'query_failed' }
-  }
+  const options = { windowsHide: true, timeout: 5_000, killSignal: 'SIGTERM' as const, maxBuffer: 32 * 1024, encoding: 'utf8' as const }
+  return inspectWindowsService({
+    query: async () => (await execFileAsync(sc, ['query', 'HromadaAIDApi'], options)).stdout,
+    metadata: async () => (await execFileAsync(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', psEncodedCommand(serviceMetadataScript)], options)).stdout,
+  })
 }
 
 export type WindowsInstallationLocator = InstallationLocator

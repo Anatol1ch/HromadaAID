@@ -1,7 +1,9 @@
 import type { ServerInstallRequest, ServerInstallStage, ServerInstallUpdate } from './installation-contract.js'
+import { installationVerificationIssues, type InstallationInspection } from './installation-contract.js'
 
 export type ServerInstallAdapters = {
-  inspect(): Promise<{ installation: { status: string }; service?: { status: string }; api?: { status: string }; configuration?: { serverVersion: string | null; apiAddress: string | null } }>
+  inspect(): Promise<InstallationInspection>
+  wait?(milliseconds: number): Promise<void>
   canResume?(request: ServerInstallRequest): Promise<boolean>
   preflight(request: ServerInstallRequest): Promise<void>
   stagePackage(request: ServerInstallRequest): Promise<void>
@@ -74,9 +76,20 @@ export async function runServerInstallation(
     await adapters.installService(request, message => emit({ operationId, stage, status: 'running', message }))
     stage = 'health'
     progress(operationId, stage, 'Перевіряємо стан служби та API.', emit)
-    const finalState = await adapters.inspect()
-    if (finalState.installation.status !== 'installed' || finalState.service?.status !== 'running' || finalState.api?.status !== 'available' || !finalState.configuration?.serverVersion || !finalState.configuration.apiAddress) {
-      throw Object.assign(new Error('Сервер налаштовано, але служба, API або версію не вдалося фактично підтвердити.'), { code: 'INSTALLATION_VERIFY_FAILED' })
+    let finalState: InstallationInspection | undefined
+    let issues: string[] = []
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        progress(operationId, stage, `Серверний сценарій завершено. Повторюємо лише перевірку стану (${attempt + 1}/3).`, emit)
+        await (adapters.wait ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))))(attempt * 1_000)
+      }
+      try { finalState = await adapters.inspect(); issues = installationVerificationIssues(finalState) }
+      catch { finalState = undefined; issues = ['Додаткова діагностика середовища тимчасово недоступна.'] }
+      if (issues.length === 0) break
+    }
+    if (issues.length || !finalState?.configuration?.serverVersion || !finalState.configuration.apiAddress) {
+      emit({ operationId, stage, status: 'verification-required', errorCode: 'INSTALLATION_VERIFY_PENDING', message: `Серверний сценарій встановлення завершено. Додаткове підтвердження не отримано: ${issues.join(' ')} Повторіть перевірку стану. Повторно встановлювати або ініціалізувати сервер не потрібно.` })
+      return
     }
     stage = 'complete'
     emit({ operationId, stage, status: 'succeeded', message: 'Сервер встановлено; Windows Service працює, API доступний.', result: { service: 'running', api: 'available', serverVersion: finalState.configuration.serverVersion, apiAddress: finalState.configuration.apiAddress } })

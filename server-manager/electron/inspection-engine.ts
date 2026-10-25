@@ -4,7 +4,7 @@ import type { CheckStatus, InspectionDiagnostic, InspectionCheck, InspectionSnap
 
 export const HROMADAAID_SERVICE_NAME = 'HromadaAIDApi'
 export const INSPECTION_TIMEOUT_MS = 4_000
-export type ServiceMetadata = { installed: boolean; state?: string; startMode?: string; startName?: string; binaryPath?: string; error?: 'access_denied' | 'query_failed' }
+export type ServiceMetadata = { installed: boolean; state?: string; startMode?: string; startName?: string; binaryPath?: string; metadataUnavailable?: boolean; error?: 'access_denied' | 'query_failed'; diagnostics?: InspectionDiagnostic[] }
 export type InstallationLocator =
   | { status: 'missing' | 'invalid' | 'access_denied' | 'query_failed'; diagnostic?: InspectionDiagnostic }
   | { status: 'available'; programDirectory: string; dataDirectory: string; backupDirectory: string; writableByUnprivileged: boolean }
@@ -101,6 +101,7 @@ export function inspectionDiagnostic(operation: string, target: string, error: u
   const message = ['ENOENT', 'ENOTDIR'].includes(code) ? 'Файл або каталог відсутній.'
     : ['EACCES', 'EPERM', '5', '0x80070005'].includes(code) ? 'Система відмовила в доступі.'
     : code === 'SERVER_PACKAGE_INVALID' ? 'Пакет не пройшов перевірку структури або цілісності.'
+    : operation.startsWith('service.') ? (code === 'ETIMEDOUT' ? 'Перевищено час опитування Windows Service.' : 'Не вдалося прочитати стан або додаткові метадані Windows Service.')
     : operation.startsWith('registry.') ? 'Не вдалося прочитати або перевірити реєстрові метадані.'
     : 'Операція перевірки файлових метаданих завершилася помилкою.'
   return { operation, target, code, message }
@@ -123,7 +124,7 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
   }
   let service: ServiceMetadata
   try { service = await adapters.queryService(HROMADAAID_SERVICE_NAME) }
-  catch { service = { installed: false, error: 'query_failed' } }
+  catch (error) { service = { installed: false, error: 'query_failed', diagnostics: [inspectionDiagnostic('service.query', HROMADAAID_SERVICE_NAME, error)] } }
 
   let serviceStatus: ServiceStatus = 'unknown'
   let serviceMessage = 'Не вдалося перевірити Windows Service.'
@@ -154,7 +155,8 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
   } else {
     discovery = { source: 'windows_service', confidence: 'corroborated', message: 'Шлях отримано з конфігурації Windows Service.' }
     serviceStatus = service.state?.toLowerCase() === 'running' ? 'running' : service.state?.toLowerCase() === 'stopped' ? 'stopped' : 'other'
-    serviceMessage = serviceStatus === 'running' ? 'Служба працює.' : serviceStatus === 'stopped' ? 'Службу зупинено.' : `Проміжний стан служби: ${service.state ?? 'невідомий'}.`
+    const transitions: Record<string, string> = { startpending: 'Служба запускається.', stoppending: 'Служба зупиняється.', continuepending: 'Служба відновлює роботу.', pausepending: 'Служба призупиняється.', paused: 'Службу призупинено.' }
+    serviceMessage = serviceStatus === 'running' ? 'Служба працює.' : serviceStatus === 'stopped' ? 'Службу зупинено.' : transitions[service.state?.toLowerCase() ?? ''] ?? 'SCM повідомив проміжний стан служби.'
     configuration.serviceAccount = service.startName ?? null
     configuration.startMode = service.startMode ?? null
     checks.push(check('service', 'Windows Service', serviceStatus === 'running' ? 'passed' : 'warning', time, serviceMessage, `name=${HROMADAAID_SERVICE_NAME}; state=${service.state ?? 'unknown'}`))
@@ -180,13 +182,21 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
         configState = componentError(error)
         configurationDiagnostics.push(inspectionDiagnostic('metadata.read', win32.join(serviceDirectory, 'HromadaAIDService.xml'), error))
       }
-    } else configState = 'invalid'
+    } else if (!service.metadataUnavailable) configState = 'invalid'
+  }
+  if (service.diagnostics?.length) {
+    const serviceCheck = checks.find(item => item.id === 'service')!
+    serviceCheck.diagnostics = service.diagnostics
+    if (service.metadataUnavailable) {
+      serviceCheck.status = 'warning'
+      serviceCheck.message += ' Додаткові метадані служби недоступні; каталоги перевіряються окремо.'
+    }
   }
 
   // NSIS already writes non-secret install paths to HKLM. Treat them as a
   // locator, never as proof: validate the shape, assess key write ACLs, then
   // corroborate paths with expected package/config files.
-  if (!service.installed) {
+  if (!service.installed || service.metadataUnavailable) {
     let locator: InstallationLocator
     try { locator = await adapters.readInstallationLocator() }
     catch (error) { locator = { status: 'query_failed', diagnostic: inspectionDiagnostic('registry.query', 'HKLM\\Software\\HromadaAID\\Installer', error) } }
@@ -235,7 +245,7 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
             configuration.backupDirectory = locator.backupDirectory
             configPath = configPresent ? candidateConfig : null
             if (!configPresent) configState = 'missing'
-            if (!service.error) {
+            if (!service.installed && !service.error) {
               serviceStatus = 'missing'
               serviceMessage = 'Метадані інсталятора вказують на серверні компоненти, але службу не зареєстровано.'
             }
@@ -260,7 +270,7 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
 
   // Older installs without the existing HKLM locator can only be discovered
   // in these documented default locations; no drive scan is performed.
-  if (!service.installed && !locatorEvidence && !locatorUntrusted && locatorStatus !== 'invalid' && adapters.programFiles && adapters.programData) {
+  if ((!service.installed || service.metadataUnavailable) && !locatorEvidence && !locatorUntrusted && locatorStatus !== 'invalid' && adapters.programFiles && adapters.programData) {
     const defaultProgram = win32.join(adapters.programFiles, 'HromadaAID')
     const defaultServer = win32.join(defaultProgram, 'Server')
     const defaultStage = win32.join(defaultProgram, 'Server.next')
@@ -289,7 +299,7 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
         configuration.dataDirectory = defaultData
         configuration.backupDirectory = win32.join(adapters.programData, 'HromadaAID', 'Backups')
         configState = configPath ? 'ok' : 'missing'
-        if (!service.error) {
+        if (!service.installed && !service.error) {
           serviceStatus = 'missing'
           serviceMessage = 'Компоненти сервера виявлено, але Windows Service не зареєстровано.'
         }
@@ -299,8 +309,8 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
   }
 
   if (service.error && discovery.source === 'unknown') discovery = { source: 'unknown', confidence: 'unavailable', message: 'Installation Discovery обмежено помилкою опитування диспетчера служб.' }
-  else if (service.installed && packageRoot) discovery = { source: 'windows_service', confidence: configPath && configState === 'ok' ? 'confirmed' : 'corroborated', message: configPath && configState === 'ok' ? 'Шляхи підтверджено SCM, WinSW XML і server.json.' : 'Шлях отримано з SCM; частину компонентів ще не підтверджено.' }
-  else if (service.installed && discovery.source !== 'windows_service') discovery = { source: 'windows_service', confidence: 'corroborated', message: 'Windows SCM підтверджує зареєстровану службу.' }
+  else if (service.installed && !service.metadataUnavailable && packageRoot) discovery = { source: 'windows_service', confidence: configPath && configState === 'ok' ? 'confirmed' : 'corroborated', message: configPath && configState === 'ok' ? 'Шляхи підтверджено SCM, WinSW XML і server.json.' : 'Шлях отримано з SCM; частину компонентів ще не підтверджено.' }
+  else if (service.installed && !service.metadataUnavailable && discovery.source !== 'windows_service') discovery = { source: 'windows_service', confidence: 'corroborated', message: 'Windows SCM підтверджує зареєстровану службу.' }
 
   if (configPath) {
     try {
@@ -364,6 +374,9 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
   if (service.error) {
     installationStatus = 'unknown'
     installationMessage = 'Стан інсталяції невідомий через помилку опитування Windows Service.'
+  } else if (service.metadataUnavailable) {
+    installationStatus = 'unknown'
+    installationMessage = 'Стан служби отримано з SCM, але її зв’язок із серверним пакетом і конфігурацією ще не підтверджено.'
   } else if (!service.installed && (defaultDiscoveryFailed || locatorError)) {
     installationStatus = 'unknown'
     installationMessage = discoveryDiagnostics.some(item => ['EACCES', 'EPERM', '5', '0x80070005'].includes(item.code))
@@ -392,7 +405,7 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
     installationMessage = 'Виявлено неповний або неузгоджений комплект серверних компонентів.'
   }
 
-  if (service.installed) {
+  if (service.installed && !service.metadataUnavailable) {
     const confirmed = installationStatus === 'installed'
     discovery = {
       source: 'windows_service',
@@ -413,9 +426,10 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
   if (discoveryDiagnostics.length) checks[checks.length - 1].diagnostics = discoveryDiagnostics
 
   let api: InspectionSnapshot['api'] = { status: 'not_configured', message: 'API не перевірено: сумісну конфігурацію не визначено.', contractVersion: null }
-  // Only probe the configured API when SCM confirms the service installation.
-  // A registry locator is advisory and may point at a user-controlled config.
-  if (config && service.installed) {
+  // A protected, corroborated locator can authorize this read-only probe when
+  // SCM is unavailable. It never supplies or implies the service state.
+  const independentlyLocated = discovery.confidence === 'corroborated' && ['installer_registry', 'standard_locations'].includes(discovery.source) && !locatorError && !locatorUntrusted && !defaultDiscoveryFailed
+  if (config && (service.installed || (service.error && independentlyLocated))) {
     try {
       const response = await adapters.probeApi(healthUrl(config), INSPECTION_TIMEOUT_MS)
       if (response.kind === 'timeout') api = { status: 'unavailable', message: 'API не відповів у межах тайм-ауту.', contractVersion: null }
