@@ -1,0 +1,67 @@
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { Check, CircleAlert, Download, FolderOpen, HardDrive, LoaderCircle, LogIn, Plus, RefreshCw, RotateCcw, ShieldCheck, Upload } from 'lucide-react'
+import type { InspectionSnapshot } from '../electron/inspection-types'
+import type { BackupArchive, ServerBackupList } from '../electron/backup-contract'
+import Alert from '../../src/components/Alert'
+
+type User = { username: string; displayName: string | null }
+type Imported = { id: string; fileName: string; createdAt: string | null; size: number }
+type Progress = { stage: string; message: string }
+const stageLabels: Record<string, string> = { verify: 'Перевірка архіву', confirm: 'Підготовка відновлення', stop: 'Зупинка сервера', restore: 'Відновлення бази', start: 'Запуск сервера', health: 'Перевірка API', complete: 'Завершено' }
+const date = (value: string | null | undefined) => value ? new Date(value).toLocaleString('uk-UA') : 'Не визначено'
+const size = (value: number) => value < 1024 ** 2 ? `${(value / 1024).toFixed(0)} КіБ` : `${(value / 1024 ** 2).toFixed(1)} МіБ`
+
+export default function BackupManagement({ inspection, onBusyChange }: { inspection: InspectionSnapshot | null; onBusyChange: (busy: boolean) => void }) {
+  const [user, setUser] = useState<User | null>(null), [list, setList] = useState<ServerBackupList | null>(null)
+  const [imports, setImports] = useState<Imported[]>([]), [login, setLogin] = useState({ username: '', password: '' })
+  const [key, setKey] = useState(''), [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('')
+  const [offlineMode, setOfflineMode] = useState(false)
+  const [progress, setProgress] = useState<Progress | null>(null), [restore, setRestore] = useState<{ id: string; name: string; createdAt: string | null } | null>(null)
+  const api = window.hromadaManager
+  const setOperationBusy = (value: boolean) => { setBusy(value); onBusyChange(value) }
+  const archives = useMemo(() => list?.archives ?? [], [list])
+  const refresh = useCallback(async () => { setOperationBusy(true); setError(''); try { setList(await api.backupList()) } catch (e) { setError(e instanceof Error ? e.message : 'Не вдалося завантажити архіви.') } finally { setOperationBusy(false) } }, [api])
+  useEffect(() => { let active = true; void api.backupSession().then(value => { if (!active) return; setUser(value); if (value) void api.backupList().then(setList).catch(e => setError(e instanceof Error ? e.message : 'Не вдалося завантажити архіви.')) }); const unsubscribe = api.onBackupProgress(setProgress); return () => { active = false; unsubscribe() } }, [api])
+
+  const signIn = async (event: FormEvent) => { event.preventDefault(); if (busy) return; setOperationBusy(true); setError(''); setMessage('')
+    try { const result = await api.backupLogin(login.username, login.password); setLogin(current => ({ ...current, password: '' })); setOfflineMode(false); setUser(result); setList(await api.backupList()); setMessage(`Вхід виконано: ${result.displayName || result.username}.`) }
+    catch (e) { setError(e instanceof Error ? e.message : 'Не вдалося увійти до сервера.') } finally { setOperationBusy(false) }
+  }
+  const signOut = async () => { setOperationBusy(true); try { await api.backupLogout() } finally { setUser(null); setList(null); setImports([]); setOperationBusy(false) } }
+  const create = async () => { if (busy) return; setOperationBusy(true); setError(''); setMessage('Створюється та перевіряється SQLite-знімок…'); try { setList(await api.backupCreate()); setMessage('Перевірений зашифрований архів створено.') } catch (e) { setError(e instanceof Error ? e.message : 'Не вдалося створити архів.'); setMessage('') } finally { setOperationBusy(false) } }
+  const importArchive = async () => { if (busy) return; setOperationBusy(true); setError(''); setMessage('Перевіряється формат, ключ і цілісність архіву…'); try { const imported = await api.backupImport(key || undefined); if (imported) { setImports(current => [imported, ...current.filter(item => item.id !== imported.id)]); setMessage(`Архів ${imported.fileName} перевірено. Він готовий до окремого підтвердження відновлення.`) } } catch (e) { setError(e instanceof Error ? e.message : 'Архів не пройшов перевірку.'); setMessage('') } finally { setOperationBusy(false) } }
+  const verify = async (id: string, name: string, createdAt: string | null) => { if (busy) return; setOperationBusy(true); setError(''); setMessage(''); try { const result = await api.backupVerify(id, key || undefined); setRestore({ id, name, createdAt: result.createdAt ?? createdAt }); setMessage('Архів і база SQLite перевірені. Перегляньте попередження перед підтвердженням.') } catch (e) { setError(e instanceof Error ? e.message : 'Перевірка архіву не пройшла.') } finally { setOperationBusy(false) } }
+  const startRestore = async () => { if (!restore || busy) return; setOperationBusy(true); setError(''); setMessage(''); try { const result = await api.backupRestore(restore.id, true, key || undefined); if (!result.success) throw new Error(result.message); setMessage(result.message); setRestore(null); setImports(current => current.filter(item => item.id !== restore.id)); if (user) await api.backupLogout().catch(() => undefined); setUser(null); setList(null) } catch (e) { setError(e instanceof Error ? e.message : 'Відновлення не завершено. Перевірте діагностику та журнал відновлення.') } finally { setOperationBusy(false); setProgress(null) } }
+  const exportArchive = async (item: BackupArchive) => { if (busy) return; setOperationBusy(true); setError(''); setMessage(''); try { const result = await api.backupExport(item.id); if (!result.canceled) setMessage(result.message ?? 'Архів експортовано.') } catch (e) { setError(e instanceof Error ? e.message : 'Не вдалося експортувати архів.') } finally { setOperationBusy(false) } }
+
+  if (!user && !offlineMode) return <section className="dashboard-panel sm-backup-login" aria-labelledby="backup-login-title">
+    <div className="settings-card-heading"><span className="settings-icon"><ShieldCheck size={20}/></span><div><h2 id="backup-login-title">Вхід адміністратора</h2><p>Для керування копіями потрібен обліковий запис із правом «Керування резервними копіями».</p></div></div>
+    {error && <Alert variant="error">{error}</Alert>}
+    <form onSubmit={event => void signIn(event)} className="sm-backup-login-form"><label>Логін<input autoComplete="username" value={login.username} onChange={event => setLogin(current => ({ ...current, username: event.target.value }))} required disabled={busy}/></label><label>Пароль<input type="password" autoComplete="current-password" value={login.password} onChange={event => setLogin(current => ({ ...current, password: event.target.value }))} required disabled={busy}/></label><button className="primary-button" type="submit" disabled={busy}><LogIn size={16}/>{busy ? 'Вхід…' : 'Увійти'}</button></form>
+    <p className="sm-muted">Токен зберігається лише в пам’яті Server Manager і не записується на диск.</p>
+    <button className="secondary-button" type="button" disabled={busy} onClick={() => { setOfflineMode(true); setError(''); setMessage('Offline-відновлення доступне для локального адміністратора Windows. Доступ до серверних HTTP-операцій не надається.') }}>Аварійне відновлення без API</button>
+  </section>
+
+  return <div className="sm-backups">
+    {offlineMode && <Alert variant="warning">API недоступний. Дозволено лише локально перевірити імпортований архів і виконати offline-відновлення через штатний серверний CLI після явного підтвердження.</Alert>}
+    <div className="sm-backup-toolbar"><div className="sm-backup-user"><ShieldCheck size={17}/><span>{user ? (user.displayName || user.username) : 'Локальне аварійне відновлення'}</span>{user ? <button className="sm-link" type="button" onClick={() => void signOut()} disabled={busy}>Вийти</button> : <button className="sm-link" type="button" onClick={() => setOfflineMode(false)}>До входу</button>}</div><div className="sm-backup-actions"><button className="secondary-button" type="button" onClick={() => void importArchive()} disabled={busy}><Upload size={16}/>Імпортувати архів</button>{!offlineMode && <button className="primary-button" type="button" onClick={() => void create()} disabled={busy || inspection?.service.status !== 'running'}><Plus size={17}/>{busy ? 'Виконується…' : 'Створити копію'}</button>}</div></div>
+    {(error || message) && <p className={`sm-local-notice sm-local-notice-${error ? 'error' : 'success'}`} role={error ? 'alert' : 'status'}>{error || message}</p>}
+    {progress && <div className="sm-backup-progress" role="status"><LoaderCircle size={17} aria-hidden="true"/><span><strong>{stageLabels[progress.stage] ?? 'Операція'}</strong>{progress.message}</span></div>}
+    <div className="sm-backup-summary">
+      <article><span>Остання копія</span><strong>{date(archives[0]?.createdAt)}</strong><small>{archives[0]?.kind === 'manual' ? 'Ручна' : archives[0] ? 'Автоматична' : 'Архівів ще немає'}</small></article>
+      <article><span>Автоматичне резервування</span><strong>Щодня о 12:00</strong><small>14 останніх автоматичних копій · час сервера</small></article>
+      <article><span>Збережено архівів</span><strong>{offlineMode ? '—' : list ? archives.length : '—'}</strong><small>{offlineMode ? 'Підключіться до API для переліку' : 'Ручні копії не видаляються ротацією'}</small></article>
+      <article className="sm-backup-path"><span>Каталог сервера</span><strong title={inspection?.configuration.backupDirectory ?? ''}>{inspection?.configuration.backupDirectory ?? 'Не визначено'}</strong><button className="sm-link" type="button" onClick={() => void api.backupOpenFolder().catch(e => setError(e.message))}><FolderOpen size={15}/>Відкрити каталог</button></article>
+    </div>
+    <section className="dashboard-panel sm-backup-panel">
+      <header className="sm-backup-panel-heading"><div><h2><HardDrive size={20}/>{offlineMode ? 'Імпортований архів' : 'Архіви сервера'}</h2><p>{offlineMode ? 'Для відновлення без API виберіть зашифрований .hraid із доступного носія.' : list?.schedule ?? 'Перелік зашифрованих серверних архівів.'}</p></div>{!offlineMode && <button className="secondary-button" type="button" disabled={busy} onClick={() => void refresh()}><RefreshCw size={16} className={busy ? 'sm-service-spinner' : ''}/>Оновити</button>}</header>
+      <label className="sm-backup-key">Аварійний ключ (за потреби)<input type="password" autoComplete="off" value={key} onChange={event => setKey(event.target.value)} placeholder="Залиште порожнім для ключа сервера" disabled={busy}/><small>Ключ використовується лише в пам’яті для перевірки або відновлення вибраного архіву.</small></label>
+      <div className="sm-table-wrap"><table className="sm-backup-table"><thead><tr><th>Створено</th><th>Тип</th><th>Розмір</th><th>Стан</th><th>Дії</th></tr></thead><tbody>
+        {!offlineMode && archives.map(item => <tr key={item.id}><td><time dateTime={item.createdAt}>{date(item.createdAt)}</time><small>{item.fileName}</small></td><td>{item.kind === 'manual' ? 'Ручна' : 'Автоматична'}</td><td>{size(item.size)}</td><td><span className="sm-backup-verified"><Check size={14}/>{item.integrity === 'verified' ? 'Перевірена' : 'Доступна'}</span></td><td><div className="sm-backup-row-actions"><button type="button" disabled={busy} onClick={() => void verify(item.id, item.fileName, item.createdAt)}>Перевірити / відновити</button><button type="button" disabled={busy} onClick={() => void exportArchive(item)}><Download size={14}/>Експорт</button></div></td></tr>)}
+        {imports.map(item => <tr key={item.id}><td><time>{date(item.createdAt)}</time><small>{item.fileName}</small></td><td>Імпортована</td><td>{size(item.size)}</td><td><span className="sm-backup-verified"><Check size={14}/>Перевірена</span></td><td><div className="sm-backup-row-actions"><button type="button" disabled={busy} onClick={() => setRestore({ id: item.id, name: item.fileName, createdAt: item.createdAt })}><RotateCcw size={14}/>Відновити</button></div></td></tr>)}
+        {(offlineMode ? imports.length === 0 : archives.length === 0 && imports.length === 0) && <tr><td colSpan={5} className="sm-empty">{busy ? 'Завантаження переліку…' : offlineMode ? 'Імпортований архів ще не вибрано.' : 'Резервних копій не знайдено. Створіть копію або імпортуйте архів.'}</td></tr>}
+      </tbody></table></div>
+    </section>
+    {restore && <div className="sm-backup-modal-backdrop"><section className="dashboard-panel sm-backup-confirm" role="dialog" aria-modal="true" aria-labelledby="restore-confirm-title"><h2 id="restore-confirm-title"><CircleAlert size={21}/>Відновлення бази даних</h2><p>Поточні дані сервера буде замінено даними з резервної копії <strong>{restore.name}</strong>. Дата копії: {date(restore.createdAt)}.</p><p>Під час відновлення сервер буде тимчасово недоступний. Перед заміною буде створено страхову копію, а перевірка SQLite і журнал відновлення виконуватимуться штатним серверним механізмом.</p><div className="sm-backup-confirm-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setRestore(null)}>Скасувати</button><button className="danger-button" type="button" disabled={busy} onClick={() => void startRestore()}><RotateCcw size={16}/>{busy ? 'Відновлення…' : 'Розпочати відновлення'}</button></div></section></div>}
+  </div>
+}

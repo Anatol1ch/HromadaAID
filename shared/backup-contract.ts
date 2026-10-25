@@ -3,15 +3,6 @@ export type RestorePreview = { id: string; confirmationToken: string; createdAt:
 export type ServerBackupList = { archives: BackupArchive[]; schedule: string }
 export function isServerBackupList(value: unknown): value is ServerBackupList { const v = value as ServerBackupList; return !!v && typeof v.schedule === 'string' && Array.isArray(v.archives) && v.archives.every(isBackupArchive) }
 export function isRestorePreview(value: unknown): value is RestorePreview { const v = value as RestorePreview; return !!v && typeof v.id === 'string' && typeof v.confirmationToken === 'string' && (v.createdAt === null || typeof v.createdAt === 'string') && typeof v.expiresAt === 'string' && typeof v.message === 'string' }
-export type BackupInstallation = { id: string; computerName: string; allowed: boolean; lastSeenAt: string; lastBackupAt: string | null; updatedAt: string }
-export type ClientBackupState = { status: 'signed-out' | 'checking' | 'disabled' | 'enabled' | 'error'; lastBackupAt?: string; message?: string }
-export type BackupActionResult = { ok: boolean; message?: string }
-export function isBackupInstallation(value: unknown): value is BackupInstallation {
-  if (!value || typeof value !== 'object') return false
-  const v = value as Record<string, unknown>
-  return typeof v.id === 'string' && typeof v.computerName === 'string' && typeof v.allowed === 'boolean' && typeof v.lastSeenAt === 'string' && (v.lastBackupAt === null || typeof v.lastBackupAt === 'string') && typeof v.updatedAt === 'string'
-}
-export function isBackupInstallationList(value: unknown): value is BackupInstallation[] { return Array.isArray(value) && value.every(isBackupInstallation) }
 export function isBackupArchive(value: unknown): value is BackupArchive {
   if (!value || typeof value !== 'object') return false
   const v = value as Record<string, unknown>

@@ -43,16 +43,17 @@ test('batch actions render after the register table and preserve the selection s
   assert.match(aidRegistry, /Скасувати вибір/)
 })
 
-test('login connection configuration remains available and the restore UI distinguishes preparation from completion', async () => {
+test('login connection configuration remains available and Server Manager owns the restore UI', async () => {
   assert.match(login, /className="auth-connection-link"/)
-  const serverPanel = await readFile(new URL('../src/ServerBackupPanel.tsx', import.meta.url), 'utf8')
-  assert.match(serverPanel, /Підготовка відновлення не означає, що дані вже відновлено/)
-  assert.match(serverPanel, /Для адміністратора сервера[\s\S]*pnpm server:backup-restore/)
+  const manager = await readFile(new URL('../server-manager/src/BackupManagement.tsx', import.meta.url), 'utf8')
+  assert.match(manager, /Під час відновлення сервер буде тимчасово недоступний/)
+  assert.match(manager, /Розпочати відновлення/)
 })
 
-test('settings navigation remains full width with About after backup', async () => {
+test('settings navigation remains full width and Client excludes backup administration', async () => {
   const settings = await readFile(new URL('../src/SettingsPage.tsx', import.meta.url), 'utf8')
-  const labels = ['Мій обліковий запис', 'Підключення до сервера', 'Резервне копіювання', 'Про програму'].map(value => settings.indexOf(value))
+  const labels = ['Мій обліковий запис', 'Підключення до сервера', 'Про програму'].map(value => settings.indexOf(value))
+  assert.doesNotMatch(settings, /Резервне копіювання/)
   assert.deepEqual(labels, [...labels].sort((a, b) => a - b))
   const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
   assert.match(styles, /\.settings-section-nav \{ width: 100%/)

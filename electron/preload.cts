@@ -2,19 +2,6 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { HromadaAidApi } from './api-contract.js'
 
 const api: HromadaAidApi = {
-  backups: {
-    listServer: () => invoke('backups:list-server'),
-    createServer: () => invoke('backups:create-server'),
-    downloadServer: id => invoke('backups:download-server', id),
-    prepareServerRestore: id => invoke('backups:prepare-server-restore', id),
-    prepareFileRestore: () => invoke('backups:prepare-file-restore'),
-    confirmRestore: (id, confirmationToken) => invoke('backups:confirm-restore', id, confirmationToken),
-    getState: () => invoke('backups:get-state'),
-    refresh: () => invoke('backups:refresh'),
-    openFolder: () => invoke('backups:open-folder'),
-    listComputers: () => invoke('backups:list-computers'),
-    setAllowed: (id, allowed, expectedUpdatedAt) => invoke('backups:set-allowed', id, allowed, expectedUpdatedAt),
-  },
   appName: 'HromadaAid',
   platform: process.platform,
   appInfo: {

@@ -4,6 +4,7 @@ export const sections = [
   { id: 'overview', label: 'Огляд' },
   { id: 'configuration', label: 'Конфігурація' },
   { id: 'diagnostics', label: 'Діагностика' },
+  { id: 'backups', label: 'Резервне копіювання' },
   { id: 'updates', label: 'Оновлення' },
 ] as const
 export type Section = typeof sections[number]['id']

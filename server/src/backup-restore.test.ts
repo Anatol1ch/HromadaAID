@@ -83,7 +83,7 @@ test('a daily backup retries when manual creation holds the shared lock', async 
 })
 
 test('real HTTP admin operations, authorization, streaming upload/download, damage and incompatible schema', async () => {
-  const f = await fixture(), app = createApp(f.db, f.archives, f.admin)
+  const f = await fixture(), app = createApp(f.db, f.admin)
   let holdHealth = false, arrived = () => {}, unblock = () => {}
   const started = new Promise<void>(resolve => { arrived = resolve })
   const barrier = new Promise<void>(resolve => { unblock = resolve })
@@ -114,20 +114,29 @@ test('real HTTP admin operations, authorization, streaming upload/download, dama
     assert.equal(list.archives.length, 1)
     assert.equal((await http.getJson('/api/backups/server', isServerBackupList)).archives.length, 1)
     const item = list.archives[0], downloaded = join(f.root, 'download.hraid')
-    await http.downloadBackup(`/api/backups/server/${item.id}/download`, downloaded, item, {}, new AbortController().signal)
+    const downloadResponse = await fetch(`${origin}/api/backups/server/${item.id}/download`, { headers: { authorization: `Bearer ${token}` } })
+    assert.equal(downloadResponse.status, 200); await writeFile(downloaded, Buffer.from(await downloadResponse.arrayBuffer()))
     assert.equal((await hashFile(downloaded)).sha256, item.sha256)
-    assert.equal((await http.getJson('/api/backups/archives', (v): v is unknown[] => Array.isArray(v)).catch(() => null)), null, 'admin without device credentials cannot use distribution API')
-    const preview = await http.uploadBackup(downloaded, isRestorePreview)
+    assert.equal((await fetch(`${origin}/api/backups/archives`, { headers: { authorization: `Bearer ${token}` } })).status, 404, 'legacy client replication route is removed')
+    assert.equal((await fetch(`${origin}/api/backup-clients`, { headers: { authorization: `Bearer ${token}` } })).status, 404, 'legacy replication administration route is removed')
+    const upload = async (file: string) => {
+      const response = await fetch(`${origin}/api/backups/restore/upload`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream' }, body: await readFile(file) })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const result = await response.json()
+      assert.ok(isRestorePreview(result))
+      return result
+    }
+    const preview = await upload(downloaded)
     assert.ok(preview.id)
     assert.ok((await http.postJson(`/api/backups/server/${item.id}/prepare`, {}, isRestorePreview)).id)
     const damaged = await readFile(downloaded); damaged[damaged.length - 1] ^= 1
     const damagedPath = join(f.root, 'damaged.hraid'); await writeFile(damagedPath, damaged)
-    await assert.rejects(http.uploadBackup(damagedPath, isRestorePreview))
+    await assert.rejects(upload(damagedPath))
     const alien = join(f.root, 'alien-test.sqlite'), alienDb = new DatabaseSync(alien)
     alienDb.exec('CREATE TABLE alien(value TEXT)'); alienDb.close()
     const incompatible = join(f.root, 'alien.hraid')
     await encryptBackupFile(alien, incompatible, f.key.bytes, { id: 'b'.repeat(64), createdAt: now, sourceSha256: (await hashFile(alien)).sha256 })
-    await assert.rejects(http.uploadBackup(incompatible, isRestorePreview))
+    await assert.rejects(upload(incompatible))
     await assert.rejects(http.postJson('/api/backups/restore/confirm', { id: preview.id, confirmationToken: 'x'.repeat(43) }))
     assert.equal(f.admin.maintenance, false)
     assert.throws(() => acquireDatabaseOwnership(f.path))

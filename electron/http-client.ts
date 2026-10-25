@@ -1,6 +1,3 @@
-import type { BackupArchive } from '../shared/backup-contract.js'
-import { saveBackupResponse } from './backup-download.js'
-import { closeSync, createReadStream, openSync, readSync, statSync } from 'node:fs'
 import { classifyHttpReachability, isMaintenanceResponse, type ConnectionFailureReason, type ConnectionStatus } from '../shared/system-state.js'
 import { safeTransportErrorMessage } from './runtime-config.js'
 
@@ -26,53 +23,6 @@ export class HttpClient {
   private configuredBaseUrl(): URL {
     if (!this.baseUrl) throw new HttpClientError('Налаштуйте адресу сервера перед входом.')
     return this.baseUrl
-  }
-
-  async downloadBackup(path: string, target: string, archive: BackupArchive, headers: Record<string, string>, signal: AbortSignal): Promise<void> {
-    const baseUrl = this.configuredBaseUrl()
-    if (baseUrl.protocol !== 'https:' && !(baseUrl.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(baseUrl.hostname))) throw new HttpClientError('Для передавання резервних копій потрібен HTTPS.')
-    if (!/^\/api\/backups\/(?:archives\/[a-f0-9]{64}|server\/[a-f0-9]{64}\/download)$/.test(path)) throw new HttpClientError('Некоректний шлях резервного архіву.')
-    const generation = this.generation, token = this.options.getAccessToken?.()
-    if (!token) throw new HttpClientError('Потрібна чинна сесія.', 401)
-    const current = () => { this.checkConnectionGeneration(generation); this.checkRequestSession(true, token) }
-    let response: Response
-    try { response = await fetch(new URL(path, baseUrl), { redirect: 'error', headers: { ...headers, authorization: `Bearer ${token}` }, signal: AbortSignal.any([signal, AbortSignal.timeout(300_000)]) }) }
-    catch (error) { const timedOut = error instanceof DOMException && error.name === 'TimeoutError'; const message = safeTransportErrorMessage(error, timedOut) ?? 'Не вдалося підключитися до сервера.'; this.options.onConnectionStatus?.('unavailable', timedOut ? 'timeout' : message !== 'Не вдалося підключитися до сервера.' ? 'incompatible' : 'network'); throw new HttpClientError(message) }
-    current()
-    const responseBody = await response.clone().json().catch(() => undefined)
-    this.options.onConnectionStatus?.(classifyHttpReachability(response.status, responseBody))
-    if (response.status === 401) this.options.onUnauthorized?.(token)
-    if (!response.ok) { await response.body?.cancel(); throw new HttpClientError(response.status === 403 ? 'Резервування для цього комп’ютера вимкнено.' : `Не вдалося завантажити резервну копію (HTTP ${response.status}).`, response.status) }
-    await saveBackupResponse(response, target, archive, current, signal)
-  }
-
-  async uploadBackup<T>(file: string, validator: JsonValidator<T>): Promise<T> {
-    const baseUrl = this.configuredBaseUrl()
-    if (!file.toLowerCase().endsWith('.hraid')) throw new HttpClientError('Оберіть зашифрований архів .hraid.')
-    if (baseUrl.protocol !== 'https:' && !(baseUrl.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(baseUrl.hostname))) throw new HttpClientError('Для передавання резервних копій потрібен HTTPS.')
-    const size = statSync(file).size
-    if (size > 2 * 1024 * 1024 * 1024 || size < 29) throw new HttpClientError('Розмір архіву має бути не більше 2 ГіБ.')
-    const fd = openSync(file, 'r'), prefix = Buffer.alloc(9)
-    try { if (readSync(fd, prefix, 0, 9, 0) !== 9 || prefix.subarray(0, 8).toString('ascii') !== 'HRAIDBKP' || ![1, 2].includes(prefix[8])) throw new HttpClientError('Файл не є підтримуваним зашифрованим архівом.') } finally { closeSync(fd) }
-    const generation = this.generation, token = this.options.getAccessToken?.()
-    if (!token) throw new HttpClientError('Потрібна чинна сесія.', 401)
-    const stream = createReadStream(file)
-    try {
-      const init = { method: 'POST', redirect: 'error' as const, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream', 'content-length': String(size) }, body: stream, duplex: 'half', signal: AbortSignal.timeout(300_000) }
-      let response: Response
-      try { response = await fetch(new URL('/api/backups/restore/upload', baseUrl), init as unknown as RequestInit) }
-      catch (error) { const timedOut = error instanceof DOMException && error.name === 'TimeoutError'; this.options.onConnectionStatus?.('unavailable', timedOut ? 'timeout' : 'network'); throw new HttpClientError(timedOut ? 'Сервер не відповів у встановлений час.' : 'Не вдалося підключитися до сервера.') }
-      this.checkConnectionGeneration(generation)
-      const responseBody = await response.clone().json().catch(() => undefined)
-      this.options.onConnectionStatus?.(classifyHttpReachability(response.status, responseBody))
-      if (response.status === 401) this.options.onUnauthorized?.(token)
-      this.checkRequestSession(true, token)
-      const value: unknown = await response.json()
-      this.checkConnectionGeneration(generation); this.checkRequestSession(true, token)
-      if (!response.ok) throw this.responseError(response.status, value, '/api/backups/restore/upload')
-      if (!validator(value)) throw new HttpClientError('Некоректна відповідь перевірки архіву.')
-      return value
-    } finally { stream.destroy() }
   }
 
   /** Switches the trusted server origin and invalidates responses from the previous connection. */

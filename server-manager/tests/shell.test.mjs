@@ -20,7 +20,7 @@ test('six synthetic scenarios keep service/API independent and provide safe oper
     assert.equal(typeof scenario.operation.retry.reason, 'string')
     assert.equal(scenario.operation.status === 'failed', scenario.operation.errorCode !== null)
   }
-  assert.deepEqual(sections.map(section => section.id), ['overview', 'configuration', 'diagnostics', 'updates'])
+  assert.deepEqual(sections.map(section => section.id), ['overview', 'configuration', 'diagnostics', 'backups', 'updates'])
 })
 
 test('renderer remains isolated and main exposes only narrowly scoped inspection and installation IPC', () => {

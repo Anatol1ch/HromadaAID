@@ -33,7 +33,7 @@ async function serveFixture() {
   const archives = new BackupArchives(config.backupDirectory, () => decodeRecoveryKey(saved.encryptionKey))
   const service = new SqliteBackupService(database, config.backupDirectory, { error: () => {}, warn: () => {} })
   const administration = new BackupAdministration(config.databasePath, archives, service, async () => {})
-  const app = createApp(database, archives, administration)
+  const app = createApp(database, administration)
   app.log.level = 'silent'
   await app.listen({ host: '127.0.0.1', port: 0 })
   const address = app.server.address(); assert.ok(address && typeof address === 'object')
@@ -74,9 +74,12 @@ if (process.argv.includes('--test-server')) {
   test('restore arguments accept the pnpm separator and reject invalid arguments without echoing values', () => {
     const flags = ['--database', 'synthetic-test.sqlite', '--backup-dir', 'synthetic backups']
     assert.deepEqual(parseRestoreArguments(flags), parseRestoreArguments(['--', ...flags]))
+    assert.equal(parseRestoreArguments([...flags, '--archive', 'synthetic.hraid', '--manager-confirmed']).managerConfirmed, true)
+    assert.equal(parseRestoreArguments([...flags, '--archive', 'synthetic.hraid', '--verify-only']).verifyOnly, true)
     for (const args of [[], ['--database'], [...flags, '--unknown', 'synthetic-sensitive-value'], [...flags, '--database', 'again'], [...flags, '--recovery-key']]) {
       assert.throws(() => parseRestoreArguments(args))
     }
+    assert.throws(() => parseRestoreArguments([...flags, '--manager-confirmed']))
     try { parseRestoreArguments([...flags, '--unknown', 'synthetic-sensitive-value']) }
     catch (error) { assert.equal(formatRestoreError(error).includes('synthetic-sensitive-value'), false) }
   })
@@ -101,6 +104,10 @@ if (process.argv.includes('--test-server')) {
       const http = new HttpClient(new URL(server.origin), 30000, { getAccessToken: () => token })
       const list = await http.postJson('/api/backups/server', {}, isServerBackupList)
       const item = list.archives[0]; assert.ok(item)
+      const archivePath = join(directory, item.fileName)
+      const verify = spawnSync(process.execPath, [cli, '--database', database, '--backup-dir', directory, '--archive', archivePath, '--verify-only'], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: 30000 })
+      assert.equal(verify.status, 0, verify.stderr)
+      assert.equal(JSON.parse(verify.stdout).valid, true)
       const preview = await http.postJson(`/api/backups/server/${item.id}/prepare`, {}, isRestorePreview)
       await http.postJson('/api/backups/restore/confirm', { id: preview.id, confirmationToken: preview.confirmationToken })
       assert.equal((await fetch(server.origin + '/health')).status, 503)
@@ -129,6 +136,13 @@ if (process.argv.includes('--test-server')) {
         assert.equal(verified.prepare('PRAGMA foreign_key_check').all().length, 0)
         assert.equal((verified.prepare('SELECT count(*) AS n FROM user_sessions').get() as { n: number }).n, 0)
       } finally { verified.close() }
+      const changedAgain = new DatabaseSync(database)
+      changedAgain.prepare('UPDATE programs SET short_name=? WHERE id=?').run('synthetic second change', program); changedAgain.close()
+      const managerRestore = spawnSync(process.execPath, [cli, '--database', database, '--backup-dir', directory, '--archive', archivePath, '--manager-confirmed'], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: 30000 })
+      assert.equal(managerRestore.status, 0, managerRestore.stderr)
+      assert.match(managerRestore.stdout, /Відновлення завершено/)
+      const managerVerified = new DatabaseSync(database)
+      try { assert.equal((managerVerified.prepare('SELECT short_name FROM programs WHERE id=?').get(program) as { short_name: string }).short_name, original) } finally { managerVerified.close() }
       server = await startServer(database, directory)
       assert.equal((await fetch(server.origin + '/health')).status, 200)
       assert.equal((await fetch(server.origin + '/auth/me', { headers: { authorization: `Bearer ${token}` } })).status, 401)

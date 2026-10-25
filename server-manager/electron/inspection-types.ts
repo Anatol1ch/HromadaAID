@@ -59,6 +59,17 @@ export type ManagerInspectionApi = {
   applyServerUpdate(previewId: string): Promise<import('./server-update-contract.js').ServerUpdateResult>
   cancelServerUpdatePreview(previewId: string): Promise<boolean>
   onServerUpdateProgress(listener: (value: import('./server-update-contract.js').ServerUpdateProgress) => void): () => void
+  backupSession(): Promise<{ username: string; displayName: string | null } | null>
+  backupLogin(username: string, password: string): Promise<{ username: string; displayName: string | null }>
+  backupLogout(): Promise<boolean>
+  backupList(): Promise<import('./backup-contract.js').ServerBackupList>
+  backupCreate(): Promise<import('./backup-contract.js').ServerBackupList>
+  backupExport(id: string): Promise<{ canceled: boolean; message?: string }>
+  backupImport(recoveryKey?: string): Promise<{ id: string; fileName: string; createdAt: string | null; size: number } | null>
+  backupVerify(id: string, recoveryKey?: string): Promise<{ createdAt: string | null; size: number }>
+  backupOpenFolder(): Promise<boolean>
+  backupRestore(id: string, confirmed: true, recoveryKey?: string): Promise<{ success: boolean; message: string }>
+  onBackupProgress(listener: (value: { stage: string; message: string }) => void): () => void
 }
 
 declare global {

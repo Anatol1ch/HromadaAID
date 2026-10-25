@@ -6,7 +6,7 @@ const read = path => readFile(new URL(path, import.meta.url), 'utf8')
 const [app, styles, login, toast, accessDenied, settings, planning, backups, toastHost] = await Promise.all([
   read('../src/App.tsx'), read('../src/styles.css'), read('../src/components/LoginScreen.tsx'),
   read('../src/components/SystemToast.tsx'), read('../src/components/AccessDeniedToast.tsx'),
-  read('../src/SettingsPage.tsx'), read('../src/AnnualPlanning.tsx'), read('../src/ServerBackupPanel.tsx'), read('../src/components/SystemToastHost.tsx'),
+  read('../src/SettingsPage.tsx'), read('../src/AnnualPlanning.tsx'), read('../server-manager/src/BackupManagement.tsx'), read('../src/components/SystemToastHost.tsx'),
 ])
 
 test('login connection action is an accessible icon-only button', () => {
@@ -43,10 +43,11 @@ test('SystemToast keeps the access-denied visual treatment with a short default 
   assert.match(styles, /\.system-toast-access-denied/)
 })
 
-test('settings tabs fill the row proportionally in the required order', () => {
-  const labels = ['Мій обліковий запис', 'Підключення до сервера', 'Резервне копіювання', 'Про програму'].map(value => settings.indexOf(value))
+test('settings tabs fill the row proportionally without backup administration in Client', () => {
+  const labels = ['Мій обліковий запис', 'Підключення до сервера', 'Про програму'].map(value => settings.indexOf(value))
   assert.deepEqual(labels, [...labels].sort((a, b) => a - b))
-  assert.match(styles, /\.settings-section-nav \{[^}]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/)
+  assert.doesNotMatch(settings, /Резервне копіювання/)
+  assert.match(styles, /\.settings-section-nav \{[^}]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/)
   assert.match(styles, /\.settings-section-current \{ display: flex; width: 100%;[^}]*justify-content: center/)
 })
 
@@ -61,10 +62,9 @@ test('planning table constrains numeric columns and preserves a separate actions
   assert.match(styles, /\.planning-table \{ width: 100%; min-width: 680px; table-layout: fixed;/)
 })
 
-test('restore confirmation retains its safeguards without the obsolete preview error block', () => {
-  assert.doesNotMatch(backups, /<Alert variant="error">\{preview\.message\}<\/Alert>/)
-  assert.match(backups, /Дата копії: \{date\(preview\.createdAt\)\}/)
-  assert.match(backups, /Підготовка відновлення не означає, що дані вже відновлено/)
-  assert.match(backups, /checked=\{confirmed\}/)
-  assert.match(backups, /confirmRestore\(preview\.id, preview\.confirmationToken\)/)
+test('Manager restore requires separate verification and explicit confirmation', () => {
+  assert.match(backups, /backupVerify\(id, key \|\| undefined\)/)
+  assert.match(backups, /backupRestore\(restore\.id, true/)
+  assert.match(backups, /Поточні дані сервера буде замінено/)
+  assert.match(backups, /Розпочати відновлення/)
 })

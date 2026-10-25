@@ -33,7 +33,7 @@ export async function startServer(config: ServerConfig | InstalledServerConfig, 
     const logger = { error: (message: string) => app?.log.error(message), warn: (message: string) => app?.log.warn(message) }
     const service = new SqliteBackupService(database, config.backupDirectory, logger, !installed)
     const administration = new BackupAdministration(config.databasePath, archives, service, async () => { await scheduler?.stop() }, !installed)
-    app = createApp(database, archives, administration, https)
+    app = createApp(database, administration, https)
     const shutdown = createGracefulShutdown([
       { name: 'HTTP-запити Fastify', close: () => app?.close() },
       { name: 'планувальник резервування', close: () => scheduler?.stop() },

@@ -12,6 +12,21 @@ contextBridge.exposeInMainWorld('hromadaManager', Object.freeze({
   selectServerUpdatePackage: () => ipcRenderer.invoke('manager:select-server-update-package'),
   applyServerUpdate: previewId => ipcRenderer.invoke('manager:apply-server-update', previewId),
   cancelServerUpdatePreview: previewId => ipcRenderer.invoke('manager:cancel-server-update-preview', previewId),
+  backupSession: () => ipcRenderer.invoke('manager:backup-session'),
+  backupLogin: (username, password) => ipcRenderer.invoke('manager:backup-login', { username, password }),
+  backupLogout: () => ipcRenderer.invoke('manager:backup-logout'),
+  backupList: () => ipcRenderer.invoke('manager:backup-list'),
+  backupCreate: () => ipcRenderer.invoke('manager:backup-create'),
+  backupExport: id => ipcRenderer.invoke('manager:backup-export', id),
+  backupImport: recoveryKey => ipcRenderer.invoke('manager:backup-import', recoveryKey),
+  backupVerify: (id, recoveryKey) => ipcRenderer.invoke('manager:backup-verify', id, recoveryKey),
+  backupOpenFolder: () => ipcRenderer.invoke('manager:backup-open-folder'),
+  backupRestore: (id, confirmed, recoveryKey) => ipcRenderer.invoke('manager:backup-restore', { id, confirmed, recoveryKey }),
+  onBackupProgress: listener => {
+    const handler = (_event, value) => listener(value)
+    ipcRenderer.on('manager:backup-progress', handler)
+    return () => ipcRenderer.removeListener('manager:backup-progress', handler)
+  },
   onInstallationUpdate: listener => {
     const handler = (_event, value) => listener(value)
     ipcRenderer.on('manager:installation-update', handler)
