@@ -4,7 +4,7 @@ import type { AnnualAidPlan, AnnualAidPlanInput } from './api-contract.js'
 
 export function listAnnualPlans(db: DatabaseSync, year: number): AnnualAidPlan[] {
   return db.prepare(`SELECT year,aid_type_id AS aidTypeId,planned_recipient_count AS plannedRecipientCount,
-    planned_amount_minor AS plannedAmountMinor
+    planned_amount_minor AS plannedAmountMinor,updated_at AS updatedAt
     FROM annual_aid_plans WHERE year=?`).all(year) as AnnualAidPlan[]
 }
 

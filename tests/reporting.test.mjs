@@ -8,6 +8,7 @@ import { openTestDatabase } from './fakes/database.mjs'
 import { registerRecordsFixture } from './fakes/records-fixture.ts'
 import { dashboardSummary, reportSummary } from '../electron/financial-summary.ts'
 import { reportGroups, reportNumbers, reportTotals, parsePlanMoney, reportPeriodText } from '../src/lib/reporting.ts'
+import { isAnnualAidPlanList } from '../shared/api-contract.ts'
 import { handlers } from './fakes/ipc-security.mjs'
 import { previewDeletion, executeDeletion } from '../electron/deletion-service.ts'
 
@@ -19,6 +20,7 @@ function fixture(t) {
  return {db,root,open,call}
 }
 const plan={year:2026,aidTypeId:'aid-social-treatment',plannedRecipientCount:10,plannedAmountMinor:100000}
+const planValues=rows=>rows.map(({updatedAt,...row})=>row)
 
 test('Report headings use full year wording, Roman quarters and exact inclusive calendar ranges',()=>{
  assert.deepEqual(reportPeriodText(2027,{kind:'month',value:1}),{label:'січень 2027 року',range:'з 01.01.2027 по 31.01.2027'})
@@ -42,29 +44,34 @@ test('Two-field plan preserves retired budget values and uses only planned sums 
  const updated={...plan,plannedRecipientCount:7,plannedAmountMinor:43210}
  assert.equal(call('reports:annual-plan-save',{...updated,budgetAmountMinor:1}).ok,true)
  assert.equal(db.prepare('SELECT budget_amount_minor value FROM annual_aid_plans').get().value,987654321)
- assert.deepEqual(call('reports:annual-plan-list',2026),[updated])
+ const saved=call('reports:annual-plan-list',2026)
+ assert(isAnnualAidPlanList(saved),'server plan response must satisfy the shared client API contract')
+ assert.match(saved[0].updatedAt,/^\d{4}-\d\d-\d\dT/)
+ assert.deepEqual(planValues(saved),[updated])
  const summary=reportSummary(db,2026,{kind:'year-to-date',endDate:'2026-12-31'})
  assert.deepEqual(reportTotals(summary.rows),[7,43210,0,0,7,43210])
  assert.equal('budgetAmountMinor' in summary.rows[0],false)
  assert.equal(dashboardSummary(db,2026).programExecution.find(row=>row.programId==='program-social').plannedMinor,43210)
  db.close();const reopened=open()
  assert.equal(reopened.prepare('SELECT budget_amount_minor value FROM annual_aid_plans').get().value,987654321)
- assert.equal(reopened.prepare('PRAGMA user_version').get().user_version,19)
+ assert.equal(reopened.prepare('PRAGMA user_version').get().user_version,reopened.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version)
 })
 
 test('Annual plan IPC: zeros, unset, independent years, validation, atomic failure and reopening',t=>{
  const {db,open,call}=fixture(t)
  assert.deepEqual(call('reports:annual-plan-list',2026),[])
+ assert(isAnnualAidPlanList(call('reports:annual-plan-list',2026)))
  assert.equal(call('reports:annual-plan-save',plan).ok,true)
  const zero={...plan,year:2027,plannedRecipientCount:0,plannedAmountMinor:0}
  assert.equal(call('reports:annual-plan-save',zero).ok,true)
- assert.deepEqual(call('reports:annual-plan-list',2027),[zero])
- assert.deepEqual(call('reports:annual-plan-list',2026),[plan])
+ assert.deepEqual(planValues(call('reports:annual-plan-list',2027)),[zero])
+ assert.deepEqual(planValues(call('reports:annual-plan-list',2026)),[plan])
+ assert(isAnnualAidPlanList(call('reports:annual-plan-list',2027)))
  for(const change of [{plannedRecipientCount:-1},{plannedRecipientCount:.5},{plannedAmountMinor:null},{aidTypeId:'absent'},{year:0},{plannedAmountMinor:Number.MAX_SAFE_INTEGER+1}])assert.equal(call('reports:annual-plan-save',{...plan,...change}).ok,false)
  db.exec("CREATE TRIGGER fail_plan BEFORE UPDATE ON annual_aid_plans BEGIN SELECT RAISE(ABORT,'synthetic'); END")
  assert.equal(call('reports:annual-plan-save',{...plan,plannedRecipientCount:30}).ok,false)
- assert.deepEqual(call('reports:annual-plan-list',2026),[plan])
- db.close();open();assert.deepEqual(call('reports:annual-plan-list',2026),[plan])
+ assert.deepEqual(planValues(call('reports:annual-plan-list',2026)),[plan])
+ db.close();open();assert.deepEqual(planValues(call('reports:annual-plan-list',2026)),[plan])
  assert.equal(parsePlanMoney('0,00'),0);assert.equal(parsePlanMoney('1 234,56'),123456);assert.equal(parsePlanMoney('1.001'),null);assert.equal(parsePlanMoney(''),null)
 })
 
@@ -130,7 +137,7 @@ test('Existing confirmed catalog deletion accounts for annual plans and rolls ba
  assert(previewDeletion(db,'aidType',plan.aidTypeId).dependencies.some(item=>item.label==='Річні планові показники'&&item.count===1))
  db.exec("CREATE TRIGGER fail_type_delete BEFORE DELETE ON aid_types BEGIN SELECT RAISE(ABORT,'synthetic'); END")
  assert.equal(executeDeletion(db,'aidType',plan.aidTypeId).ok,false)
- assert.deepEqual(call('reports:annual-plan-list',2026),[plan])
+ assert.deepEqual(planValues(call('reports:annual-plan-list',2026)),[plan])
  db.exec('DROP TRIGGER fail_type_delete')
  assert.equal(executeDeletion(db,'aidType',plan.aidTypeId).ok,true)
  assert.deepEqual(call('reports:annual-plan-list',2026),[])
