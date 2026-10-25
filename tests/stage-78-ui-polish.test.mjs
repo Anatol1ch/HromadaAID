@@ -47,8 +47,9 @@ test('settings tabs fill the row proportionally without backup administration in
   const labels = ['Мій обліковий запис', 'Підключення до сервера', 'Про програму'].map(value => settings.indexOf(value))
   assert.deepEqual(labels, [...labels].sort((a, b) => a - b))
   assert.doesNotMatch(settings, /Резервне копіювання/)
-  assert.match(styles, /\.settings-section-nav \{[^}]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/)
-  assert.match(styles, /\.settings-section-current \{ display: flex; width: 100%;[^}]*justify-content: center/)
+  assert.match(styles, /\.settings-section-nav \{[^}]*display: flex/)
+  assert.match(styles, /\.settings-section-current \{ display: flex; flex: 1 1 0; width: 100%;[^}]*justify-content: center/)
+  assert.doesNotMatch(styles, /\.settings-section-nav \{[^}]*grid-template-columns/)
 })
 
 test('support contacts keep safe Electron links and have visible labels', () => {
