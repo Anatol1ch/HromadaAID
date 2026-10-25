@@ -57,7 +57,12 @@ try {
 
 function psBase64(text: string): string { return Buffer.from(text, 'utf8').toString('base64') }
 function powershell(): string { return join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe') }
-function run(executable: string, args: string[], cwd: string, timeoutMs = 180_000, onStdout?: (chunk: string) => void): Promise<{ stdout: string; stderr: string }> {
+async function run(executable: string, args: string[], cwd: string, timeoutMs = 180_000, onStdout?: (chunk: string) => void): Promise<{ stdout: string; stderr: string }> {
+  try {
+    if (!(await stat(cwd)).isDirectory()) throw new Error('not a directory')
+  } catch {
+    throw Object.assign(new Error(`Робочий каталог допоміжного процесу недоступний: ${cwd}`), { code: 'UPDATE_WORKING_DIRECTORY_UNAVAILABLE' })
+  }
   return new Promise((resolveResult, reject) => {
     const child = spawn(executable, args, { cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = '', stderr = '', settled = false
@@ -65,7 +70,13 @@ function run(executable: string, args: string[], cwd: string, timeoutMs = 180_00
     child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8')
     child.stdout.on('data', chunk => { stdout += chunk; onStdout?.(chunk); if (stdout.length > 256_000) child.kill() })
     child.stderr.on('data', chunk => { stderr += chunk; if (stderr.length > 256_000) child.kill() })
-    child.once('error', error => { settled = true; clearTimeout(timer); reject(error) })
+    child.once('error', error => {
+      settled = true; clearTimeout(timer)
+      const code = (error as NodeJS.ErrnoException).code
+      reject(Object.assign(new Error(code === 'ENOENT'
+        ? `Не вдалося запустити допоміжний процес. Перевірте PowerShell і робочий каталог: ${cwd}`
+        : `Не вдалося запустити допоміжний процес із робочого каталогу: ${cwd}`), { code: 'UPDATE_CHILD_PROCESS_START_FAILED', cause: error, executable, cwd }))
+    })
     child.once('close', code => {
       if (settled) return
       settled = true; clearTimeout(timer)
@@ -85,7 +96,10 @@ export function createWindowsServerUpdateAdapters(): ServerUpdateAdapters {
     extract: async (zipPath, destination) => {
       const info = await stat(zipPath)
       if (!info.isFile() || info.size < 1) throw Object.assign(new Error('ZIP-файл порожній або недоступний.'), { code: 'UPDATE_ARCHIVE_INVALID' })
-      await run(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(buildSafeZipExtractionCommand(zipPath, destination), 'utf16le').toString('base64')], dirname(destination))
+      const workingDirectory = dirname(destination)
+      try { await mkdir(workingDirectory, { recursive: true }) }
+      catch (error) { throw Object.assign(new Error(`Не вдалося підготувати тимчасовий каталог розпакування: ${workingDirectory}`), { code: 'UPDATE_WORKING_DIRECTORY_UNAVAILABLE', cause: error }) }
+      await run(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(buildSafeZipExtractionCommand(zipPath, destination), 'utf16le').toString('base64')], workingDirectory)
     },
     readCurrentSchema: async environment => {
       const root = join(environment.programDirectory, 'Server')

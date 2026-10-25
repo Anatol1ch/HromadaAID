@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 const { verifyUpdatePackage, prepareServerUpdate, applyServerUpdate } = await import('../../dist-server-manager/main/server-update.js')
-const { buildSafeZipExtractionCommand } = await import('../../dist-server-manager/main/windows-server-update.js')
+const { createWindowsServerUpdateAdapters } = await import('../../dist-server-manager/main/windows-server-update.js')
 
 const payloadFiles = [
   'runtime/node.exe', 'service/HromadaAIDService.exe', 'service/HromadaAIDService.xml.template', 'app/package.json',
@@ -155,17 +155,15 @@ test('installer rollback outcome remains distinct from success and manual recove
 test('Windows PowerShell safe extractor accepts Unicode paths and rejects ZIP traversal', { skip: process.platform !== 'win32' }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'HromadaAID ZIP перевірка ')); t.after(() => rm(root, { recursive: true, force: true }))
   const powershell = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
-  const archive = join(root, 'сервер package.zip'), destination = join(root, 'unpacked'), badArchive = join(root, 'bad.zip')
+  const archive = join(root, 'сервер package.zip'), destination = join(root, 'new temp parent', 'unpacked'), badArchive = join(root, 'bad.zip')
   const createScript = String.raw`Add-Type -AssemblyName System.IO.Compression; $zipPath=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__ZIP__'));$archive=[IO.Compression.ZipArchive]::new([IO.File]::Open($zipPath,[IO.FileMode]::CreateNew),[IO.Compression.ZipArchiveMode]::Create);try{$entry=$archive.CreateEntry('пакет/дані.txt');$writer=[IO.StreamWriter]::new($entry.Open(),[Text.Encoding]::UTF8);try{$writer.Write('тест')}finally{$writer.Dispose()}}finally{$archive.Dispose()}`
   const create = (path, script) => spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script.replace('__ZIP__', Buffer.from(path, 'utf8').toString('base64')), 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true })
   assert.equal(create(archive, createScript).status, 0)
-  const extracted = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(buildSafeZipExtractionCommand(archive, destination), 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true })
-  assert.equal(extracted.status, 0, extracted.stderr || extracted.stdout)
+  await createWindowsServerUpdateAdapters().extract(archive, destination)
   assert.equal(await readFile(join(destination, 'пакет', 'дані.txt'), 'utf8').then(value => value.replace(/^\uFEFF/, '')), 'тест')
   const badScript = String.raw`Add-Type -AssemblyName System.IO.Compression;$zipPath=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__ZIP__'));$archive=[IO.Compression.ZipArchive]::new([IO.File]::Open($zipPath,[IO.FileMode]::CreateNew),[IO.Compression.ZipArchiveMode]::Create);try{$entry=$archive.CreateEntry('../escape.txt');$writer=[IO.StreamWriter]::new($entry.Open());$writer.Write('bad');$writer.Dispose()}finally{$archive.Dispose()}`
   assert.equal(create(badArchive, badScript).status, 0)
-  const rejected = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(buildSafeZipExtractionCommand(badArchive, join(root, 'bad-out')), 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true })
-  assert.notEqual(rejected.status, 0)
+  await assert.rejects(createWindowsServerUpdateAdapters().extract(badArchive, join(root, 'bad temp parent', 'bad-out')), { code: 'ZIP_EXTRACTION_FAILED' })
 })
 
 test('existing service installer stops only after validations and keeps failures before transaction from stopping service', async () => {
