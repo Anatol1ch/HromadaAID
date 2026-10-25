@@ -82,7 +82,19 @@ try {
 
   const cdp = connectCdp(target.webSocketDebuggerUrl)
   await cdp.ready()
-  await Promise.all([cdp.send('Runtime.enable'), cdp.send('Page.enable'), cdp.send('Network.enable')])
+  await Promise.all([cdp.send('Runtime.enable'), cdp.send('Page.enable')])
+  const initialLoadDeadline = Date.now() + 10_000
+  let initialRendererReady = false
+  while (Date.now() < initialLoadDeadline && !initialRendererReady) {
+    const initial = await cdp.send('Runtime.evaluate', {
+      expression: `document.readyState === 'complete' && Boolean(document.querySelector('#root')?.innerText.trim())`,
+      returnByValue: true,
+    })
+    initialRendererReady = initial.result.value === true
+    if (!initialRendererReady) await delay(250)
+  }
+  if (!initialRendererReady) throw new Error('Packaged Client renderer did not finish its initial load.')
+  await cdp.send('Network.enable')
   await cdp.send('Page.reload', { ignoreCache: true })
   await delay(2_000)
   const evaluated = await cdp.send('Runtime.evaluate', { expression: `JSON.stringify({url:location.href,title:document.title,rootText:document.querySelector('#root')?.innerText ?? '',resources:performance.getEntriesByType('resource').map(x=>x.name),styles:[...document.querySelectorAll('link[rel=stylesheet]')].map(x=>({href:x.href,loaded:Boolean(x.sheet)}))})`, returnByValue: true })

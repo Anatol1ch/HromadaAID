@@ -119,115 +119,6 @@ Page custom ModePageCreate ModePageLeave
 !insertmacro MUI_UNPAGE_FINISH
 !insertmacro MUI_LANGUAGE "Ukrainian"
 
-Function ModePageCreate
-  nsDialogs::Create 1018
-  Pop $ModeDialog
-  ${If} $ModeDialog == error
-    Abort
-  ${EndIf}
-  !insertmacro MUI_HEADER_TEXT "Вибір компонентів" "Оберіть, що потрібно встановити на цьому комп’ютері."
-
-  ; Each option is a native radio button with a neighboring description and icon.
-  ; Dialog units make the layout follow the system font and DPI.
-  ${NSD_CreateGroupBox} 0 0 100% 43u ""
-  Pop $0
-  ${NSD_CreateGroupBox} 0 47u 100% 43u ""
-  Pop $0
-  ${NSD_CreateGroupBox} 0 94u 100% 43u ""
-  Pop $0
-
-  ; Create the three radio controls consecutively so arrow-key navigation treats
-  ; them as one group. Descriptions and images are added after the radio group.
-  ${NSD_CreateFirstRadioButton} 42u 6u 250u 13u "Клієнт"
-  Pop $ModeClientRadio
-  ${NSD_CreateAdditionalRadioButton} 42u 53u 250u 13u "Сервер"
-  Pop $ModeServerRadio
-  ${NSD_CreateAdditionalRadioButton} 42u 100u 250u 13u "Повний комплект"
-  Pop $ModeCombinedRadio
-
-  ${NSD_CreateBitmap} 8u 101u 28u 28u ""
-  Pop $1
-  ${NSD_SetStretchedBitmap} $1 "$PLUGINSDIR\InstallerUi\mode-combined.bmp" $ModeCombinedIcon
-  ${NSD_CreateBitmap} 8u 7u 28u 28u ""
-  Pop $1
-  ${NSD_SetStretchedBitmap} $1 "$PLUGINSDIR\InstallerUi\mode-client.bmp" $ModeClientIcon
-  ${NSD_CreateBitmap} 8u 54u 28u 28u ""
-  Pop $1
-  ${NSD_SetStretchedBitmap} $1 "$PLUGINSDIR\InstallerUi\mode-server.bmp" $ModeServerIcon
-
-  ${NSD_CreateLabel} 60u 20u 230u 18u "Для працівників, які користуються системою HromadaAID."
-  Pop $2
-  ${NSD_OnClick} $2 SelectClientMode
-  ${NSD_CreateLabel} 60u 67u 230u 18u "Сервер і засіб його керування для HromadaAID."
-  Pop $2
-  ${NSD_OnClick} $2 SelectServerMode
-  ${NSD_CreateLabel} 60u 114u 230u 18u "Клієнт і сервер на одному комп’ютері."
-  Pop $2
-  ${NSD_OnClick} $2 SelectCombinedMode
-
-  SectionGetFlags ${SEC_CLIENT} $0
-  IntOp $0 $0 & ${SF_SELECTED}
-  SectionGetFlags ${SEC_SERVER} $1
-  IntOp $1 $1 & ${SF_SELECTED}
-  ${If} $0 != 0
-  ${AndIf} $1 != 0
-    ${NSD_Check} $ModeCombinedRadio
-    ${NSD_SetFocus} $ModeCombinedRadio
-  ${ElseIf} $1 != 0
-    ${NSD_Check} $ModeServerRadio
-    ${NSD_SetFocus} $ModeServerRadio
-  ${Else}
-    ${NSD_Check} $ModeClientRadio
-    ${NSD_SetFocus} $ModeClientRadio
-  ${EndIf}
-
-  nsDialogs::Show
-  ${NSD_FreeBitmap} $ModeClientIcon
-  ${NSD_FreeBitmap} $ModeServerIcon
-  ${NSD_FreeBitmap} $ModeCombinedIcon
-FunctionEnd
-
-Function SelectClientMode
-  Pop $0
-  ${NSD_Uncheck} $ModeServerRadio
-  ${NSD_Uncheck} $ModeCombinedRadio
-  ${NSD_Check} $ModeClientRadio
-FunctionEnd
-
-Function SelectServerMode
-  Pop $0
-  ${NSD_Uncheck} $ModeClientRadio
-  ${NSD_Uncheck} $ModeCombinedRadio
-  ${NSD_Check} $ModeServerRadio
-FunctionEnd
-
-Function SelectCombinedMode
-  Pop $0
-  ${NSD_Uncheck} $ModeClientRadio
-  ${NSD_Uncheck} $ModeServerRadio
-  ${NSD_Check} $ModeCombinedRadio
-FunctionEnd
-
-Function ModePageLeave
-  ${NSD_GetState} $ModeClientRadio $0
-  ${NSD_GetState} $ModeServerRadio $1
-  ${NSD_GetState} $ModeCombinedRadio $2
-  ${If} $0 == ${BST_CHECKED}
-    SectionSetFlags ${SEC_CLIENT} ${SF_SELECTED}
-    SectionSetFlags ${SEC_SERVER} 0
-  ${ElseIf} $1 == ${BST_CHECKED}
-    SectionSetFlags ${SEC_CLIENT} 0
-    SectionSetFlags ${SEC_SERVER} ${SF_SELECTED}
-  ${ElseIf} $2 == ${BST_CHECKED}
-    SectionSetFlags ${SEC_CLIENT} ${SF_SELECTED}
-    SectionSetFlags ${SEC_SERVER} ${SF_SELECTED}
-  ${Else}
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Оберіть один із трьох варіантів, щоб продовжити."
-    Abort
-  ${EndIf}
-  Call SummaryLeave
-FunctionEnd
-
 Section -CloseApplications
   ; taskkill without /F sends the normal close request; Windows file-copy errors
   ; remain fatal if an application cannot close cleanly.
@@ -388,6 +279,116 @@ Section "Uninstall"
   DeleteRegValue HKLM "Software\HromadaAID\Installer" "InstallVersion"
   ; DataDirectory and BackupDirectory remain as safe reinstall/recovery locators.
 SectionEnd
+
+Function ModePageCreate
+  nsDialogs::Create 1018
+  Pop $ModeDialog
+  ${If} $ModeDialog == error
+    Abort
+  ${EndIf}
+  !insertmacro MUI_HEADER_TEXT "Вибір компонентів" "Оберіть, що потрібно встановити на цьому комп’ютері."
+
+  ; Each option is a native radio button with a neighboring description and icon.
+  ; Dialog units make the layout follow the system font and DPI.
+  ${NSD_CreateGroupBox} 0 0 100% 43u ""
+  Pop $0
+  ${NSD_CreateGroupBox} 0 47u 100% 43u ""
+  Pop $0
+  ${NSD_CreateGroupBox} 0 94u 100% 43u ""
+  Pop $0
+
+  ; Create the three radio controls consecutively so arrow-key navigation treats
+  ; them as one group. Descriptions and images are added after the radio group.
+  ${NSD_CreateRadioButton} 42u 6u 250u 13u "Клієнт"
+  Pop $ModeClientRadio
+  ${NSD_AddStyle} $ModeClientRadio ${WS_GROUP}
+  ${NSD_CreateRadioButton} 42u 53u 250u 13u "Сервер"
+  Pop $ModeServerRadio
+  ${NSD_CreateRadioButton} 42u 100u 250u 13u "Повний комплект"
+  Pop $ModeCombinedRadio
+
+  ${NSD_CreateBitmap} 8u 101u 28u 28u ""
+  Pop $1
+  ${NSD_SetStretchedImage} $1 "$PLUGINSDIR\InstallerUi\mode-combined.bmp" $ModeCombinedIcon
+  ${NSD_CreateBitmap} 8u 7u 28u 28u ""
+  Pop $1
+  ${NSD_SetStretchedImage} $1 "$PLUGINSDIR\InstallerUi\mode-client.bmp" $ModeClientIcon
+  ${NSD_CreateBitmap} 8u 54u 28u 28u ""
+  Pop $1
+  ${NSD_SetStretchedImage} $1 "$PLUGINSDIR\InstallerUi\mode-server.bmp" $ModeServerIcon
+
+  ${NSD_CreateLabel} 60u 20u 230u 18u "Для працівників, які користуються системою HromadaAID."
+  Pop $2
+  ${NSD_OnClick} $2 SelectClientMode
+  ${NSD_CreateLabel} 60u 67u 230u 18u "Сервер і засіб його керування для HromadaAID."
+  Pop $2
+  ${NSD_OnClick} $2 SelectServerMode
+  ${NSD_CreateLabel} 60u 114u 230u 18u "Клієнт і сервер на одному комп’ютері."
+  Pop $2
+  ${NSD_OnClick} $2 SelectCombinedMode
+
+  SectionGetFlags ${SEC_CLIENT} $0
+  IntOp $0 $0 & ${SF_SELECTED}
+  SectionGetFlags ${SEC_SERVER} $1
+  IntOp $1 $1 & ${SF_SELECTED}
+  ${If} $0 != 0
+  ${AndIf} $1 != 0
+    ${NSD_Check} $ModeCombinedRadio
+    ${NSD_SetFocus} $ModeCombinedRadio
+  ${ElseIf} $1 != 0
+    ${NSD_Check} $ModeServerRadio
+    ${NSD_SetFocus} $ModeServerRadio
+  ${Else}
+    ${NSD_Check} $ModeClientRadio
+    ${NSD_SetFocus} $ModeClientRadio
+  ${EndIf}
+
+  nsDialogs::Show
+  ${NSD_FreeBitmap} $ModeClientIcon
+  ${NSD_FreeBitmap} $ModeServerIcon
+  ${NSD_FreeBitmap} $ModeCombinedIcon
+FunctionEnd
+
+Function SelectClientMode
+  Pop $0
+  ${NSD_Uncheck} $ModeServerRadio
+  ${NSD_Uncheck} $ModeCombinedRadio
+  ${NSD_Check} $ModeClientRadio
+FunctionEnd
+
+Function SelectServerMode
+  Pop $0
+  ${NSD_Uncheck} $ModeClientRadio
+  ${NSD_Uncheck} $ModeCombinedRadio
+  ${NSD_Check} $ModeServerRadio
+FunctionEnd
+
+Function SelectCombinedMode
+  Pop $0
+  ${NSD_Uncheck} $ModeClientRadio
+  ${NSD_Uncheck} $ModeServerRadio
+  ${NSD_Check} $ModeCombinedRadio
+FunctionEnd
+
+Function ModePageLeave
+  ${NSD_GetState} $ModeClientRadio $0
+  ${NSD_GetState} $ModeServerRadio $1
+  ${NSD_GetState} $ModeCombinedRadio $2
+  ${If} $0 == ${BST_CHECKED}
+    SectionSetFlags ${SEC_CLIENT} ${SF_SELECTED}
+    SectionSetFlags ${SEC_SERVER} 0
+  ${ElseIf} $1 == ${BST_CHECKED}
+    SectionSetFlags ${SEC_CLIENT} 0
+    SectionSetFlags ${SEC_SERVER} ${SF_SELECTED}
+  ${ElseIf} $2 == ${BST_CHECKED}
+    SectionSetFlags ${SEC_CLIENT} ${SF_SELECTED}
+    SectionSetFlags ${SEC_SERVER} ${SF_SELECTED}
+  ${Else}
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Оберіть один із трьох варіантів, щоб продовжити."
+    Abort
+  ${EndIf}
+  Call SummaryLeave
+FunctionEnd
 
 Function .onInit
   SetRegView 64
