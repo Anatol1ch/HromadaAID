@@ -86,6 +86,7 @@ async function openWindow() {
   const width = Math.min(1180, area.width), height = Math.min(780, area.height)
   window = new BrowserWindow({
     title: 'HromadaAID Server Manager',
+    icon: app.isPackaged ? join(process.resourcesPath, 'assets', 'hromadaaid-server-manager.ico') : join(dirname(fileURLToPath(import.meta.url)), '../../assets/hromadaaid-server-manager.ico'),
     width, height,
     x: area.x + Math.floor((area.width - width) / 2),
     y: area.y + Math.floor((area.height - height) / 2),

@@ -3,6 +3,7 @@ productName: HromadaAID Server Manager
 directories:
   app: dist-server-manager/package
   output: release/server-manager
+  buildResources: assets
 files:
   - main/**/*
   - renderer/**/*
@@ -12,9 +13,20 @@ npmRebuild: false
 extraResources:
   - from: release/installer-payload/Server
     to: server-payload
+  - from: assets
+    to: assets
+    filter:
+      - hromadaaid-server-manager.ico
+      - hromadaaid-server-manager.png
+      - hromadaaid-server-manager.svg
 win:
+  icon: assets/hromadaaid-server-manager.ico
   requestedExecutionLevel: requireAdministrator
   target:
     - target: dir
       arch:
         - x64
+nsis:
+  installerIcon: assets/hromadaaid-server-manager.ico
+  uninstallerIcon: assets/hromadaaid-server-manager.ico
+  installerHeaderIcon: assets/hromadaaid-server-manager.ico

@@ -5,7 +5,17 @@ import ts from 'typescript'
 
 const source = readFileSync(new URL('../src/inspection-presentation.ts', import.meta.url), 'utf8')
 const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText
-const { apiDisplay, diagnosticLevel, installationDisplay, notCheckedState, serviceDisplay } = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+const { apiDisplay, diagnosticLevel, inspectionFeedback, installationDisplay, notCheckedState, serviceDisplay } = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+
+test('manual inspection feedback distinguishes success, unavailable API, stopped service and unknown installation', () => {
+  const state = { installation: { status: 'installed', message: 'Installed' }, service: { status: 'running', message: 'Running' }, api: { status: 'available', message: 'Healthy' } }
+  assert.equal(inspectionFeedback(state).tone, 'success')
+  assert.match(inspectionFeedback({ ...state, api: { status: 'unavailable', message: 'Timeout' } }).message, /API недоступний/)
+  assert.equal(inspectionFeedback({ ...state, api: { status: 'unavailable', message: 'Timeout' } }).tone, 'error')
+  assert.equal(inspectionFeedback({ ...state, service: { status: 'stopped' } }).tone, 'info')
+  assert.equal(inspectionFeedback({ ...state, installation: { status: 'unknown', message: 'Access denied' } }).tone, 'error')
+  assert.equal(inspectionFeedback({ ...state, installation: { status: 'not_installed' } }).tone, 'info')
+})
 
 test('unstarted inspection uses neutral information states for installation, service and API', () => {
   assert.deepEqual(notCheckedState(), { label: 'Не перевірено', tone: 'info' })

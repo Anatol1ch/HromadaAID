@@ -1036,7 +1036,7 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .no-payable-rows { padding: var(--space-5); border-radius: var(--radius-control); background: #f5f7f9; color: #6d7c8b; font-size: 12px; line-height: 1.5; }
 .preview-integrity-note { margin: 13px 0 0; color: #657d70; font-size: 11px; }
 
-/* Реєстр отримувачів: збереження локальних карток і явна перевірка збігів. */
+/* Реєстр отримувачів: збереження серверних карток і явна перевірка збігів. */
 .registry-heading { align-items: center; }
 .registry-heading .primary-button { flex: none; }
 .registry-alert { margin-bottom: var(--space-4); border: 1px solid #ead6c3; border-radius: 9px; background: #fffaf4; padding: 13px var(--space-4); color: #705b42; font-size: 13px; line-height: 1.5; display: flex; align-items: center; justify-content: space-between; gap: 14px; }

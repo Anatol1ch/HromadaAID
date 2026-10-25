@@ -1,9 +1,19 @@
-import type { CheckStatus, InstallationStatus, InspectionCheck, ServiceStatus, ApiStatus } from '../electron/inspection-types'
+import type { CheckStatus, InstallationStatus, InspectionCheck, ServiceStatus, ApiStatus, InspectionSnapshot } from '../electron/inspection-types'
 
 export type PresentationTone = 'success' | 'warning' | 'error' | 'info'
 export type DiagnosticLevel = 'success' | 'warning' | 'error' | 'info'
 
 export type DisplayState = { label: string; tone: PresentationTone }
+
+export function inspectionFeedback(snapshot: InspectionSnapshot): { message: string; tone: PresentationTone } {
+  if (snapshot.installation.status === 'not_installed') return { tone: 'info', message: 'Перевірку завершено. Сервер ще не встановлено.' }
+  if (snapshot.installation.status !== 'installed') return { tone: snapshot.installation.status === 'unknown' ? 'error' : 'warning', message: `Перевірку завершено. ${snapshot.installation.message}` }
+  if (snapshot.service.status === 'unknown') return { tone: 'error', message: `Не вдалося визначити стан служби. ${snapshot.service.message}` }
+  if (snapshot.service.status === 'stopped') return { tone: 'info', message: 'Перевірку завершено. Сервер установлено, службу зупинено.' }
+  if (snapshot.service.status !== 'running') return { tone: 'warning', message: `Перевірку завершено. ${snapshot.service.message}` }
+  if (snapshot.api.status !== 'available') return { tone: 'error', message: `Служба працює, але API недоступний. ${snapshot.api.message}` }
+  return { tone: 'success', message: 'Перевірку завершено. Служба працює, API доступний.' }
+}
 
 export const notCheckedState = (checking = false): DisplayState => ({
   label: checking ? 'Перевіряється…' : 'Не перевірено',

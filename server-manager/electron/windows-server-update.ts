@@ -1,11 +1,10 @@
 import { spawn } from 'node:child_process'
 import { cp, lstat, mkdir, readFile, rm, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { inspectEnvironment } from './inspection-engine.js'
 import { createWindowsInspectionAdapters } from './windows-inspection.js'
-import type { ServerUpdateAdapters, ServerUpdateEnvironment } from './server-update.js'
+import type { ServerUpdateAdapters } from './server-update.js'
 import type { ServerUpdateStage } from './server-update-contract.js'
 import { verifyUpdatePackage, readInstalledPackageIdentity } from './server-update.js'
 

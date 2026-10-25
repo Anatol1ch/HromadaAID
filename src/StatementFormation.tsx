@@ -131,7 +131,7 @@ export default function StatementFormation() {
   const activeDocument = documents.find((document) => document.id === activeDocumentId)
 
   return <>
-    <section className="page-heading formation-heading"><div><div className="eyebrow">ДОКУМЕНТИ • ЗАПИСИ ЛОКАЛЬНОЇ БАЗИ</div><h1>Формування відомостей</h1><p className="subtitle">Позначте допомоги за {year} рік. Кожне призначення — окремий запис, навіть коли отримувач повторюється.</p></div></section>
+    <section className="page-heading formation-heading"><div><div className="eyebrow">ДОКУМЕНТИ • ДАНІ СЕРВЕРА</div><h1>Формування відомостей</h1><p className="subtitle">Позначте допомоги за {year} рік. Кожне призначення — окремий запис, навіть коли отримувач повторюється.</p></div></section>
     {error && !parameterRequest && !statementKind && !bankDocument && <Alert variant="error" className="ui-alert-preserve-lines">{error}</Alert>}
     <section className="dashboard-panel formation-panel" aria-label="Вибір призначень для документів">
       <div className="panel-heading formation-panel-heading"><div><h2>Призначення за {year} рік</h2><p>Доступні статуси: «Призначено», «В роботі», «Передано до казначейства». Рік визначається за рішенням.</p></div></div>

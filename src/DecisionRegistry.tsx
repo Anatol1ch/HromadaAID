@@ -57,7 +57,7 @@ function DecisionRegistry() {
     setLoading(true)
     setError('')
     try { const rows = await decisionRepository.list(); if (sequence === loadSequence.current) setDecisions(rows.filter(item => item.decisionDate.slice(0, 4) === String(year))) }
-    catch { if (sequence === loadSequence.current) setError('Не вдалося завантажити реєстр рішень. Перевірте локальне сховище й повторіть спробу.') }
+    catch { if (sequence === loadSequence.current) setError('Не вдалося завантажити реєстр рішень. Перевірте підключення до сервера й повторіть спробу.') }
     finally { if (sequence === loadSequence.current) setLoading(false) }
   }
 
@@ -120,7 +120,7 @@ function DecisionRegistry() {
         return [makeAssignmentRow(catalog.programs[0]?.id ?? '', catalog.aidTypes)]
       })
     } catch {
-      setAssignmentError('Не вдалося завантажити отримувачів або довідники. Перевірте локальне сховище.')
+      setAssignmentError('Не вдалося завантажити отримувачів або довідники. Перевірте підключення до сервера.')
     } finally { setLoadingChoices(false) }
   }
 
@@ -177,7 +177,7 @@ function DecisionRegistry() {
 
   return <>
     <section className="page-heading registry-heading">
-      <div><div className="eyebrow">ОБЛІК ПРИЗНАЧЕНЬ • ЛОКАЛЬНІ ДАНІ</div><h1>Реєстр рішень</h1><p className="subtitle">Рішення виконкому та пов’язані з ними призначення допомоги</p></div>
+      <div><div className="eyebrow">ОБЛІК ПРИЗНАЧЕНЬ • СЕРВЕРНІ ДАНІ</div><h1>Реєстр рішень</h1><p className="subtitle">Рішення виконкому та пов’язані з ними призначення допомоги</p></div>
       <button className="primary-button" onClick={beginCreate}><Plus size={19}/>Додати рішення</button>
     </section>
 

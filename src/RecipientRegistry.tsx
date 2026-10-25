@@ -134,7 +134,7 @@ function RecipientRegistry({ embedded = false, readOnly = false }: { embedded?: 
 
   return <>
     {!embedded && <section className="page-heading registry-heading">
-      <div><div className="eyebrow">ОТРИМУВАЧІ • ЛОКАЛЬНІ ДАНІ</div><h1>Реєстр отримувачів</h1><p className="subtitle">Картки людей зберігаються окремо від рішень і призначень допомоги</p></div>
+      <div><div className="eyebrow">ОТРИМУВАЧІ • СЕРВЕРНІ ДАНІ</div><h1>Реєстр отримувачів</h1><p className="subtitle">Картки людей зберігаються окремо від рішень і призначень допомоги</p></div>
       {!readOnly && <button className="primary-button" onClick={beginCreate}><Plus size={19}/>Додати отримувача</button>}
     </section>}
 
@@ -347,7 +347,7 @@ function RecipientDetails({ recipient, history, historyLoading, historyError, on
     ['Адреси та контактні дані', [['Адреса проживання', recipient.address], ['Адреса реєстрації', recipient.registeredAddress], ['Телефон', recipient.phone], ['Електронна пошта', recipient.email], ['Ознака ВПО', recipient.isVpo === null ? null : recipient.isVpo ? 'Так' : 'Ні']]],
     ['Банківські реквізити', [['Поточний рахунок', recipient.bankAccount], ['Банк', recipient.bankName], ['МФО банку', recipient.bankMfo], ['ЄДРПОУ банку', recipient.bankEdrpou]]],
   ]
-  return <Modal title="Картка отримувача" description={recipient.isDemo ? 'Синтетичний демонстраційний запис' : 'Локальний запис'} onClose={onClose} size="large"><div className="recipient-details"><div className="detail-avatar"><UserRound size={22}/></div>
+  return <Modal title="Картка отримувача" description={recipient.isDemo ? 'Синтетичний демонстраційний запис' : 'Запис у базі даних сервера'} onClose={onClose} size="large"><div className="recipient-details"><div className="detail-avatar"><UserRound size={22}/></div>
     {details.map(([section, fields]) => <section className="recipient-detail-section" key={section}><h3>{section}</h3><div className="recipient-detail-grid">{fields.map(([label, value]) => <div className="recipient-detail-item" key={label}><span>{label}</span><strong>{value || 'Не вказано'}</strong></div>)}</div></section>)}
     <section className="recipient-history" aria-labelledby="recipient-history-title"><div className="recipient-history-heading"><h3 id="recipient-history-title">Історія призначень</h3><span>{historyLoading ? 'Завантаження…' : historyError ? 'Дані недоступні' : `${history.length} записів`}</span></div>
       {historyError ? <Alert variant="error">{historyError}</Alert> : historyLoading ? <DataState kind="loading" compact message="Завантажуємо історію…"/> : history.length ? <div className="recipient-history-table-wrap"><table className="recipient-history-table"><thead><tr><th>Рішення</th><th>Дата</th><th>Вид допомоги</th><th>Сума</th><th>Статус</th></tr></thead><tbody>{history.map((item) => <tr key={item.id}><td>№ {item.decisionNumber}</td><td>{formatDate(item.decisionDate)}</td><td>{item.aidTypeName}<small>{item.programName}</small></td><td className="history-amount">{formatMoneyMinor(item.amountMinor)}</td><td><span className={`status-badge status-${assignmentStatusColor[item.status]}`}>{item.status}</span></td></tr>)}</tbody></table></div> : <DataState kind="empty" compact message="Для цього отримувача ще немає призначень."/>}

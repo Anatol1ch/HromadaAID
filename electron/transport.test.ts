@@ -12,6 +12,10 @@ import { enforceTlsCertificateValidation, readSavedConnectionConfig, safeTranspo
 const fixture = (name: string) => readFileSync(resolve(process.cwd(), 'server', 'test-fixtures', name))
 
 test('server address validation permits HTTPS anywhere and HTTP only on loopback', () => {
+  for (const address of ['http://localhost:4310', 'https://192.168.10.20:4310', 'https://api.council.test:4310', 'https://100.101.102.103:4310', 'https://api.example-tailnet.ts.net:4310']) {
+    assert.equal(validateServerBaseUrl(address).origin, new URL(address).origin)
+  }
+  assert.throws(() => validateServerBaseUrl('http://100.101.102.103:4310'), /HTTPS/)
   assert.equal(validateServerBaseUrl('http://127.0.0.1:4310').protocol, 'http:')
   assert.equal(validateServerBaseUrl('http://[::1]:4310').protocol, 'http:')
   assert.equal(validateServerBaseUrl('https://192.0.2.15:4310').protocol, 'https:')

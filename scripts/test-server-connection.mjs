@@ -45,8 +45,8 @@ try {
   await rm(join(userData, 'server-connection.json'))
   console.log('PASS URL policy, server-only startup, environment priority and corrupt-config fail-closed behavior')
 
-  await createFirstAdministrator(database1, { username: 'synthetic-one', password: pass })
-  await createFirstAdministrator(database2, { username: 'synthetic-two', password: pass })
+  await createFirstAdministrator(database1, { displayName: 'Synthetic One', username: 'synthetic-one', password: pass })
+  await createFirstAdministrator(database2, { displayName: 'Synthetic Two', username: 'synthetic-two', password: pass })
   app1 = createApp(database1); app1.log.level = 'silent'
   app2 = createApp(database2); app2.log.level = 'silent'
   const secondServerAuthHeaders = []

@@ -60,6 +60,16 @@ const executable = join(unpacked, 'HromadaAID Server Manager.exe')
 const asarPath = join(unpacked, 'resources', 'app.asar')
 if (!(await stat(executable).catch(() => undefined))?.isFile()) throw new Error('Portable Server Manager executable was not produced.')
 if (!(await stat(asarPath).catch(() => undefined))?.isFile()) throw new Error('Packaged application archive is missing.')
+const icon = await readFile(join(root, 'assets', 'hromadaaid-server-manager.ico'))
+const executableBytes = await readFile(executable)
+for (let index = 0; index < icon.readUInt16LE(4); index++) {
+  const offset = icon.readUInt32LE(6 + index * 16 + 12), length = icon.readUInt32LE(6 + index * 16 + 8)
+  if (!executableBytes.includes(icon.subarray(offset, offset + length))) throw new Error('Server Manager EXE does not embed the requested icon frames.')
+}
+for (const extension of ['ico', 'png', 'svg']) {
+  const name = `hromadaaid-server-manager.${extension}`
+  if (!(await readFile(join(root, 'assets', name))).equals(await readFile(join(unpacked, 'resources', 'assets', name)))) throw new Error('Packaged Manager icon differs from its source: ' + name)
+}
 
 const requireFromBuilder = createRequire(builderCli)
 let asar

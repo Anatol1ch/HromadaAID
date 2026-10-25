@@ -9,7 +9,7 @@ import { createServer } from 'node:net'
 const root = fileURLToPath(new URL('..', import.meta.url))
 const require = createRequire(import.meta.url)
 const mode = process.argv[2]
-if (!['dev', 'start', 'smoke', 'smoke-dev'].includes(mode)) throw new Error('Expected dev, start, smoke or smoke-dev')
+if (!['dev', 'start', 'smoke', 'smoke-dev', 'smoke-status'].includes(mode)) throw new Error('Expected dev, start, smoke or smoke-dev')
 const electronDirectory = dirname(require.resolve('electron/package.json'))
 const electron = join(electronDirectory, 'dist', readFileSync(join(electronDirectory, 'path.txt'), 'utf8').trim())
 const children = new Set()
@@ -53,7 +53,7 @@ try {
     const entry = mode === 'smoke-dev' ? 'server-manager/tests/electron-smoke.mjs' : 'dist-server-manager/main/main.js'
     await run(electron, [join(root, entry), '--manager-dev'], mode === 'dev').completion
   } else {
-    const entry = mode === 'smoke' ? 'server-manager/tests/electron-smoke.mjs' : 'dist-server-manager/main/main.js'
+    const entry = mode === 'smoke-status' ? 'server-manager/tests/status-refresh-smoke.mjs' : mode === 'smoke' ? 'server-manager/tests/electron-smoke.mjs' : 'dist-server-manager/main/main.js'
     await run(electron, [join(root, entry)], mode !== 'smoke').completion
   }
 } catch (error) {

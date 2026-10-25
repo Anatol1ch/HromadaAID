@@ -6,13 +6,10 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve, win32 } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
-import type { ServerInstallRequest } from './installation-contract.js'
 import type { ServerInstallAdapters } from './installation-engine.js'
 import { canResumeInitialInstallLayout, isInitialInstallRetryJournal } from './installation-recovery.js'
 import { inspectEnvironment } from './inspection-engine.js'
 import { createWindowsInspectionAdapters } from './windows-inspection.js'
-
-type Emit = (message: string) => void
 
 async function verifyPackageCopy(source: string, candidate: string): Promise<void> {
   const sourceManifest = await readFile(join(source, 'package-integrity.json'))

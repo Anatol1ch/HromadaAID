@@ -61,7 +61,7 @@ export function readSavedConnectionConfig(userDataPath: string, packagedDefaultP
         return { error: 'Не вдалося прочитати встановлену адресу сервера.' }
       }
     } else {
-    return { error: 'Не вдалося прочитати локальну адресу сервера. Вкажіть її повторно в налаштуваннях.' }
+    return { error: 'Не вдалося прочитати збережену адресу сервера. Вкажіть її повторно в налаштуваннях.' }
     }
   }
   try {
@@ -70,7 +70,7 @@ export function readSavedConnectionConfig(userDataPath: string, packagedDefaultP
     const apiUrl = validateServerBaseUrl((parsed as Record<string, unknown>).apiUrl).origin
     return { config: { apiUrl } }
   } catch {
-    return { error: 'Локальна адреса сервера пошкоджена або некоректна. Перевірте її в налаштуваннях підключення.' }
+    return { error: 'Збережена адреса сервера пошкоджена або некоректна. Перевірте її в налаштуваннях підключення.' }
   }
 }
 

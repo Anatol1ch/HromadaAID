@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Візуальний прототип обліку матеріальної допомоги громади",
+  "description": "Клієнт-серверна система обліку матеріальних допомог громади",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "manager:dev": "node scripts/server-manager.mjs dev",
@@ -11,7 +11,7 @@
     "manager:portable": "pnpm windows:package && pnpm manager:build && node scripts/package-server-manager.mjs",
     "manager:portable:smoke": "node scripts/smoke-portable-server-manager.mjs",
     "manager:start": "pnpm manager:build && node scripts/server-manager.mjs start",
-    "manager:test": "pnpm manager:build && node --test server-manager/tests/shell.test.mjs server-manager/tests/inspection.test.mjs server-manager/tests/inspection-presentation.test.mjs server-manager/tests/installation-engine.test.mjs server-manager/tests/installation-recovery.test.mjs server-manager/tests/service-control.test.mjs server-manager/tests/server-update.test.mjs server-manager/tests/server-update-legacy.integration.test.mjs && node scripts/server-manager.mjs smoke && node scripts/server-manager.mjs smoke-dev",
+    "manager:test": "pnpm manager:build && node --test server-manager/tests/shell.test.mjs server-manager/tests/inspection.test.mjs server-manager/tests/inspection-presentation.test.mjs server-manager/tests/installation-engine.test.mjs server-manager/tests/installation-recovery.test.mjs server-manager/tests/service-control.test.mjs server-manager/tests/manager-icon.test.mjs server-manager/tests/server-update.test.mjs server-manager/tests/server-update-legacy.integration.test.mjs && node scripts/server-manager.mjs smoke && node scripts/server-manager.mjs smoke-dev && node scripts/server-manager.mjs smoke-status",
     "build": "tsc -b && node scripts/clean-electron-build.mjs && tsc -p tsconfig.electron.json && node electron/copy-assets.mjs && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "server:dev": "pnpm server:build && concurrently -k \"pnpm exec tsc -p server/tsconfig.json --watch\" \"node --watch dist-server/server/src/index.js\"",
@@ -30,7 +30,8 @@
     "client:portable": "pnpm build && node node_modules/electron-builder/cli.js --win --x64 --dir && node scripts/package-client-portable.mjs",
     "client:portable:smoke": "node scripts/smoke-portable-client.mjs",
     "windows:deployment-packages": "pnpm run windows:package && node scripts/package-deployment-v2.mjs",
-    "windows:installer": "pnpm run windows:package && node scripts/build-windows-installer.mjs"
+    "windows:installer": "pnpm run windows:package && node scripts/build-windows-installer.mjs",
+    "manager:test-stage7": "pnpm manager:build && node --test server-manager/tests/shell.test.mjs server-manager/tests/inspection.test.mjs server-manager/tests/inspection-presentation.test.mjs server-manager/tests/service-control.test.mjs server-manager/tests/manager-icon.test.mjs && node scripts/server-manager.mjs smoke && node scripts/server-manager.mjs smoke-dev && node scripts/server-manager.mjs smoke-status"
   },
   "dependencies": {},
   "devDependencies": {
