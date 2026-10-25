@@ -21,6 +21,7 @@ import ValidatedInput, { ValidatedTextarea } from './components/ValidatedInput'
 import { formatDate } from './lib/dates'
 import DeleteConfirmation from './components/DeleteConfirmation'
 import ConfirmDialog from './components/ConfirmDialog'
+import { notifySystemToast } from './components/SystemToastHost'
 import { ArrowRight } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -146,6 +147,7 @@ export default function Dictionaries({
     try {
       const result = await catalogRepository.save(input)
       if (!result.ok) { setError(result.message ?? 'Не вдалося зберегти довідник.'); return false }
+      notifySystemToast('success', 'Зміни збережено', input.kind === 'program' ? 'Дані програми збережено.' : 'Вид допомоги збережено.')
       setDraft(null); await refresh()
       return true
     } catch { setError('Не вдалося зберегти довідник. Перевірте введені дані.'); return false }
@@ -165,6 +167,7 @@ export default function Dictionaries({
       const { id, expectedUpdatedAt, ...input } = decisionDraft
       const result = await window.hromadaAid.decisions.save(input, id, expectedUpdatedAt)
       if (!result.ok) { setError(result.message); return }
+      notifySystemToast('success', id ? 'Рішення оновлено' : 'Рішення додано', id ? 'Зміни рішення збережено.' : 'Нове рішення успішно збережено.')
       setDecisionDraft(null); await refresh()
     } catch { setError('Не вдалося зберегти рішення. Введені дані залишилися у формі.') }
     finally { savingRef.current = false; setSaving(false) }

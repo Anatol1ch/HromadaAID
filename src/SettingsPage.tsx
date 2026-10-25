@@ -8,6 +8,7 @@ import ChangePasswordForm from './components/ChangePasswordForm'
 import Modal from './components/Modal'
 import ServerConnectionDialog from './components/ServerConnectionDialog'
 import BackupSettings from './BackupSettings'
+import { notifySystemToast } from './components/SystemToastHost'
 
 type ConnectionActions = { getState: () => Promise<ServerConnectionState>; check: (apiUrl: string) => Promise<ServerConnectionCheckResult>; save: (apiUrl: string) => Promise<ServerConnectionSaveResult> }
 
@@ -109,6 +110,6 @@ export default function SettingsPage({ user, onChangePassword, connectionActions
         </dl>
       </section>
     </div>}
-    {connectionModalOpen && <ServerConnectionDialog onClose={() => setConnectionModalOpen(false)} {...connectionActions} onSaved={(state, message) => { setConnection(state); setConnectionMessage(message ?? state.message ?? 'Адресу сервера збережено.') }} />}
+    {connectionModalOpen && <ServerConnectionDialog onClose={() => setConnectionModalOpen(false)} {...connectionActions} onSaved={state => { setConnection(state); setConnectionMessage(''); notifySystemToast('success', 'Налаштування збережено', 'Адресу сервера оновлено.') }} />}
   </div>
 }

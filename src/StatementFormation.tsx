@@ -12,6 +12,7 @@ import { assignmentStatusColor } from '../electron/assignment-model'
 import { useReportingYear } from './context/YearContext'
 import { formatDate } from './lib/dates'
 import { connectionRestoredEvent } from './services/connectionRefresh'
+import { notifySystemToast } from './components/SystemToastHost'
 
 const money = (minor: number) => `${new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(minor / 100)} ₴`
 function pdfUrl(base64: string) {
@@ -30,7 +31,6 @@ export default function StatementFormation() {
   const [loadError, setLoadError] = useState('')
   const [loadRevision, setLoadRevision] = useState(0)
   const [error, setError] = useState('')
-  const [exportNotice, setExportNotice] = useState('')
   const [parameterRequest, setParameterRequest] = useState<{ kind: StatementKind; ids: string[]; plan: StatementPlan[] } | null>(null)
   const [statementKind, setStatementKind] = useState<StatementKind | null>(null)
   const [bankDocument, setBankDocument] = useState<GeneratedBankStatement | null>(null)
@@ -96,7 +96,7 @@ export default function StatementFormation() {
   const generate = async (kind: StatementKind, ids: string[], parameters: StatementParameters[]) => {
     if (generationInProgress.current || exportInProgress.current) return
     generationInProgress.current = true
-    setActiveGenerator(kind); setError(''); setExportNotice('')
+    setActiveGenerator(kind); setError('')
     try {
       const result = await window.hromadaAid.statements.generate(kind, ids, year, parameters)
       if (!result.ok) { setError(result.message); return }
@@ -109,7 +109,7 @@ export default function StatementFormation() {
   const generateBank = async (ids: string[]) => {
     if (generationInProgress.current || exportInProgress.current) return
     generationInProgress.current = true
-    setActiveGenerator('bank'); setError(''); setExportNotice('')
+    setActiveGenerator('bank'); setError('')
     try {
       const result = await window.hromadaAid.statements.generateBank(ids, year)
       if (!result.ok) { setError(result.message); return }
@@ -120,10 +120,10 @@ export default function StatementFormation() {
   const saveDocument = async (document: Pick<GeneratedStatement, 'id'>, format: 'xlsx' | 'pdf') => {
     if (generationInProgress.current || exportInProgress.current) return
     exportInProgress.current = true
-    setSavingId(document.id); setSavingFormat(format); setError(''); setExportNotice('')
+    setSavingId(document.id); setSavingFormat(format); setError('')
     try {
       const result = format === 'pdf' ? await window.hromadaAid.statements.savePdf(document.id) : await window.hromadaAid.statements.save(document.id)
-      if (result.ok) setExportNotice(format === 'pdf' ? 'PDF-файл збережено.' : 'Excel-файл збережено.')
+      if (result.ok) notifySystemToast('success', 'Документ збережено', format === 'pdf' ? 'PDF-файл збережено.' : 'Excel-файл збережено.')
       if (!result.ok && result.message !== 'Збереження скасовано.') setError(result.message ?? `Не вдалося зберегти ${format.toUpperCase()}-файл.`)
     } catch { setError(`Не вдалося зберегти ${format.toUpperCase()}-файл.`) }
     finally { exportInProgress.current = false; setSavingId(''); setSavingFormat('') }
@@ -159,7 +159,6 @@ export default function StatementFormation() {
     </section>
     {parameterRequest && <StatementParametersModal kind={parameterRequest.kind} plan={parameterRequest.plan} busy={generating} error={error} onClose={() => { if (!generationInProgress.current) { setParameterRequest(null); setError('') } }} onGenerate={parameters => void generate(parameterRequest.kind, parameterRequest.ids, parameters)}/>}
     {statementKind && <Modal title={statementKind === 'personal' ? 'Персональні відомості' : 'Зведені відомості'} description={`${documents.length} документів · Перегляд і збереження`} className="statement-result-modal document-preview-modal" headerIcon={<FileText size={21} aria-hidden="true"/>} busy={exporting} onClose={() => { if (!exportInProgress.current) setStatementKind(null) }} size="large">
-      {exportNotice && <Alert variant="success">{exportNotice}</Alert>}
       {documents.length > 1 && <nav className="statement-document-list" aria-label="Сформовані документи">{documents.map((document) => <button type="button" disabled={exporting} aria-pressed={document.id === activeDocumentId} className={document.id === activeDocumentId ? 'active' : ''} key={document.id} onClick={() => setActiveDocumentId(document.id)}>{document.aidTypeName}<small>№ {document.documentNumber} · {formatDate(document.documentDate)}</small><small>{document.recordCount} записів • {money(document.totalMinor)}</small></button>)}</nav>}
       {activeDocument && <><div className="statement-preview-toolbar"><strong title={activeDocument.fileName}>{activeDocument.aidTypeName} · № {activeDocument.documentNumber}</strong><span>{activeDocument.recordCount} записів • {money(activeDocument.totalMinor)}</span><div className="document-preview-actions" aria-label="Дії зі сформованою відомістю" aria-busy={exporting}><button type="button" className="secondary-button document-preview-action" disabled={operationBusy} onClick={() => { if (!exportInProgress.current) iframeRef.current?.contentWindow?.print() }}><Printer size={17} aria-hidden="true"/>Друк</button><button type="button" className="secondary-button document-preview-action" disabled={operationBusy} onClick={() => void saveDocument(activeDocument, 'xlsx')}><FileSpreadsheet size={17} aria-hidden="true"/>{savingId === activeDocument.id && savingFormat === 'xlsx' ? 'Зберігаємо…' : 'Зберегти Excel'}</button><button type="button" className="secondary-button document-preview-action" disabled={operationBusy} onClick={() => void saveDocument(activeDocument, 'pdf')}><FileText size={17} aria-hidden="true"/>{savingId === activeDocument.id && savingFormat === 'pdf' ? 'Зберігаємо…' : 'Зберегти PDF'}</button></div></div>
         <iframe ref={iframeRef} className="statement-pdf-preview" title={`Попередній перегляд ${activeDocument.fileName}`} src={`${pdfUrls[activeDocument.id]}#toolbar=1&navpanes=0&zoom=page-width`}/>
@@ -168,7 +167,6 @@ export default function StatementFormation() {
       {error && <Alert variant="error" className="ui-alert-preserve-lines">{error}</Alert>}
     </Modal>}
     {bankDocument && <Modal title="ПриватБанк" className="statement-result-modal" headerIcon={<Landmark size={21}/>} description="Банківська відомість за вибраними призначеннями" busy={exporting} onClose={() => { if (!exportInProgress.current) setBankDocument(null) }}>
-      {exportNotice && <Alert variant="success">{exportNotice}</Alert>}
       <div className="statement-preview-toolbar"><strong title={bankDocument.fileName}>Банківська відомість · ПриватБанк</strong><span>{bankDocument.recordCount} записів • {money(bankDocument.totalMinor)}</span><div><button type="button" className="primary-button" disabled={operationBusy} onClick={() => void saveDocument(bankDocument, 'xlsx')}><Download size={16}/>{savingId === bankDocument.id ? 'Зберігаємо…' : 'Зберегти Excel'}</button></div></div>
       {error && <Alert variant="error" className="ui-alert-preserve-lines">{error}</Alert>}
     </Modal>}

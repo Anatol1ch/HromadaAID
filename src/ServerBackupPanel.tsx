@@ -4,19 +4,17 @@ import type { BackupArchive, RestorePreview, ServerBackupList } from '../shared/
 import Alert from './components/Alert'
 import DictionaryTable from './components/DictionaryTable'
 import Modal from './components/Modal'
-import SystemToast, { type SystemNoticeKind } from './components/SystemToast'
+import { notifySystemToast } from './components/SystemToastHost'
 import { beginExclusiveOperation, restorePendingNotice, safeBackupErrorMessage } from './lib/backup-operations'
 
 const date = (value: string | null) => value ? new Date(value).toLocaleString('uk-UA') : 'Дата в архіві не зазначена'
 const size = (bytes: number) => `${(bytes / 1024 / 1024).toLocaleString('uk-UA', { maximumFractionDigits: 2 })} МіБ`
-type Notice = { kind: SystemNoticeKind; title: string; message: string }
 
 export default function ServerBackupPanel() {
   const [list, setList] = useState<ServerBackupList | null>(null)
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [operationLabel, setOperationLabel] = useState('')
-  const [notice, setNotice] = useState<Notice | null>(null)
   const [preview, setPreview] = useState<RestorePreview | null>(null)
   const [confirmed, setConfirmed] = useState(false)
   const [maintenance, setMaintenance] = useState(false)
@@ -28,7 +26,7 @@ export default function ServerBackupPanel() {
     mounted.current = true
     void window.hromadaAid.backups.listServer()
       .then(value => { if (active) setList(value) })
-      .catch(error => { if (active) setNotice({ kind: 'error', title: 'Не вдалося завантажити копії', message: safeBackupErrorMessage(error) }) })
+      .catch(error => { if (active) notifySystemToast('error', 'Не вдалося завантажити копії', safeBackupErrorMessage(error)) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false; mounted.current = false }
   }, [])
@@ -37,9 +35,9 @@ export default function ServerBackupPanel() {
     if (maintenance || loading) return
     const task = beginExclusiveOperation(running, operation)
     if (!task.started) return
-    setBusy(true); setOperationLabel(label); setNotice(null)
+    setBusy(true); setOperationLabel(label)
     try { await task.result }
-    catch (error) { if (mounted.current) setNotice({ kind: 'error', title: 'Операцію не виконано', message: safeBackupErrorMessage(error) }) }
+    catch (error) { if (mounted.current) notifySystemToast('error', 'Операцію не виконано', safeBackupErrorMessage(error)) }
     finally { if (mounted.current) { setBusy(false); setOperationLabel('') } }
   }
 
@@ -50,7 +48,7 @@ export default function ServerBackupPanel() {
     if (value && mounted.current) {
       setPreview(value)
       setConfirmed(false)
-      setNotice({ kind: 'success', title: 'Архів перевірено', message: 'Резервна копія пройшла перевірку та готова до підтвердження відновлення.' })
+      notifySystemToast('success', 'Архів перевірено', 'Резервна копія пройшла перевірку та готова до підтвердження відновлення.')
     }
   }
 
@@ -65,13 +63,12 @@ export default function ServerBackupPanel() {
           const value = await window.hromadaAid.backups.createServer()
           if (!mounted.current) return
           setList(value)
-          const newest = value.archives.find(item => item.kind === 'manual')
-          setNotice({ kind: 'success', title: 'Резервну копію створено', message: newest ? `Копію успішно збережено на сервері: ${date(newest.createdAt)}.` : 'Резервну копію успішно збережено на сервері.' })
+          notifySystemToast('success', 'Резервну копію створено', 'Копію успішно збережено на сервері.')
         })}><HardDriveDownload size={17} aria-hidden="true"/>Створити копію</button>
         <button className="secondary-button" type="button" disabled={busy || loading || maintenance} onClick={() => void run('Завантажуємо й перевіряємо файл…', () => prepare())}><Upload size={17} aria-hidden="true"/>Перевірити файл .hraid</button>
         <button className="secondary-button" type="button" disabled={busy || loading || maintenance} onClick={() => void run('Оновлюємо перелік архівів…', async () => {
           const value = await window.hromadaAid.backups.listServer()
-          if (mounted.current) { setList(value); setNotice({ kind: 'success', title: 'Перелік оновлено', message: 'Список серверних резервних копій оновлено.' }) }
+          if (mounted.current) { setList(value); notifySystemToast('success', 'Перелік оновлено', 'Список серверних резервних копій оновлено.') }
         })}><RotateCcw size={17} aria-hidden="true"/>Оновити перелік</button>
       </div>
       {operationLabel && <div className="backup-operation-status" role="status" aria-live="polite"><LoaderCircle size={17} aria-hidden="true"/>{operationLabel}</div>}
@@ -90,10 +87,10 @@ export default function ServerBackupPanel() {
             <button className="secondary-button" type="button" disabled={busy || loading || maintenance} onClick={() => void run('Завантажуємо архів на комп’ютер…', async () => {
               const result = await window.hromadaAid.backups.downloadServer(item.id)
               if (!mounted.current || !result.ok) {
-                if (mounted.current && result.message) setNotice({ kind: 'info', title: 'Завантаження не завершено', message: result.message })
+                if (mounted.current && result.message) notifySystemToast('info', 'Завантаження не завершено', result.message)
                 return
               }
-              setNotice({ kind: 'success', title: 'Архів завантажено', message: 'Резервну копію збережено на вашому комп’ютері.' })
+              notifySystemToast('success', 'Архів завантажено', 'Резервну копію збережено на вашому комп’ютері.')
             })}><Download size={16} aria-hidden="true"/>Завантажити</button>
             <button className="secondary-button" type="button" disabled={busy || loading || maintenance} onClick={() => void run('Перевіряємо архів і готуємо відновлення…', () => prepare(item))}><RotateCcw size={16} aria-hidden="true"/>Перевірити для відновлення</button>
           </div></td>
@@ -101,14 +98,13 @@ export default function ServerBackupPanel() {
       </DictionaryTable>
     </section>
 
-    {notice && <SystemToast key={`${notice.title}-${notice.message}`} kind={notice.kind} title={notice.title} message={notice.message} onClose={() => setNotice(null)}/>}
     {preview && <Modal title="Відновлення резервної копії" description="Перевірте дату архіву та наслідки перед підтвердженням." busy={busy} onClose={() => { if (!busy) setPreview(null) }}>
       <div className="backup-restore-warning"><strong>Увага! Відновлення замінить поточні дані системи.</strong><span>Дата копії: {date(preview.createdAt)}</span><p>Усі зміни, внесені після дати створення резервної копії, буде втрачено. Після підтвердження система перейде в режим технічного обслуговування. Для завершення відновлення необхідно виконати адміністративну процедуру на сервері.</p><p>Підготовка відновлення не означає, що дані вже відновлено. Після завершення процедури всім користувачам потрібно буде увійти до системи повторно.</p></div>
       <p className="server-backup-expiry">Підтвердження чинне до {date(preview.expiresAt)}. Після відновлення всі користувачі мають увійти повторно.</p>
       <label className="backup-restore-confirm"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)}/> Я розумію, що зміни після дати копії буде втрачено, й підтверджую підготовку відновлення.</label>
       <div className="settings-form-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setPreview(null)}>Скасувати</button><button className="danger-button" type="button" disabled={busy || !confirmed} onClick={() => void run('Передаємо підтвердження серверу…', async () => {
         const result = await window.hromadaAid.backups.confirmRestore(preview.id, preview.confirmationToken)
-        if (mounted.current) { setPreview(null); setMaintenance(true); setNotice({ ...restorePendingNotice, message: `${result.message} ${restorePendingNotice.message}` }) }
+        if (mounted.current) { setPreview(null); setMaintenance(true); notifySystemToast('warning', restorePendingNotice.title, `${result.message} ${restorePendingNotice.message}`) }
       })}>Підтвердити підготовку</button></div>
     </Modal>}
   </section>

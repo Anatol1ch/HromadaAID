@@ -4,6 +4,7 @@ import type { DecisionInput, DecisionSummary } from '../../electron/api-contract
 import { decisionRepository } from '../services/decisionRepository'
 import Modal, { confirmModalClose } from './Modal'
 import DecisionFields from './DecisionFields'
+import { notifySystemToast } from './SystemToastHost'
 
 export default function DecisionFormModal({ year, onClose, onSaved }: { year: number; onClose: () => void; onSaved: (decision: DecisionSummary) => void }) {
   const [draft, setDraft] = useState<DecisionInput>({ decisionNumber: '', decisionDate: '', title: '' })
@@ -20,6 +21,7 @@ export default function DecisionFormModal({ year, onClose, onSaved }: { year: nu
     try {
       const result = await decisionRepository.save(draft)
       if (!result.ok) { setError(result.message); return }
+      notifySystemToast('success', 'Рішення додано', 'Нове рішення успішно збережено.')
       onSaved(result.decision)
     } catch { setError('Не вдалося зберегти рішення. Введені дані залишилися у формі.') }
     finally { savingRef.current = false; setSaving(false) }

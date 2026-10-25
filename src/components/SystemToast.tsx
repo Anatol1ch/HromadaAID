@@ -6,7 +6,7 @@ export type SystemNoticeKind = 'success' | 'error' | 'warning' | 'info' | 'acces
 
 const icons = { success: CircleCheck, error: CircleAlert, warning: TriangleAlert, info: Info, 'access-denied': LockKeyhole }
 
-export default function SystemToast({ kind, title, message, onClose, duration = 5_000 }: { kind: SystemNoticeKind; title: string; message: string; onClose: () => void; duration?: number }) {
+export default function SystemToast({ kind, title, message, onClose, duration = 3_500 }: { kind: SystemNoticeKind; title: string; message: string; onClose: () => void; duration?: number }) {
   const [closing, setClosing] = useState(false)
   const closeRef = useRef(onClose)
   closeRef.current = onClose

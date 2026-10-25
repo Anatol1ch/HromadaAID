@@ -3,10 +3,10 @@ import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 
 const read = path => readFile(new URL(path, import.meta.url), 'utf8')
-const [app, styles, login, toast, accessDenied, settings, planning, backups] = await Promise.all([
+const [app, styles, login, toast, accessDenied, settings, planning, backups, toastHost] = await Promise.all([
   read('../src/App.tsx'), read('../src/styles.css'), read('../src/components/LoginScreen.tsx'),
   read('../src/components/SystemToast.tsx'), read('../src/components/AccessDeniedToast.tsx'),
-  read('../src/SettingsPage.tsx'), read('../src/AnnualPlanning.tsx'), read('../src/ServerBackupPanel.tsx'),
+  read('../src/SettingsPage.tsx'), read('../src/AnnualPlanning.tsx'), read('../src/ServerBackupPanel.tsx'), read('../src/components/SystemToastHost.tsx'),
 ])
 
 test('login connection action is an accessible icon-only button', () => {
@@ -25,12 +25,19 @@ test('home year remains horizontal while analytics stay behind the overview perm
   assert.doesNotMatch(app, /Показники та стан виконання доступні в огляді/)
 })
 
-test('SystemToast uses one five-second card treatment and access-denied shares it', () => {
-  assert.match(toast, /duration = 5_000/)
+test('SystemToast keeps the access-denied visual treatment with a short default duration', () => {
+  assert.match(toast, /duration = 3_500/)
   assert.match(toast, /window\.setTimeout\(\(\) => setClosing\(true\), duration\)/)
   assert.match(toast, /createPortal\(<aside className=\{`system-toast/)
   assert.match(toast, /setTimeout\(\(\) => closeRef\.current\(\), 180\)/)
   assert.match(accessDenied, /<SystemToast kind="access-denied"/)
+  assert.match(accessDenied, /duration=\{5_000\}/)
+  assert.match(toastHost, /duration: typeof detail\.duration === 'number'/)
+  assert.match(toastHost, /notifySystemToast\(kind: SystemNoticeKind, title: string, message: string, duration = 3_500\)/)
+  assert.match(app, /notifySystemToast\('access-denied'/)
+  assert.match(styles, /\.system-toast-success/)
+  assert.match(styles, /\.system-toast-error/)
+  assert.match(styles, /\.system-toast-warning/)
   assert.match(styles, /\.system-toast \{[^}]*left: 50%;[^}]*var\(--radius-modal\)[^}]*var\(--shadow-modal\)[^}]*transform: translateX\(-50%\)/)
   assert.match(styles, /\.system-toast.is-closing/)
   assert.match(styles, /\.system-toast-access-denied/)

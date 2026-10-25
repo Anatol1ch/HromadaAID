@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Check, Pencil, Plus, X } from 'lucide-react'
 import type { AidTypeOption, AnnualAidPlan, ProgramOption } from '../electron/api-contract'
 import { useReportingYear } from './context/YearContext'
+import { notifySystemToast } from './components/SystemToastHost'
 import { notifyCatalogsChanged, useCatalogUpdates } from './services/catalogRepository'
 import Modal, { confirmModalClose } from './components/Modal'
 import { parsePlanMoney, reportMoney } from './lib/reporting'
@@ -63,7 +64,7 @@ function PlanModal({ year, type, program, plan, onClose, onSaved }: { year: numb
     setErrors(next)
     if (Object.keys(next).length) { form.current?.querySelector<HTMLInputElement>(`[data-plan-field="${Object.keys(next)[0]}"]`)?.focus(); return }
     saving.current = true; setBusy(true)
-    try { const result = await window.hromadaAid.reports.annualPlanSave({year,aidTypeId:type.id,plannedRecipientCount:count,plannedAmountMinor:amount!}, plan?.updatedAt); if (!result.ok) setError(result.message ?? 'Не вдалося зберегти план.'); else onSaved() }
+    try { const result = await window.hromadaAid.reports.annualPlanSave({year,aidTypeId:type.id,plannedRecipientCount:count,plannedAmountMinor:amount!}, plan?.updatedAt); if (!result.ok) setError(result.message ?? 'Не вдалося зберегти план.'); else { notifySystemToast('success', 'Планові показники збережено', 'Значення річного плану успішно збережено.'); onSaved() } }
     catch { setError('Не вдалося зберегти план. Введені дані залишено у формі.') }
     finally { saving.current = false; setBusy(false) }
   }

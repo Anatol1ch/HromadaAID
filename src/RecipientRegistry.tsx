@@ -19,6 +19,7 @@ import DeleteConfirmation from './components/DeleteConfirmation'
 import Select from './components/Select'
 import { formatDate } from './lib/dates'
 import { recipientTextFields, validateRecipientInput, type RecipientErrors, type RecipientTextField } from '../electron/recipient-validation'
+import { notifySystemToast } from './components/SystemToastHost'
 
 const emptyRecipient: RecipientInput = {
   lastName: '', firstName: '', patronymic: '', rnokpp: '', sex: '', address: '', registeredAddress: '', addressParts: null, registeredAddressParts: null, isVpo: null,
@@ -237,7 +238,7 @@ export function RecipientFormModal({ initial = emptyRecipient, editingId, expect
     savingRef.current = true; setSaving(true); setError(''); setDuplicate(null)
     try {
       const result = await recipientRepository.save(validation.input, editingId, confirmSameName, expectedUpdatedAt)
-      if (result.ok) { onSaved(result.recipient); return }
+      if (result.ok) { notifySystemToast('success', editingId ? 'Дані отримувача збережено' : 'Отримувача створено', editingId ? 'Картку отримувача оновлено.' : 'Картку отримувача створено.'); onSaved(result.recipient); return }
       if (result.reason === 'name-match' || result.reason === 'rnokpp-match') setDuplicate(result)
       else setError(result.message)
     } catch { setError('Не вдалося зберегти картку. Дані у формі залишилися — спробуйте ще раз.') }

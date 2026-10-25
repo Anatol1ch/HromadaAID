@@ -20,6 +20,7 @@ import DecisionFields from './components/DecisionFields'
 import { formatDate, formatDateInput, parseDateInput, todayIsoDate } from './lib/dates'
 import DeleteConfirmation from './components/DeleteConfirmation'
 import ValidatedInput from './components/ValidatedInput'
+import { notifySystemToast } from './components/SystemToastHost'
 
 type AssignmentRowDraft = { recipientId: string; programId: string; aidTypeId: string; amount: string; status: AssignmentStatus; paidOn: string }
 
@@ -81,6 +82,7 @@ function DecisionRegistry() {
     try {
       const result = await decisionRepository.save(editor, editingId ?? undefined, editingUpdatedAt ?? undefined)
       if (!result.ok) { setError(result.message); return }
+      notifySystemToast('success', editingId ? 'Рішення оновлено' : 'Рішення додано', editingId ? 'Зміни рішення збережено.' : 'Нове рішення успішно збережено.')
       setEditor(null)
       setEditingId(null); setEditingUpdatedAt(null)
       await loadDecisions()

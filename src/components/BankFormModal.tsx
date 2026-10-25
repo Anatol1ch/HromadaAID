@@ -6,6 +6,7 @@ import { validateBankInput, type BankErrors } from '../../electron/bank-validati
 import { bankRepository } from '../services/bankRepository'
 import Modal, { confirmModalClose } from './Modal'
 import ConfirmDialog from './ConfirmDialog'
+import { notifySystemToast } from './SystemToastHost'
 
 type DetailDraft = BankInput['details'][number] & { key: string }
 const newDetail = (): DetailDraft => ({ key: crypto.randomUUID(), mfo: '', edrpou: '' })
@@ -45,7 +46,7 @@ export default function BankFormModal({ initial, onClose, onSaved }: { initial?:
     savingRef.current = true; setSaving(true)
     try {
       const result = await bankRepository.save(validation.input, initial?.id, initial?.updatedAt)
-      if (result.ok) onSaved(result.bank)
+      if (result.ok) { notifySystemToast('success', initial ? 'Реквізити оновлено' : 'Банк додано', initial ? 'Дані банку й реквізити збережено.' : 'Новий банк і його реквізити створено.'); onSaved(result.bank) }
       else setError(result.message)
     } catch { setError('Не вдалося зберегти банк. Введені дані залишилися у формі.') }
     finally { savingRef.current = false; setSaving(false) }

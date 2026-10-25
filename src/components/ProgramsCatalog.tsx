@@ -7,6 +7,7 @@ import type { AidTypeOption, CatalogOrderInput, ProgramOption } from '../../elec
 import Modal from './Modal'
 import { programTone } from '../lib/programTone'
 import { formatDate } from '../lib/dates'
+import { notifySystemToast } from './SystemToastHost'
 
 type Props = {
   loading?: boolean
@@ -41,8 +42,11 @@ export default function ProgramsCatalog({ programs, aidTypes, onEditProgram, onE
     if (from < 0 || to < 0) return
     ids.splice(to, 0, ids.splice(from, 1)[0])
     moving.current = true; setNotice('Зберігаємо порядок…')
-    try { setNotice(await onReorder({ kind: source.kind, programId: source.programId, ids }) ? 'Порядок збережено.' : 'Порядок не змінено.') }
-    finally { moving.current = false }
+    try {
+      const saved = await onReorder({ kind: source.kind, programId: source.programId, ids })
+      if (saved) notifySystemToast('success', 'Порядок збережено', 'Порядок довідника успішно оновлено.')
+      setNotice(saved ? '' : 'Порядок не змінено.')
+    } finally { moving.current = false }
   }
   const dropProps = (target: DragItem) => ({
     onDragOver: (event: DragEvent) => { if (allowed(target) && !ordering) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; setOverId(target.id) } },

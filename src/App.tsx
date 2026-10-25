@@ -15,7 +15,7 @@ import Dashboard from './Dashboard'
 import Reports from './Reports'
 import UsersAdmin from './UsersAdmin'
 import TemporaryPasswordScreen from './components/TemporaryPasswordScreen'
-import AccessDeniedToast from './components/AccessDeniedToast'
+import { notifySystemToast } from './components/SystemToastHost'
 import ConnectionStateOverlay from './components/ConnectionStateOverlay'
 import SettingsPage from './SettingsPage'
 import communityCoat from '../reference/ГЕРБ.png'
@@ -157,6 +157,7 @@ function App() {
   const changePassword = async (currentPassword: string, newPassword: string) => {
     const result = await window.hromadaAid.auth.changePassword(currentPassword, newPassword)
     setAuth(result.state)
+    if (result.ok) notifySystemToast('success', 'Пароль змінено', 'Новий пароль збережено.')
     return { ok: result.ok, message: 'message' in result ? result.message : undefined }
   }
   if (!startupReady || !auth) return <StartupScreen/>
@@ -172,7 +173,6 @@ function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extrac
   const [decisionContext, setDecisionContext] = useState<(DecisionAssignmentTarget & { label: string }) | null>(null)
   const [dictionarySection, setDictionarySection] = useState<DictionarySection | undefined>()
   const [notice, setNotice] = useState('')
-  const [accessDeniedRevision, setAccessDeniedRevision] = useState(0)
   const [year, setYear] = useState(initialAccountingYear)
   const [logoutBusy, setLogoutBusy] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -181,23 +181,22 @@ function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extrac
   const visibleNav = nav.filter((item) => item.label !== 'Користувачі' || (can('users.manage')))
   const dictionarySections = useMemo(() => dictionarySectionsForRoles(auth.user.roles) as DictionarySection[], [auth.user.roles])
   const canOpenPage = (page: WorkspacePage, permission: Permission) => (page === 'dictionaries' ? dictionarySections.length > 0 : hasWorkspacePage(auth.user.roles, page) && can(permission))
-  const showAccessDenied = useCallback(() => setAccessDeniedRevision((revision) => revision + 1), [])
-  const closeAccessDenied = useCallback(() => setAccessDeniedRevision(0), [])
+  const showAccessDenied = useCallback(() => notifySystemToast('access-denied', 'Доступ обмежено', 'У вашого облікового запису немає дозволу на виконання цієї дії.', 5_000), [])
   useEffect(() => { rememberAccountingYear(year) }, [year])
   useEffect(() => { if (activeNav !== 'Налаштування' && !visibleNav.some((item) => item.label === activeNav && canOpenPage(item.page, item.permission))) setActiveNav('Головна') }, [activeNav, visibleNav, dictionarySections, permissions])
-  const navigate = (label: string) => { const item = visibleNav.find((value) => value.label === label); if (!item) return; if (!canOpenPage(item.page, item.permission)) { showAccessDenied(); return }; setCreateAssignment(false); if (label !== 'Реєстр допомог') setDecisionContext(null); if (label !== 'Довідники') setDictionarySection(undefined); setActiveNav(label); setNotice(''); closeAccessDenied() }
-  const navigateSettings = () => { setCreateAssignment(false); setActiveNav('Налаштування'); setNotice(''); closeAccessDenied() }
+  const navigate = (label: string) => { const item = visibleNav.find((value) => value.label === label); if (!item) return; if (!canOpenPage(item.page, item.permission)) { showAccessDenied(); return }; setCreateAssignment(false); if (label !== 'Реєстр допомог') setDecisionContext(null); if (label !== 'Довідники') setDictionarySection(undefined); setActiveNav(label); setNotice('') }
+  const navigateSettings = () => { setCreateAssignment(false); setActiveNav('Налаштування'); setNotice('') }
   const newAssignment = () => { if (!can('assignments.manage') || !canOpenPage('assignments', 'assignments.read')) return; setDecisionContext(null); setCreateAssignment(true); setActiveNav('Реєстр допомог'); setNotice('') }
   const viewDecisionAssignments = (decision: { id: string; decisionDate: string; decisionNumber: string }) => {
     const target = decisionAssignmentTarget(decision.id, decision.decisionDate, canOpenPage('assignments', 'assignments.read'))
     if (!target || !dictionarySections.includes('decisions')) { showAccessDenied(); return }
     setDictionarySection('decisions')
     setDecisionContext({ ...target, label: `Рішення № ${decision.decisionNumber} від ${new Date(`${decision.decisionDate}T00:00:00`).toLocaleDateString('uk-UA')}` })
-    setYear(target.year); setCreateAssignment(false); setActiveNav('Реєстр допомог'); setNotice(''); closeAccessDenied()
+    setYear(target.year); setCreateAssignment(false); setActiveNav('Реєстр допомог'); setNotice('')
   }
   const returnToDecision = () => {
     if (!decisionContext || !dictionarySections.includes('decisions') || !canOpenPage('dictionaries', 'catalogs.read')) { setDecisionContext(null); showAccessDenied(); return }
-    setYear(decisionContext.year); setDictionarySection('decisions'); setDecisionContext(null); setActiveNav('Довідники'); setNotice(''); closeAccessDenied()
+    setYear(decisionContext.year); setDictionarySection('decisions'); setDecisionContext(null); setActiveNav('Довідники'); setNotice('')
   }
   const logout = async () => {
     if (logoutBusy) return
@@ -239,7 +238,6 @@ function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extrac
           activeNav === 'Огляд' ? <Dashboard/> : activeNav === 'Користувачі' ? <UsersAdmin currentUserId={auth.user.id}/> : activeNav === 'Налаштування' ? <SettingsPage user={user} onChangePassword={onChangePassword} connectionActions={connectionActions}/> : <Reports/>}</div>
       </div>
     </main>
-    {accessDeniedRevision > 0 && <AccessDeniedToast key={accessDeniedRevision} onClose={closeAccessDenied}/>}
     {helpOpen && <Modal title="Допомога та підтримка" description="З питань роботи системи, технічних несправностей та налаштування звертайтеся до розробника й адміністратора HromadaAID." onClose={() => setHelpOpen(false)} headerIcon={<CircleHelp size={19} aria-hidden="true"/>}><div className="support-contact-card"><div className="support-contact-owner"><strong>Розробник та адміністратор системи</strong><span>Анатолій Мироненко</span></div><a href="tel:+380985196340" onClick={event => { event.preventDefault(); void window.hromadaAid.appInfo.openExternal('tel:+380985196340') }}><Phone size={16}/><span><small>Телефон</small><strong>+380 98 519 63 40</strong></span></a><a href="mailto:tech.vishnsrada@ukr.net" onClick={event => { event.preventDefault(); void window.hromadaAid.appInfo.openExternal('mailto:tech.vishnsrada@ukr.net') }}><Mail size={16}/><span><small>Робоча електронна пошта</small><strong>tech.vishnsrada@ukr.net</strong></span></a><a href="mailto:myronenko.anatoliu@gmail.com" onClick={event => { event.preventDefault(); void window.hromadaAid.appInfo.openExternal('mailto:myronenko.anatoliu@gmail.com') }}><Mail size={16}/><span><small>Особиста електронна пошта</small><strong>myronenko.anatoliu@gmail.com</strong></span></a><a href="https://t.me/antlmrnnk" onClick={event => { event.preventDefault(); void window.hromadaAid.appInfo.openExternal('https://t.me/antlmrnnk') }}><Send size={16}/><span><small>Telegram</small><strong>@antlmrnnk</strong></span></a></div></Modal>}
   </div><UnsavedChangesConfirmation/></YearContext.Provider>
 }

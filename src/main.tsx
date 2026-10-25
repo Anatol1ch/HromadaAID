@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import KeyboardNavigation from './components/KeyboardNavigation'
+import SystemToastHost from './components/SystemToastHost'
 import './styles.css'
 
 class StartupBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
@@ -14,5 +15,5 @@ class StartupBoundary extends React.Component<{ children: React.ReactNode }, { f
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode><StartupBoundary><KeyboardNavigation><App /></KeyboardNavigation></StartupBoundary></React.StrictMode>,
+  <React.StrictMode><StartupBoundary><KeyboardNavigation><App /><SystemToastHost /></KeyboardNavigation></StartupBoundary></React.StrictMode>,
 )

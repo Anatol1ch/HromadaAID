@@ -3,6 +3,7 @@ import { FileText, FileSpreadsheet, LoaderCircle, Printer } from 'lucide-react'
 import type { PreparedReport } from '../../electron/api-contract'
 import Modal from './Modal'
 import Alert from './Alert'
+import { notifySystemToast } from './SystemToastHost'
 
 export default function ReportPreviewModal({ document, onClose }: { document: PreparedReport; onClose: () => void }) {
   const iframe = useRef<HTMLIFrameElement>(null)
@@ -10,7 +11,7 @@ export default function ReportPreviewModal({ document, onClose }: { document: Pr
   const [url, setUrl] = useState('')
   const [loaded, setLoaded] = useState(false)
   const [operation, setOperation] = useState<'pdf' | 'excel' | 'print' | null>(null)
-  const [error, setError] = useState(''), [notice, setNotice] = useState('')
+  const [error, setError] = useState('')
   useEffect(() => {
     const binary = atob(document.pdfBase64)
     const bytes = new Uint8Array(binary.length)
@@ -21,7 +22,7 @@ export default function ReportPreviewModal({ document, onClose }: { document: Pr
   }, [document.pdfBase64])
   const execute = async (action: 'pdf' | 'excel' | 'print') => {
     if (inFlight.current || action === 'print' && !loaded) return
-    inFlight.current = true; setOperation(action); setError(''); setNotice('')
+    inFlight.current = true; setOperation(action); setError('')
     try {
       if (action === 'print') {
         if (!iframe.current?.contentWindow) throw new Error('PDF недоступний.')
@@ -29,7 +30,7 @@ export default function ReportPreviewModal({ document, onClose }: { document: Pr
         iframe.current.contentWindow.print()
       } else {
         const result = action === 'pdf' ? await window.hromadaAid.reports.savePdf(document.id) : await window.hromadaAid.reports.saveExcel(document.id)
-        if (result.ok) setNotice(action === 'pdf' ? 'PDF-файл збережено.' : 'Excel-файл збережено.')
+        if (result.ok) notifySystemToast('success', 'Звіт збережено', action === 'pdf' ? 'PDF-файл збережено.' : 'Excel-файл збережено.')
         else if (!result.canceled) setError(result.message ?? 'Не вдалося зберегти документ. Повторіть спробу.')
       }
     } catch { setError(action === 'print' ? 'Не вдалося відкрити друк PDF. Повторіть спробу.' : 'Не вдалося зберегти документ. Перегляд PDF залишається доступним.') }
@@ -45,7 +46,6 @@ export default function ReportPreviewModal({ document, onClose }: { document: Pr
       </div>
     </div>
     {error && <Alert variant="error">{error}</Alert>}
-    {notice && <Alert variant="success">{notice}</Alert>}
     {url && <iframe ref={iframe} className="statement-pdf-preview" title={`Попередній перегляд: ${document.title}, ${document.periodRange}`} src={`${url}#toolbar=1&navpanes=0&zoom=page-width`} onLoad={() => setLoaded(true)}/>}
   </Modal>
 }

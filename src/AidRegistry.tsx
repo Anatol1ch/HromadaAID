@@ -18,6 +18,7 @@ import Select from './components/Select'
 import { paymentYearError } from '../electron/accounting-year'
 import DateField from './components/DateField'
 import ValidatedInput from './components/ValidatedInput'
+import { notifySystemToast } from './components/SystemToastHost'
 import { formatDate, formatDateInput, parseDateInput, todayIsoDate } from './lib/dates'
 import { useReportingYear } from './context/YearContext'
 import DeleteConfirmation from './components/DeleteConfirmation'
@@ -79,11 +80,10 @@ export default function AidRegistry({ createOnOpen = false, decisionContext, onR
   const [deletePreview, setDeletePreview] = useState<DeletePreview | null>(null)
   const [selection, setSelection] = useState<{ year: number; ids: Set<string> }>(() => ({ year, ids: new Set() }))
   const [batchIds, setBatchIds] = useState<string[] | null>(null)
-  const [batchNotice, setBatchNotice] = useState('')
   const [contextError, setContextError] = useState('')
   const appliedDecisionContext = useRef<string | null>(null)
   const paidSelectionReasonId = useId()
-  useEffect(() => { setSelection({ year, ids: new Set() }); setBatchIds(null); setBatchNotice('') }, [year])
+  useEffect(() => { setSelection({ year, ids: new Set() }); setBatchIds(null) }, [year])
 
   const refresh = async (selectedYear = year) => {
     const sequence = ++refreshSequence.current
@@ -216,6 +216,9 @@ export default function AidRegistry({ createOnOpen = false, decisionContext, onR
     try {
       const result = await assignmentRepository.save(input, editingId, editingUpdatedAt, assignmentRequestId.current)
       if (!result.ok) { setError(result.message); saveAndContinueRef.current = false; return }
+      const wasPaid = editingId ? rows.find(row => row.id === editingId)?.status === 'Виплачено' : false
+      const confirmedPayment = draft.status === 'Виплачено' && !wasPaid
+      notifySystemToast('success', confirmedPayment ? 'Виплату підтверджено' : editingId ? 'Зміни збережено' : 'Призначення створено', confirmedPayment ? 'Виплату за призначенням підтверджено.' : editingId ? 'Призначення успішно оновлено.' : 'Нове призначення успішно збережено.')
       if (saveAndContinueRef.current && !editingId) {
         const next = { ...blank(), decisionId: draft.decisionId, decisionNumber: draft.decisionNumber, decisionDate: draft.decisionDate }
         initialDraft.current = JSON.stringify(next); setDraft(next); setError(''); saveAndContinueRef.current = false
@@ -268,14 +271,13 @@ export default function AidRegistry({ createOnOpen = false, decisionContext, onR
         <label><span>ВПО</span><Select label="Фільтр: ВПО" value={filters.vpo} placeholder="Усі" options={[{ value: '', label: 'Усі' }, { value: 'yes', label: 'Так' }, { value: 'no', label: 'Ні' }]} onChange={(value) => setFilters((current) => ({ ...current, vpo: value }))}/></label>
       </div></div>
       <span id={paidSelectionReasonId} className="visually-hidden">Виплачене призначення можна змінити лише індивідуально</span>
-      {batchNotice && <Alert variant="success">{batchNotice}</Alert>}
       {loading && !rows.length ? <TableSkeleton columns={11} label="Завантажуємо призначення…"/> : loadError ? <Alert variant="error" action={<button type="button" onClick={() => void refresh()}>Повторити завантаження</button>}>{loadError}</Alert> : <div className="aid-table-wrap" role="region" aria-label="Таблиця реєстру допомог — горизонтальна прокрутка за потреби" tabIndex={0}><table className="aid-table" aria-label="Призначення матеріальної допомоги" aria-busy={loading || undefined}><colgroup><col className="aid-col-selection"/>{tableColumns.map(({ key }) => <col className={`aid-col-${key}`} key={key}/>)}<col className="aid-col-actions"/></colgroup><thead><tr><th scope="col" className="aid-selection-cell"><SelectAllAssignments checked={headerSelection.checked} indeterminate={headerSelection.indeterminate} disabled={!eligibleIds.length} onChange={() => setSelection({ year, ids: toggleEligibleSelection(eligibleIds, selectedIds) })}/></th>{tableColumns.map(({ key, label }) => <th scope="col" key={key} aria-sort={sort.key === key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : undefined}>{sortHeader(label, key)}</th>)}<th scope="col">Дії</th></tr></thead><tbody>{!visible.length && <tr><td colSpan={tableColumns.length + 2} className="aid-empty-cell"><DataState kind={rows.length ? "search" : "empty"} message={decisionContext && filters.decisionId === decisionContext.decisionId ? 'За цим рішенням призначень не знайдено' : rows.length ? 'За заданими параметрами нічого не знайдено' : `За ${year} рік призначень немає`} description={decisionContext && filters.decisionId === decisionContext.decisionId ? 'Перевірте, чи додано призначення до цього рішення.' : rows.length ? 'Очистіть пошук або фільтри, щоб переглянути призначення.' : 'Створіть перше призначення, щоб розпочати облік'}/></td></tr>}{visible.map((row, index) => <tr key={row.id} className={selectedIds.has(row.id) ? 'aid-row-selected' : undefined}><td className="aid-selection-cell"><span className="aid-selection-control" title={row.status === 'Виплачено' ? 'Виплачене призначення можна змінити лише індивідуально' : undefined}><input type="checkbox" aria-label={`Вибрати призначення: ${row.recipientName}, рішення № ${row.decisionNumber}`} aria-describedby={row.status === 'Виплачено' ? paidSelectionReasonId : undefined} checked={selectedIds.has(row.id)} disabled={row.status === 'Виплачено'} onChange={() => toggleAssignment(row.id)}/></span></td><td data-label="№">{index + 1}</td><td data-label="Рішення"><strong className="registry-name">№ {row.decisionNumber}</strong><span className="decision-date-cell">{formatDate(row.decisionDate)}</span></td><td data-label="Програма">{row.programName}</td><td data-label="Вид допомоги">{row.aidTypeName}</td><td data-label="ПІБ"><strong className="registry-name">{row.recipientName}</strong>{row.recipientIsDemo && <span className="demo-recipient-badge">Демо</span>}</td><td data-label="Стать">{row.recipientSex ?? '—'}</td><td data-label="Сума призначення" className="assignment-amount"><strong>{money(row.amountMinor)}</strong></td><td data-label="ВПО">{row.recipientIsVpo === null ? 'Не зазначено' : row.recipientIsVpo ? 'Так' : 'Ні'}</td><td data-label="Статус"><span className={`status-badge status-${assignmentStatusColor[row.status]}`}>{row.status}</span></td><td data-label="Дії"><div className="registry-row-actions"><button className="table-action" aria-label={`Редагувати призначення ${row.recipientName}`} onClick={() => startEdit(row)}><Pencil size={17}/></button><button className="table-action danger-action" aria-label={`Видалити призначення ${row.recipientName}`} onClick={() => void requestDelete(row)}><Trash2 size={17}/></button></div></td></tr>)}</tbody><tfoot aria-live="polite"><tr><td colSpan={7} className="aid-total-count">{visible.length ? 'Призначено:' : 'Всього:'} <strong>{assignedCount}</strong></td><td className="assignment-amount" data-label="Сума призначень">{!visible.length && <span className="aid-empty-total-label">Сума призначень:</span>}<strong>{money(assignedTotalMinor)}</strong></td><td colSpan={3} className="aid-total-spacer" aria-hidden="true"/></tr></tfoot></table></div>}
       {!loading && !loadError && selectedIds.size > 0 && <div className="aid-batch-toolbar"><strong>Вибрано призначень: {selectedIds.size}</strong><div><button type="button" className="primary-button" onClick={() => setBatchIds([...selectedIds])}>Змінити статус</button><button type="button" className="secondary-button" onClick={() => setSelection({ year, ids: new Set() })}>Скасувати вибір</button></div></div>}
 
     </section>
     {batchIds && <BatchAssignmentStatusModal assignmentIds={batchIds} year={year} onClose={() => setBatchIds(null)} onSaved={(result) => {
       setBatchIds(null); setSelection({ year, ids: new Set() })
-      setBatchNotice(`Оновлено статусів: ${result.updatedCount}.${result.unchangedCount ? ` Без змін: ${result.unchangedCount}.` : ''}`)
+      notifySystemToast(result.updatedCount ? 'success' : 'info', result.updatedCount ? 'Статус оновлено' : 'Змін не потрібно', result.updatedCount ? `Оновлено призначень: ${result.updatedCount}.` : 'Усі вибрані призначення вже мають цей статус.')
       void refresh(year)
     }}/>}
     {deletePreview && <DeleteConfirmation preview={deletePreview} onClose={() => setDeletePreview(null)} onDeleted={async () => { setDeletePreview(null); await refresh() }}/>}
