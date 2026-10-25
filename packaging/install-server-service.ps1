@@ -3,7 +3,8 @@
   [Parameter(Mandatory = $true)][string]$DataDirectory,
   [Parameter(Mandatory = $true)][string]$BackupDirectory,
   [Parameter(Mandatory = $false)][string]$PreviousServiceStateFile,
-  [Parameter(Mandatory = $false)][switch]$FromServerManager
+  [Parameter(Mandatory = $false)][switch]$FromServerManager,
+  [Parameter(Mandatory = $false)][switch]$UpdateOnly
 )
 $ErrorActionPreference = 'Stop'
 $serviceName = 'HromadaAIDApi'
@@ -341,21 +342,29 @@ try {
   }
 
   $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+  if ($UpdateOnly -and (-not $hadOldPackage -or $null -eq $service)) {
+    throw 'Режим оновлення доступний лише для наявного серверного пакета із зареєстрованою службою. Первинне встановлення не виконано.'
+  }
   if ($PreviousServiceStateFile -and [IO.File]::Exists($PreviousServiceStateFile)) { $wasServiceRunning = [IO.File]::ReadAllText($PreviousServiceStateFile).Trim() -eq 'Running' }
   else { $wasServiceRunning = $null -ne $service -and $service.Status -eq 'Running' }
 
   Set-InstallStage 'configure-acl'
   foreach ($path in @($ProgramDirectory, $activeServer, $DataDirectory, $databaseRoot, (Join-Path $DataDirectory 'Logs'), $BackupDirectory, $config, $key)) { Save-Acl $path }
-  Set-AclChecked $DataDirectory @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
-  Set-AclChecked $databaseRoot @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
-  Set-AclChecked (Join-Path $DataDirectory 'Logs') @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
-  Set-AclChecked $BackupDirectory @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
-  Set-ReadOnlyServiceFile $config
-  if ($settings.tls) {
-    $tlsCertificate = [IO.Path]::GetFullPath([string]$settings.tls.certificatePath)
-    $tlsPrivateKey = [IO.Path]::GetFullPath([string]$settings.tls.privateKeyPath)
-    if ([IO.File]::Exists($tlsCertificate)) { Save-Acl $tlsCertificate; Set-ReadOnlyServiceFile $tlsCertificate }
-    if ([IO.File]::Exists($tlsPrivateKey)) { Save-Acl $tlsPrivateKey; Set-ReadOnlyServiceFile $tlsPrivateKey }
+  if (-not $hadOldPackage) {
+    # Initial install needs the baseline ACLs before creating data. During an
+    # update, preserve live data ACLs until the service is stopped; the normal
+    # service-ACL phase below applies and verifies the service access safely.
+    Set-AclChecked $DataDirectory @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
+    Set-AclChecked $databaseRoot @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
+    Set-AclChecked (Join-Path $DataDirectory 'Logs') @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
+    Set-AclChecked $BackupDirectory @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
+    Set-ReadOnlyServiceFile $config
+    if ($settings.tls) {
+      $tlsCertificate = [IO.Path]::GetFullPath([string]$settings.tls.certificatePath)
+      $tlsPrivateKey = [IO.Path]::GetFullPath([string]$settings.tls.privateKeyPath)
+      if ([IO.File]::Exists($tlsCertificate)) { Save-Acl $tlsCertificate; Set-ReadOnlyServiceFile $tlsCertificate }
+      if ([IO.File]::Exists($tlsPrivateKey)) { Save-Acl $tlsPrivateKey; Set-ReadOnlyServiceFile $tlsPrivateKey }
+    }
   }
 
   Set-InstallStage 'initialize-data'
@@ -385,9 +394,11 @@ try {
     $script:LastChildExitCode = $null
   }
 
-  if ([IO.File]::Exists($key)) { Set-ReadOnlyServiceFile $key }
-  Set-AclChecked $BackupDirectory @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
-  if ([IO.File]::Exists($key)) { Set-ReadOnlyServiceFile $key }
+  if (-not $hadOldPackage) {
+    if ([IO.File]::Exists($key)) { Set-ReadOnlyServiceFile $key }
+    Set-AclChecked $BackupDirectory @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
+    if ([IO.File]::Exists($key)) { Set-ReadOnlyServiceFile $key }
+  }
 
   Set-InstallStage 'inspect-database-and-create-admin'
   $databaseStatus = Get-DatabaseStatus $newNode $stagedServer $database
@@ -399,6 +410,9 @@ try {
     catch { throw 'Маркер незавершеного першого налаштування пошкоджений; автоматичне створення облікового запису зупинено.' }
     if ([IO.Path]::GetFullPath([string]$pending.databasePath) -ine $database) { throw 'Маркер першого налаштування належить іншій SQLite; автоматичні зміни зупинено.' }
   }
+  if ($UpdateOnly -and ($databaseStatus.users -eq 0 -or $pendingExists)) {
+    throw 'Оновлення зупинено: наявна база не підтверджує завершене первинне налаштування. Створення адміністратора під час оновлення заборонено; дані збережено.'
+  }
   if ($databaseStatus.users -eq 0) {
     if (-not $pendingExists) { throw 'База існує без користувачів і без маркера першого встановлення. Створення адміністратора в довільній базі заборонено; потрібне окреме рішення адміністратора.' }
     $adminScript = Join-Path $stagedServer 'installer\admin-setup.ps1'
@@ -408,6 +422,16 @@ try {
     if ($adminProcess.ExitCode -ne 0) { throw 'Першого адміністратора не створено. Наявні база, ключ і архіви збережено; повторіть встановлення для продовження.' }
     $databaseStatus = Get-DatabaseStatus $newNode $stagedServer $database
     if ($databaseStatus.users -ne 'present') { throw 'Після створення адміністратора перевірка облікового запису не пройшла.' }
+  }
+
+  # Keep all package, configuration, SQLite, compatibility and ACL checks
+  # ahead of service downtime. Stop only immediately before the transaction.
+  if ($null -ne $service -and $service.Status -ne 'Stopped') {
+    Set-InstallStage 'stop-service'
+    Stop-Service -Name $serviceName -ErrorAction Stop
+    $service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(45))
+    $service = Get-Service -Name $serviceName -ErrorAction Stop
+    if ($service.Status -ne 'Stopped') { throw 'Windows Service не підтвердила штатну зупинку перед перемиканням пакета.' }
   }
 
   Set-InstallStage 'prepare-package-journal'
@@ -455,7 +479,10 @@ try {
   $failure = Protect-InstallDiagnosticText ([string]$caught.Exception.Message)
   Write-InstallFailureDiagnostic $caught
   $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-  if ($null -ne $service -and $service.Status -ne 'Stopped') { try { Stop-Service -Name $serviceName -ErrorAction Stop; (Get-Service -Name $serviceName).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(45)) } catch { } }
+  # A validation failure must never take a healthy installed service offline.
+  # Only stop a replacement/rollback service after transaction files exist.
+  $transactionStarted = [IO.Directory]::Exists($previousServer) -or [IO.Directory]::Exists($failedServer) -or $newServiceRegistered
+  if ($transactionStarted -and $null -ne $service -and $service.Status -ne 'Stopped') { try { Stop-Service -Name $serviceName -ErrorAction Stop; (Get-Service -Name $serviceName).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(45)) } catch { } }
   $activeWrapper = Join-Path $activeServer 'service\HromadaAIDService.exe'
   if ($newServiceRegistered -and [IO.File]::Exists($activeWrapper)) { try { & $activeWrapper uninstall 2>$null } catch { } }
 

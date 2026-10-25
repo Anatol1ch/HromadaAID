@@ -166,6 +166,13 @@
 .sm-update-steps p { margin: 3px 0 0; color: var(--color-text-secondary); font-size: 12px; }
 .sm-local-notice { padding: 8px 12px; margin: 0; border-radius: var(--radius-control); background: var(--feedback-success-bg); color: var(--feedback-success-text); font-size: 12px; }
 .sm-local-notice.is-error { background: var(--feedback-error-bg); color: var(--feedback-error-text); }
+.sm-update-review { display: grid; gap: 14px; }
+.sm-update-review > h3, .sm-update-failure > h3 { margin: 0; color: var(--color-text); font-size: 18px; }
+.sm-update-review .sm-details { margin: 0; }
+.sm-update-details { width: 100%; padding: 12px; border: 1px solid var(--border-standard); border-radius: var(--radius-control); background: var(--surface-app); color: var(--color-text-secondary); font-size: 12px; }
+.sm-update-details summary { cursor: pointer; font-weight: 600; color: var(--color-text-control); }
+.sm-update-details pre { margin: 10px 0 0; max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.55 ui-monospace, Consolas, monospace; }
+.sm-update-failure { display: grid; gap: 12px; width: 100%; }
 .sm-skip { position: fixed; top: -100px; left: 20px; z-index: 3000; padding: 12px 20px; background: var(--surface-card); color: var(--accent-green); }
 .sm-skip:focus { top: 10px; }
 .sm-start-error { padding: 40px; }

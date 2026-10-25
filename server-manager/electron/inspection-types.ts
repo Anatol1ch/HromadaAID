@@ -37,6 +37,7 @@ export type InspectionSnapshot = {
   api: { status: ApiStatus; message: string; contractVersion: number | null }
   configuration: InspectedConfiguration
   discovery: { source: DiscoverySource; confidence: DiscoveryConfidence; message: string }
+  updateReadiness?: { ready: boolean; reason: string }
   checks: InspectionCheck[]
 }
 
@@ -51,6 +52,10 @@ export type ManagerInspectionApi = {
   cancelRecoveryKey(): Promise<boolean>
   onInstallationUpdate(listener: (value: import('./installation-contract.js').ServerInstallUpdate) => void): () => void
   onRecoveryKeyRequired(listener: (value: { operationId: string; key: string }) => void): () => void
+  selectServerUpdatePackage(): Promise<{ preview: import('./server-update-contract.js').ServerUpdatePreview | null; error?: string; code?: string }>
+  applyServerUpdate(previewId: string): Promise<import('./server-update-contract.js').ServerUpdateResult>
+  cancelServerUpdatePreview(previewId: string): Promise<boolean>
+  onServerUpdateProgress(listener: (value: import('./server-update-contract.js').ServerUpdateProgress) => void): () => void
 }
 
 declare global {

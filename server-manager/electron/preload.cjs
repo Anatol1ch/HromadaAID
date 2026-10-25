@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld('hromadaManager', Object.freeze({
   saveRecoveryKey: () => ipcRenderer.invoke('manager:save-recovery-key'),
   confirmRecoveryKeySaved: () => ipcRenderer.invoke('manager:confirm-recovery-key-saved'),
   cancelRecoveryKey: () => ipcRenderer.invoke('manager:cancel-recovery-key'),
+  selectServerUpdatePackage: () => ipcRenderer.invoke('manager:select-server-update-package'),
+  applyServerUpdate: previewId => ipcRenderer.invoke('manager:apply-server-update', previewId),
+  cancelServerUpdatePreview: previewId => ipcRenderer.invoke('manager:cancel-server-update-preview', previewId),
   onInstallationUpdate: listener => {
     const handler = (_event, value) => listener(value)
     ipcRenderer.on('manager:installation-update', handler)
@@ -18,5 +21,10 @@ contextBridge.exposeInMainWorld('hromadaManager', Object.freeze({
     const handler = (_event, value) => listener(value)
     ipcRenderer.on('manager:recovery-key-required', handler)
     return () => ipcRenderer.removeListener('manager:recovery-key-required', handler)
+  },
+  onServerUpdateProgress: listener => {
+    const handler = (_event, value) => listener(value)
+    ipcRenderer.on('manager:server-update-progress', handler)
+    return () => ipcRenderer.removeListener('manager:server-update-progress', handler)
   },
 }))

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, screen, session } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { writeFile } from 'node:fs/promises'
+import { lstat, writeFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { inspectEnvironment } from './inspection-engine.js'
@@ -12,6 +12,8 @@ import { runServerInstallation } from './installation-engine.js'
 import { createWindowsInstallationAdapters } from './windows-installation.js'
 import { createServiceControlRequestHandler, runServiceControl, type ServiceControlOperation } from './service-control.js'
 import { controlWindowsService } from './windows-service-control.js'
+import { prepareServerUpdate, applyServerUpdate, type PreparedServerUpdate } from './server-update.js'
+import { createWindowsServerUpdateAdapters } from './windows-server-update.js'
 
 // An independent process and profile; only a narrow read-only inspection bridge is exposed.
 app.setName('HromadaAID Server Manager')
@@ -23,6 +25,10 @@ const devOrigin = 'http://127.0.0.1:5176'
 let window: BrowserWindow | null = null
 let activeInstallId: string | null = null
 let serviceOperationInProgress = false
+let updatePreparationInProgress = false
+let activeUpdateId: string | null = null
+let preparedServerUpdate: PreparedServerUpdate | null = null
+let updateCloseWarningOpen = false
 let recoveryPrompt: { operationId: string; key: string; savedPath: string | null; resolve: (saved: boolean) => void } | null = null
 
 function isTrustedRenderer(event: Electron.IpcMainInvokeEvent): boolean {
@@ -44,8 +50,31 @@ function failedInspection(): InspectionSnapshot {
     api: { status: 'unknown', message: 'Health endpoint не перевірено через помилку діагностики.', contractVersion: null },
     configuration: { programDirectory: null, dataDirectory: null, backupDirectory: null, databasePath: null, apiAddress: null, host: null, port: null, transport: null, serverVersion: null, serviceName: 'HromadaAIDApi', serviceAccount: null, startMode: null, logDirectory: null },
     discovery: { source: 'unknown', confidence: 'unavailable', message: 'Джерело інсталяції не вдалося перевірити.' },
+    updateReadiness: { ready: false, reason: 'Стан інсталяції не вдалося перевірити.' },
     checks: [{ id: 'installation', title: 'Перевірка середовища', status: 'unknown', checkedAt, message, details: 'INSPECTION_FAILED' }],
   }
+}
+
+async function inspectWithUpdateReadiness(): Promise<InspectionSnapshot> {
+  const snapshot = await inspectEnvironment(createWindowsInspectionAdapters())
+  const configuration = snapshot.configuration
+  let updateReadiness: NonNullable<InspectionSnapshot['updateReadiness']> = { ready: false, reason: 'Оновлення доступне лише для підтвердженої встановленої служби.' }
+  if (snapshot.installation.status === 'installed' && ['running', 'stopped'].includes(snapshot.service.status) && ['confirmed', 'corroborated'].includes(snapshot.discovery.confidence) && configuration.programDirectory && configuration.dataDirectory) {
+    const conflicts = [join(configuration.programDirectory, 'Server.next'), join(configuration.programDirectory, 'Server.previous'), join(configuration.programDirectory, 'Server.failed'), join(configuration.dataDirectory, '.hromadaaid-update-state.json')]
+    try {
+      const existing = []
+      for (const path of conflicts) {
+        try { await lstat(path); existing.push(path.split(/[\\/]/).pop() ?? 'службовий файл') }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && (error as NodeJS.ErrnoException).code !== 'ENOTDIR') throw error }
+      }
+      updateReadiness = existing.length
+        ? { ready: false, reason: `Виявлено залишки попередньої транзакції (${existing.join(', ')}). Спершу потрібне відновлення.` }
+        : { ready: true, reason: 'Повну інсталяцію підтверджено; незавершених транзакцій не знайдено.' }
+    } catch {
+      updateReadiness = { ready: false, reason: 'Не вдалося перевірити службові файли транзакції; оновлення заблоковано.' }
+    }
+  }
+  return { ...snapshot, updateReadiness }
 }
 
 async function openWindow() {
@@ -72,6 +101,12 @@ async function openWindow() {
   // The window stays hidden until Chromium has painted the maximized layout,
   // avoiding a visible small-window-to-maximized transition.
   window.once('ready-to-show', () => window?.show())
+  window.on('close', event => {
+    if (!activeUpdateId || updateCloseWarningOpen) return
+    event.preventDefault()
+    updateCloseWarningOpen = true
+    void dialog.showMessageBox(window!, { type: 'warning', title: 'Оновлення сервера триває', message: 'Дочекайтеся завершення оновлення та перевірки API. Закриття зараз може перервати контрольовану операцію.', buttons: ['Зрозуміло'], defaultId: 0, noLink: true }).finally(() => { updateCloseWarningOpen = false })
+  })
   window.on('closed', () => { window = null })
   if (development) await window.loadURL(devOrigin)
   else await window.loadFile(fileURLToPath(page))
@@ -79,7 +114,7 @@ async function openWindow() {
 
 if (!app.requestSingleInstanceLock()) app.quit()
 else {
-  const inspectRequest = createInspectionRequestHandler(() => inspectEnvironment(createWindowsInspectionAdapters()), isTrustedRenderer, failedInspection)
+  const inspectRequest = createInspectionRequestHandler(inspectWithUpdateReadiness, isTrustedRenderer, failedInspection)
   ipcMain.handle('manager:inspect-environment', event => inspectRequest(event))
   const serviceControlRequest = createServiceControlRequestHandler(
     async (operation: ServiceControlOperation, operationId) => {
@@ -94,11 +129,50 @@ else {
       } finally { serviceOperationInProgress = false }
     },
     isTrustedRenderer,
-    () => activeInstallId !== null || serviceOperationInProgress,
+    () => activeInstallId !== null || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId !== null || preparedServerUpdate !== null,
     randomUUID,
     failedInspection,
   )
   ipcMain.handle('manager:control-service', (event, operation: unknown) => serviceControlRequest(event, operation))
+  ipcMain.handle('manager:select-server-update-package', async event => {
+    if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
+    if (activeInstallId || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId) return { preview: null, code: 'OPERATION_BUSY', error: 'Зараз виконується інша системна операція.' }
+    const selection = await dialog.showOpenDialog(window!, { title: 'Виберіть ZIP-пакет HromadaAID Server', properties: ['openFile'], filters: [{ name: 'ZIP-пакет сервера', extensions: ['zip'] }] })
+    if (selection.canceled || !selection.filePaths[0]) return { preview: null }
+    updatePreparationInProgress = true
+    try {
+      const adapters = createWindowsServerUpdateAdapters()
+      const prepared = await prepareServerUpdate(selection.filePaths[0], adapters)
+      if (preparedServerUpdate) await adapters.cleanup(preparedServerUpdate.cleanupRoot)
+      preparedServerUpdate = prepared
+      return { preview: prepared.preview }
+    } catch (error) {
+      const failure = error as Error & { code?: string }
+      return { preview: null, code: failure.code ?? 'UPDATE_VALIDATION_FAILED', error: failure.message || 'Не вдалося перевірити пакет сервера.' }
+    } finally { updatePreparationInProgress = false }
+  })
+  ipcMain.handle('manager:cancel-server-update-preview', async (event, previewId: unknown) => {
+    if (!isTrustedRenderer(event) || typeof previewId !== 'string' || preparedServerUpdate?.preview.id !== previewId || activeUpdateId) return false
+    const current = preparedServerUpdate
+    preparedServerUpdate = null
+    await createWindowsServerUpdateAdapters().cleanup(current.cleanupRoot).catch(() => undefined)
+    return true
+  })
+  ipcMain.handle('manager:apply-server-update', async (event, previewId: unknown) => {
+    if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
+    if (typeof previewId !== 'string' || !preparedServerUpdate || preparedServerUpdate.preview.id !== previewId) return { operationId: randomUUID(), success: false, rolledBack: false, manualRecoveryRequired: false, message: 'Перевірений пакет уже недоступний. Виберіть ZIP повторно.' }
+    if (activeInstallId || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId) return { operationId: randomUUID(), success: false, rolledBack: false, manualRecoveryRequired: false, message: 'Зараз виконується інша системна операція.' }
+    const prepared = preparedServerUpdate
+    const operationId = randomUUID()
+    activeUpdateId = operationId
+    const send = (update: import('./server-update.js').ServerUpdateProgress) => { if (window && !window.isDestroyed() && isTrustedRenderer(event)) window.webContents.send('manager:server-update-progress', update) }
+    try {
+      return await applyServerUpdate(prepared, createWindowsServerUpdateAdapters(), operationId, send)
+    } finally {
+      preparedServerUpdate = null
+      activeUpdateId = null
+    }
+  })
   ipcMain.handle('manager:select-install-directory', async (event, kind: InstallDirectoryKind) => {
     if (!isTrustedRenderer(event) || !['program', 'data', 'backups'].includes(kind)) throw new Error('UNTRUSTED_RENDERER')
     const labels: Record<InstallDirectoryKind, string> = { program: 'Каталог програми сервера', data: 'Каталог серверних даних', backups: 'Каталог резервних копій' }
@@ -117,7 +191,7 @@ else {
   })
   ipcMain.handle('manager:install-server', async (event, input: unknown) => {
     if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
-    if (activeInstallId || serviceOperationInProgress) throw new Error('INSTALLATION_ALREADY_RUNNING')
+    if (activeInstallId || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId || preparedServerUpdate) throw new Error('INSTALLATION_ALREADY_RUNNING')
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('INSTALL_OPTIONS_INVALID')
     const request = input as ServerInstallRequest
     if (Object.keys(request).some(key => !['programDirectory', 'dataDirectory', 'backupDirectory', 'host', 'port', 'administrator'].includes(key)) ||
@@ -191,5 +265,8 @@ else {
     dialog.showErrorBox('HromadaAID Server Manager', 'Не вдалося відкрити інтерфейс. Перевірте збірку Server Manager та повторіть запуск.')
     app.exit(1)
   })
-  app.on('window-all-closed', () => app.quit())
+  app.on('window-all-closed', () => {
+    if (preparedServerUpdate) { void createWindowsServerUpdateAdapters().cleanup(preparedServerUpdate.cleanupRoot); preparedServerUpdate = null }
+    app.quit()
+  })
 }
