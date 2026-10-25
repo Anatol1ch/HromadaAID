@@ -51,3 +51,14 @@ Setup і Uninstall також використовують фірмову іко
 одночасно відкритих Client/Manager, ярлики обох компонентів у трьох режимах,
 Modify/Reinstall та Installed Apps у Server-only. Старі закріплені Windows ярлики
 можуть зберігати кеш попередньої іконки; автоматичне очищення кешу не виконується.
+
+## Ресурси NSIS майстра
+
+`hromadaaid-installer-header.bmp` — компактний заголовок MUI2 150×57 із наявним
+знаком і назвою продукту. Три BMP 48×48 використовуються поруч із native radio
+controls для вибору Client, Server або повного комплекту. Усі елементи застосовують
+фірмовий зелений #286343 та світлий фон. Ресурси відтворюються зі штатним
+System.Drawing у Windows PowerShell:
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/generate-installer-ui-assets.ps1`.
+Сценарій читає `hromadaaid.png` і записує лише похідні BMP у `assets/`; він не
+запускає NSIS чи пакування застосунків.

@@ -65,6 +65,42 @@ test('NSIS implements the three modes through a client section and inseparable s
   assert.doesNotMatch(script, /ExecWait\s+'[^\r\n]*powershell\.exe/i)
 })
 
+test('NSIS presents branded mode selection and keeps installer validation and uninstall pages', async () => {
+  const script = (await readFile(new URL('../packaging/windows-installer.nsi', import.meta.url), 'utf8')).replace(/^\uFEFF/, '')
+  assert.match(script, /!include "nsDialogs\.nsh"/)
+  assert.match(script, /!define MUI_HEADERIMAGE_BITMAP .*hromadaaid-installer-header\.bmp/)
+  assert.match(script, /!define MUI_HEADERIMAGE_UNBITMAP .*hromadaaid-installer-header\.bmp/)
+  assert.match(script, /Page custom ModePageCreate ModePageLeave/)
+  assert.doesNotMatch(script, /MUI_PAGE_COMPONENTS/)
+  assert.match(script, /Function ModePageCreate[\s\S]*?Клієнт[\s\S]*?Сервер[\s\S]*?Повний комплект[\s\S]*?NSD_SetStretchedBitmap/)
+  assert.match(script, /Function ModePageLeave[\s\S]*?NSD_GetState[\s\S]*?SectionSetFlags \$\{SEC_CLIENT\} \$\{SF_SELECTED\}[\s\S]*?SectionSetFlags \$\{SEC_SERVER\} \$\{SF_SELECTED\}[\s\S]*?Call SummaryLeave/)
+  assert.match(script, /IfFileExists "\$INSTDIR\\ServerManager\\HromadaAID Server Manager\.exe" selectInstalledServer/)
+  assert.match(script, /!define MUI_DIRECTORYPAGE_TEXT_TOP "Виберіть папку для програмних файлів HromadaAID/)
+  assert.match(script, /ShowInstDetails hide/)
+  assert.match(script, /ShowUnInstDetails hide/)
+  assert.match(script, /!insertmacro MUI_UNPAGE_CONFIRM[\s\S]*?!insertmacro MUI_UNPAGE_INSTFILES[\s\S]*?!insertmacro MUI_UNPAGE_FINISH/)
+  assert.match(script, /Серверна база даних, конфігурація та резервні копії залишаться на комп’ютері/)
+  assert.match(script, /DataDirectory and BackupDirectory remain as safe reinstall\/recovery locators/)
+})
+
+test('installer UI bitmaps have the documented header dimensions and compact native-control icons', async () => {
+  const assets = [
+    ['hromadaaid-installer-header.bmp', 150, 57],
+    ['hromadaaid-installer-mode-client.bmp', 48, 48],
+    ['hromadaaid-installer-mode-server.bmp', 48, 48],
+    ['hromadaaid-installer-mode-combined.bmp', 48, 48],
+  ]
+  for (const [name, width, height] of assets) {
+    const bitmap = await readFile(new URL(`../assets/${name}`, import.meta.url))
+    assert.equal(bitmap.toString('ascii', 0, 2), 'BM', `${name} is a Windows bitmap`)
+    assert.equal(bitmap.readInt32LE(18), width, `${name} width`)
+    assert.equal(bitmap.readInt32LE(22), height, `${name} height`)
+  }
+  const generator = await readFile(new URL('./generate-installer-ui-assets.ps1', import.meta.url), 'utf8')
+  assert.match(generator, /hromadaaid\.png/)
+  assert.match(generator, /#286343/)
+})
+
 test('component removal protects transactional artifacts and preserves server data on full uninstall', async () => {
   const script = await readFile(new URL('../packaging/windows-installer.nsi', import.meta.url), 'utf8')
   const control = await readFile(new URL('../packaging/windows-service-control.ps1', import.meta.url), 'utf8')
