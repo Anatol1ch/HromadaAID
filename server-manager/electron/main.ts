@@ -28,6 +28,7 @@ let serviceOperationInProgress = false
 let updatePreparationInProgress = false
 let activeUpdateId: string | null = null
 let preparedServerUpdate: PreparedServerUpdate | null = null
+const initialSetupVerification = new Map<string, { fingerprint: string; verified: boolean }>()
 let updateCloseWarningOpen = false
 let recoveryPrompt: { operationId: string; key: string; savedPath: string | null; resolve: (saved: boolean) => void } | null = null
 
@@ -62,6 +63,50 @@ function updateAdapters() {
 async function inspectWithUpdateReadiness(): Promise<InspectionSnapshot> {
   const snapshot = await inspectEnvironment(createWindowsInspectionAdapters())
   const configuration = snapshot.configuration
+  if (snapshot.installation.status === 'partial_installation' && snapshot.service.status === 'missing' &&
+    snapshot.discovery.source === 'installer_registry' && snapshot.discovery.confidence === 'corroborated' &&
+    configuration.programDirectory && configuration.dataDirectory && configuration.backupDirectory && configuration.serverVersion &&
+    snapshot.checks.find(item => item.id === 'package')?.status === 'passed' &&
+    snapshot.checks.find(item => item.id === 'configuration')?.details === 'config_missing') {
+    const program = configuration.programDirectory
+    const data = configuration.dataDirectory
+    const stage = join(program, 'Server.next')
+    const journal = join(data, '.hromadaaid-update-state.json')
+    const protectedPaths = [join(stage, 'package-integrity.json'), join(program, 'Server'), join(program, 'Server.previous'), join(program, 'Server.failed'), journal]
+    const signature: string[] = []
+    let signatureReadable = true
+    for (const path of protectedPaths) {
+      try {
+        const info = await lstat(path)
+        if (info.isSymbolicLink()) { signatureReadable = false; break }
+        signature.push(`${info.isDirectory() ? 'd' : 'f'}:${info.size}:${info.mtimeMs}`)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ENOTDIR') signature.push('absent')
+        else { signatureReadable = false; break }
+      }
+    }
+    const cacheKey = program.toLocaleLowerCase('en-US')
+    const fingerprint = signature.join('|')
+    let verified = false
+    const cached = signatureReadable ? initialSetupVerification.get(cacheKey) : undefined
+    if (cached?.verified && cached.fingerprint === fingerprint) verified = true
+    else if (signatureReadable) {
+      try {
+        const adapters = createWindowsInstallationAdapters()
+        verified = await adapters.canResume?.({
+          programDirectory: program, dataDirectory: data, backupDirectory: configuration.backupDirectory,
+          host: configuration.host === '::1' ? '::1' : '127.0.0.1', port: configuration.port ?? 4310,
+          administrator: { displayName: '', username: '', password: '', confirmation: '' },
+        }) ?? false
+      } catch { verified = false }
+      initialSetupVerification.set(cacheKey, { fingerprint, verified })
+    }
+    if (verified) {
+      snapshot.installation = { status: 'ready_to_configure', message: 'Сервер готовий до початкового налаштування.' }
+      const installationCheck = snapshot.checks.find(item => item.id === 'installation')
+      if (installationCheck) { installationCheck.status = 'warning'; installationCheck.message = snapshot.installation.message }
+    }
+  }
   let updateReadiness: NonNullable<InspectionSnapshot['updateReadiness']> = { ready: false, reason: 'Оновлення доступне лише для підтвердженої встановленої служби.' }
   if (snapshot.installation.status === 'installed' && ['running', 'stopped'].includes(snapshot.service.status) && ['confirmed', 'corroborated'].includes(snapshot.discovery.confidence) && configuration.programDirectory && configuration.dataDirectory) {
     const conflicts = [join(configuration.programDirectory, 'Server.next'), join(configuration.programDirectory, 'Server.previous'), join(configuration.programDirectory, 'Server.failed'), join(configuration.dataDirectory, '.hromadaaid-update-state.json')]

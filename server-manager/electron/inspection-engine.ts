@@ -165,7 +165,7 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
   // NSIS already writes non-secret install paths to HKLM. Treat them as a
   // locator, never as proof: validate the shape, assess key write ACLs, then
   // corroborate paths with expected package/config files.
-  if (!service.error && !service.installed) {
+  if (!service.installed) {
     let locator: InstallationLocator
     try { locator = await adapters.readInstallationLocator() }
     catch { locator = { status: 'query_failed' } }
@@ -209,8 +209,10 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
             configuration.backupDirectory = locator.backupDirectory
             configPath = configPresent ? candidateConfig : null
             if (!configPresent) configState = 'missing'
-            serviceStatus = 'missing'
-            serviceMessage = 'Метадані інсталятора вказують на серверні компоненти, але службу не зареєстровано.'
+            if (!service.error) {
+              serviceStatus = 'missing'
+              serviceMessage = 'Метадані інсталятора вказують на серверні компоненти, але службу не зареєстровано.'
+            }
             discovery = { source: 'installer_registry', confidence: 'corroborated', message: stagedEvidence && !activeEvidence ? 'Виявлено підготовлений Server.next та перевірено каталоги з HKLM.' : 'Шляхи з HKLM підтверджено файлами серверного пакета або конфігурацією.' }
           } else {
             locatorStale = true
@@ -232,7 +234,7 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
 
   // Older installs without the existing HKLM locator can only be discovered
   // in these documented default locations; no drive scan is performed.
-  if (!service.error && !service.installed && adapters.programFiles && adapters.programData) {
+  if (!service.installed && adapters.programFiles && adapters.programData) {
     const defaultProgram = win32.join(adapters.programFiles, 'HromadaAID')
     const defaultServer = win32.join(defaultProgram, 'Server')
     const defaultData = win32.join(adapters.programData, 'HromadaAID', 'Data')
@@ -252,13 +254,15 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
       configPath = present[4] ? win32.join(defaultData, 'server.json') : null
       configuration.programDirectory = present.slice(0, 4).some(Boolean) ? defaultProgram : null
       configState = configPath ? 'ok' : 'missing'
-      serviceStatus = 'missing'
-      serviceMessage = 'Компоненти сервера виявлено, але Windows Service не зареєстровано.'
+      if (!service.error) {
+        serviceStatus = 'missing'
+        serviceMessage = 'Компоненти сервера виявлено, але Windows Service не зареєстровано.'
+      }
       discovery = { source: 'standard_locations', confidence: 'corroborated', message: 'Компоненти знайдено у стандартних каталогах Windows.' }
     }
   }
 
-  if (service.error) discovery = { source: 'unknown', confidence: 'unavailable', message: 'Installation Discovery обмежено помилкою опитування диспетчера служб.' }
+  if (service.error && discovery.source === 'unknown') discovery = { source: 'unknown', confidence: 'unavailable', message: 'Installation Discovery обмежено помилкою опитування диспетчера служб.' }
   else if (service.installed && packageRoot) discovery = { source: 'windows_service', confidence: configPath && configState === 'ok' ? 'confirmed' : 'corroborated', message: configPath && configState === 'ok' ? 'Шляхи підтверджено SCM, WinSW XML і server.json.' : 'Шлях отримано з SCM; частину компонентів ще не підтверджено.' }
   else if (service.installed && discovery.source !== 'windows_service') discovery = { source: 'windows_service', confidence: 'corroborated', message: 'Windows SCM підтверджує зареєстровану службу.' }
 
@@ -295,6 +299,7 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
         win32.join(packageRoot, 'app', 'node_modules', 'fastify', 'package.json'),
         win32.join(packageRoot, 'app', 'node_modules', 'argon2', 'package.json'),
         win32.join(packageRoot, 'app', 'node_modules', '@phc', 'format', 'package.json'),
+        win32.join(packageRoot, 'package-integrity.json'),
       ]
       const present = await Promise.all(required.map(path => adapters.exists(path)))
       if (present.every(Boolean)) {

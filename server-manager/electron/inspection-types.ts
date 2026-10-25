@@ -1,5 +1,5 @@
 export type CheckStatus = 'passed' | 'warning' | 'failed' | 'unknown' | 'not_checked'
-export type InstallationStatus = 'not_installed' | 'installed' | 'partial_installation' | 'unknown'
+export type InstallationStatus = 'not_installed' | 'ready_to_configure' | 'installed' | 'partial_installation' | 'unknown'
 export type ServiceStatus = 'running' | 'stopped' | 'other' | 'missing' | 'unknown'
 export type ApiStatus = 'available' | 'unavailable' | 'invalid_response' | 'not_configured' | 'unknown'
 export type DiscoverySource = 'windows_service' | 'installer_registry' | 'standard_locations' | 'none' | 'unknown'

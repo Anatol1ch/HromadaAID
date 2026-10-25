@@ -74,9 +74,31 @@ export async function queryServiceWithInitialTimeoutRetry<T>(query: () => Promis
   }
 }
 
+/** `sc.exe query` returns a stable Win32 exit code for service absence (1060).
+ * Probe SCM first so an absent service is not mistaken for a CIM/WMI failure.
+ * Access denied and all other failures remain errors; they never imply absence.
+ */
+export function classifyScQueryFailure(error: unknown): 'missing' | 'access_denied' | 'query_failed' {
+  const failure = error as NodeJS.ErrnoException & { stderr?: string; stdout?: string }
+  const text = `${failure.message ?? ''} ${failure.stderr ?? ''} ${failure.stdout ?? ''}`
+  if (Number(failure.code) === 1060 || /(?:error|failed)\s*[:=]?\s*1060\b/i.test(text)) return 'missing'
+  if (Number(failure.code) === 5 || /(?:error|failed)\s*[:=]?\s*5\b/i.test(text) || /access is denied|access denied|0x80070005/i.test(text)) return 'access_denied'
+  return 'query_failed'
+}
+
 async function queryWindowsService(): Promise<ServiceMetadata> {
   if (process.platform !== 'win32') return { installed: false, error: 'query_failed' }
-  const executable = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const systemRoot = process.env.SystemRoot || 'C:\\Windows'
+  const sc = join(systemRoot, 'System32', 'sc.exe')
+  try {
+    await execFileAsync(sc, ['query', 'HromadaAIDApi'], { windowsHide: true, timeout: 5_000, killSignal: 'SIGTERM', maxBuffer: 32 * 1024, encoding: 'utf8' })
+  } catch (error) {
+    const classification = classifyScQueryFailure(error)
+    if (classification === 'missing') return { installed: false }
+    return { installed: false, error: classification }
+  }
+
+  const executable = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   try {
     const result = await queryServiceWithInitialTimeoutRetry(() => execFileAsync(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', psEncodedCommand(serviceQueryScript)], {
       windowsHide: true, timeout: 5_000, killSignal: 'SIGTERM', maxBuffer: 32 * 1024, encoding: 'utf8',

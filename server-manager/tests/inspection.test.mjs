@@ -23,6 +23,7 @@ function fixture({ service = { installed: true, state: 'Running', startMode: 'Au
   const trace = {}
   const knownFiles = files ?? new Set([
     `${server}\\runtime\\node.exe`, `${server}\\service\\HromadaAIDService.exe`, `${server}\\app\\dist\\server\\src\\installed.js`, `${server}\\app\\node_modules\\fastify\\package.json`, `${server}\\app\\node_modules\\argon2\\package.json`, `${server}\\app\\node_modules\\@phc\\format\\package.json`, 'C:\\TLS\\cert.pem', 'C:\\TLS\\private.pem',
+    `${server}\\package-integrity.json`,
   ].map(value => value.toLowerCase()))
   const textFiles = new Map([
     [`${server}\\service\\HromadaAIDService.xml`.toLowerCase(), serviceXml],
@@ -85,6 +86,7 @@ test('discovers non-standard program, data and backup paths from the existing pr
   const customFiles = new Set([
     `${customRoot}\\runtime\\node.exe`, `${customRoot}\\service\\HromadaAIDService.exe`, `${customRoot}\\app\\dist\\server\\src\\installed.js`,
     `${customRoot}\\app\\node_modules\\fastify\\package.json`, `${customRoot}\\app\\node_modules\\argon2\\package.json`, `${customRoot}\\app\\node_modules\\@phc\\format\\package.json`, customConfig,
+    `${customRoot}\\package-integrity.json`,
   ].map(value => value.toLowerCase()))
   const custom = fixture({
     service: { installed: false },
@@ -116,6 +118,7 @@ test('discovers a corroborated staged Server.next after an interrupted first ins
   const stagedFiles = new Set([
     `${stagedRoot}\\runtime\\node.exe`, `${stagedRoot}\\service\\HromadaAIDService.exe`, `${stagedRoot}\\app\\dist\\server\\src\\installed.js`,
     `${stagedRoot}\\app\\node_modules\\fastify\\package.json`, `${stagedRoot}\\app\\node_modules\\argon2\\package.json`, `${stagedRoot}\\app\\node_modules\\@phc\\format\\package.json`,
+    `${stagedRoot}\\package-integrity.json`,
   ].map(value => value.toLowerCase()))
   const partial = fixture({
     service: { installed: false },
@@ -133,6 +136,34 @@ test('discovers a corroborated staged Server.next after an interrupted first ins
   assert.equal(result.configuration.backupDirectory, customBackups)
   assert.equal(result.configuration.serverVersion, '0.1.0')
   assert.match(result.discovery.message, /Server.next/)
+})
+
+test('keeps a real SCM query failure unknown while independently reporting staged package evidence', async () => {
+  const customProgram = 'D:\\Застосунки HromadaAID'
+  const customData = 'E:\\Дані HromadaAID'
+  const customBackups = 'F:\\Резервні копії HromadaAID'
+  const stagedRoot = `${customProgram}\\Server.next`
+  const files = new Set([
+    `${stagedRoot}\\runtime\\node.exe`, `${stagedRoot}\\service\\HromadaAIDService.exe`, `${stagedRoot}\\app\\dist\\server\\src\\installed.js`,
+    `${stagedRoot}\\app\\node_modules\\fastify\\package.json`, `${stagedRoot}\\app\\node_modules\\argon2\\package.json`,
+    `${stagedRoot}\\app\\node_modules\\@phc\\format\\package.json`, `${stagedRoot}\\package-integrity.json`,
+  ].map(value => value.toLowerCase()))
+  const f = fixture({
+    service: { installed: false, error: 'query_failed' },
+    locator: { status: 'available', programDirectory: customProgram, dataDirectory: customData, backupDirectory: customBackups, writableByUnprivileged: false },
+    files,
+  })
+  f.adapter.readText = async path => {
+    if (path.toLowerCase() === `${stagedRoot}\\app\\package.json`.toLowerCase()) return JSON.stringify({ version: '0.1.0' })
+    const error = new Error('missing'); error.code = 'ENOENT'; throw error
+  }
+  const result = await inspectEnvironment(f.adapter)
+  assert.equal(result.service.status, 'unknown')
+  assert.equal(result.installation.status, 'unknown')
+  assert.equal(result.configuration.programDirectory, customProgram)
+  assert.equal(result.configuration.serverVersion, '0.1.0')
+  assert.equal(result.discovery.source, 'installer_registry')
+  assert.equal(result.checks.find(item => item.id === 'package').status, 'passed')
 })
 
 test('fails closed for writable and malformed locators, and labels a locator with no surviving components as stale', async () => {
@@ -267,6 +298,8 @@ test('access failure while checking default roots is unknown, never a false not-
 test('PowerShell provider is constrained to a read-only named-service query and bounded child process', () => {
   const source = readFileSync(new URL('../electron/windows-inspection.ts', import.meta.url), 'utf8')
   assert.match(source, /Get-CimInstance -ClassName Win32_Service -Filter/)
+  assert.match(source, /execFileAsync\(sc, \['query', 'HromadaAIDApi'\]/)
+  assert.match(source, /Number\(failure\.code\) === 1060/)
   assert.match(source, /System\.Text\.UTF8Encoding/)
   assert.match(source, /SERVICE_ACCESS_DENIED/)
   assert.match(source, /timeout:\s*5_000/)
@@ -309,6 +342,14 @@ test('Windows service query retries exactly once only after a child-process time
     throw Object.assign(new Error('still timed out'), { code: 'ETIMEDOUT' })
   }, async () => {}))
   assert.equal(calls, 2)
+})
+
+test('SCM exit codes distinguish an absent service from access denied and an actual query failure', async () => {
+  const { classifyScQueryFailure } = await import('../../dist-server-manager/main/windows-inspection.js')
+  assert.equal(classifyScQueryFailure(Object.assign(new Error('sc.exe failed'), { code: 1060 })), 'missing')
+  assert.equal(classifyScQueryFailure(Object.assign(new Error('[SC] OpenService FAILED 1060'), { code: 1060 })), 'missing')
+  assert.equal(classifyScQueryFailure(Object.assign(new Error('Access is denied'), { code: 5 })), 'access_denied')
+  assert.equal(classifyScQueryFailure(Object.assign(new Error('query process failed'), { code: 'ENOENT' })), 'query_failed')
 })
 
 test('IPC handler accepts only the trusted renderer, coalesces refreshes and returns a safe failure state', async () => {

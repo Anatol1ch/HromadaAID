@@ -48,3 +48,11 @@ test('partial installation retains warnings and failures, and unknown inspection
   assert.deepEqual(installationDisplay('unknown'), { label: 'Невідомо', tone: 'warning' })
   assert.deepEqual(serviceDisplay('unknown'), { label: 'Невідомо', tone: 'warning' })
 })
+
+test('verified staged package is presented as ready for initial setup without treating SCM errors as absence', () => {
+  const ready = { status: 'ready_to_configure', message: 'Сервер готовий до початкового налаштування.' }
+  assert.deepEqual(installationDisplay(ready.status), { label: 'Готовий до налаштування', tone: 'info' })
+  assert.equal(inspectionFeedback({ installation: ready, service: { status: 'missing' }, api: { status: 'not_configured' } }).tone, 'info')
+  assert.equal(diagnosticLevel({ id: 'service', status: 'warning' }, ready.status), 'info')
+  assert.equal(diagnosticLevel({ id: 'service', status: 'unknown' }, 'unknown'), 'warning')
+})
