@@ -2,11 +2,11 @@ import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNo
 import { Activity, ArrowRight, ChevronRight, CircleAlert, CircleCheck, Clock3, Cog, Download, FileText, Folder, House, Info, LoaderCircle, Package, Play, RefreshCw, RotateCw, Server, Settings2, ShieldCheck, Square, Wifi } from 'lucide-react'
 import Alert from '../../src/components/Alert'
 import { DEMO_CHECKED_AT, demoPaths, scenarioIds, scenarios, sections, type ScenarioId, type Section } from './demo'
-import type { InspectionSnapshot } from '../electron/inspection-types'
+import type { InspectionDiagnostic, InspectionSnapshot } from '../electron/inspection-types'
 import type { ServiceControlOperation } from '../electron/service-control'
 import type { ServerUpdatePreview, ServerUpdateProgress, ServerUpdateResult } from '../electron/server-update-contract'
 import InstallWizard from './InstallWizard'
-import { apiDisplay, diagnosticLevel, inspectionFeedback, installationDisplay, notCheckedState, serviceDisplay, type PresentationTone } from './inspection-presentation'
+import { apiDisplay, diagnosticLevel, initialSetupAction, inspectionFeedback, installationDisplay, notCheckedState, serviceDisplay, type PresentationTone } from './inspection-presentation'
 import managerIcon from '../../assets/hromadaaid-server-manager.svg'
 
 const navIcons = { overview: House, configuration: Settings2, diagnostics: Activity, updates: Download }
@@ -35,7 +35,7 @@ function discoveryConfidenceLabel(confidence: string): string {
   return confidence === 'confirmed' ? 'підтверджено' : confidence === 'corroborated' ? 'підтверджено компонентами' : confidence === 'stale' ? 'застарілі метадані' : confidence === 'untrusted' ? 'недовірені метадані' : 'перевірка недоступна'
 }
 
-type DemoEvent = { id: string; time: string; title: string; detail: string; level: string; code: string }
+type DemoEvent = { id: string; time: string; title: string; detail: string; level: string; code: string; diagnostics?: InspectionDiagnostic[] }
 function EventTable({ events, compact = false, caption = 'Демонстраційні діагностичні події' }: { events: DemoEvent[]; compact?: boolean; caption?: string }) {
   const tableId = useId()
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
@@ -54,7 +54,7 @@ function EventTable({ events, compact = false, caption = 'Демонстраці
           <td>{event.title}</td>
           <td><span>{event.detail}</span>{!compact && <button id={toggleId} className="sm-event-details-toggle" type="button" aria-expanded={isExpanded} aria-controls={detailId} onClick={() => setExpanded(current => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next })}>{isExpanded ? 'Сховати технічні відомості' : 'Технічні відомості'}</button>}</td>
         </tr>
-        {!compact && <tr hidden={!isExpanded} key={`${key}-details`} className="sm-event-details-row"><td colSpan={4}><dl id={detailId} aria-labelledby={toggleId} className="sm-event-details"><div><dt>Код</dt><dd>{event.code}</dd></div><div><dt>Ідентифікатор</dt><dd>{event.id}</dd></div></dl></td></tr>}
+        {!compact && <tr hidden={!isExpanded} key={`${key}-details`} className="sm-event-details-row"><td colSpan={4}><dl id={detailId} aria-labelledby={toggleId} className="sm-event-details"><div><dt>Код</dt><dd>{event.code}</dd></div><div><dt>Ідентифікатор</dt><dd>{event.id}</dd></div>{event.diagnostics?.map((item, diagnosticIndex) => <Fragment key={diagnosticIndex}><div><dt>Операція</dt><dd>{item.operation}</dd></div><div><dt>Об’єкт</dt><dd>{item.target}</dd></div><div><dt>Системний код</dt><dd>{item.code}</dd></div><div><dt>Пояснення</dt><dd>{item.message}</dd></div></Fragment>)}</dl></td></tr>}
       </Fragment>
     })}{events.length === 0 && <tr><td colSpan={4} className="sm-empty">У вибраному сценарії немає діагностичних подій.</td></tr>}</tbody>
   </table></div>
@@ -74,9 +74,10 @@ function RealContent({ section, inspection, checking, serviceOperation, controlS
     detail: item.message,
     level: diagnosticLevel(item, snapshot?.installation.status ?? null),
     code: item.details ?? item.status,
+    diagnostics: item.diagnostics,
   }))
   const notInstalled = snapshot?.installation.status === 'not_installed'
-  const resumableCandidate = snapshot?.installation.status === 'ready_to_configure'
+  const initialSetupLabel = initialSetupAction(snapshot)
   const reasonFor = (checkId: string) => snapshot?.checks.find(item => item.id === checkId)?.message ?? 'Причину не надано окремою перевіркою.'
   const value = (item: string | null | undefined, checkId = 'configuration') => item ?? <span className="sm-unavailable-value"><span>Не визначено</span>{snapshot && !notInstalled && <details><summary>Причина</summary><span>{reasonFor(checkId)}</span></details>}</span>
   const config = snapshot?.configuration
@@ -131,7 +132,7 @@ function RealContent({ section, inspection, checking, serviceOperation, controlS
       <Panel title="Серверний пакет" icon={<Download size={21} aria-hidden="true"/>} action={<span className="sm-readonly-label">Локальний ZIP</span>}><p className="sm-card-lead">Встановлена версія</p><strong className="sm-real-version">{config?.serverVersion ?? 'Не визначено'}</strong><p className="sm-card-note">API health contract: {snapshot?.api.contractVersion ?? 'Не отримано'}.</p></Panel>
     </div>
     <Panel title="Результати останньої перевірки" icon={<Activity size={21} aria-hidden="true"/>}><EventTable events={events.slice(0, 3)} compact caption="Останні результати перевірки серверного середовища"/></Panel>
-    {(notInstalled || resumableCandidate) && <div className="sm-future-action"><button className="primary-button" type="button" onClick={startInstall} disabled={checking}>{notInstalled ? 'Встановити сервер' : 'Налаштувати сервер'}</button><span>{notInstalled ? 'Локальний HTTP · Windows Service · серверні дані зберігаються окремо.' : 'Підготовлений пакет і стан транзакції перевірено. Завершіть початкове налаштування сервера.'}</span></div>}
+    {initialSetupLabel && <div className="sm-future-action"><button className="primary-button" type="button" onClick={startInstall} disabled={checking}>{initialSetupLabel}</button><span>{notInstalled ? 'Локальний HTTP · Windows Service · серверні дані зберігаються окремо.' : 'Підготовлений пакет і стан транзакції перевірено. Завершіть початкове налаштування сервера.'}</span></div>}
   </>
 
   if (section === 'configuration') return <>

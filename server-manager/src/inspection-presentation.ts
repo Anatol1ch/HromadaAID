@@ -57,6 +57,11 @@ export function apiDisplay(status: ApiStatus | null, checking = false): DisplayS
   return states[status]
 }
 
+export function initialSetupAction(snapshot: Pick<InspectionSnapshot, 'installation'> | null): string | null {
+  return snapshot?.installation.status === 'ready_to_configure' ? 'Налаштувати сервер'
+    : snapshot?.installation.status === 'not_installed' ? 'Встановити сервер' : null
+}
+
 export function diagnosticLevel(check: Pick<InspectionCheck, 'id' | 'status'>, installation: InstallationStatus | null): DiagnosticLevel {
   const absentComponent = check.id === 'service' || check.id === 'configuration' || check.id === 'package' || check.id === 'installation'
   if ((installation === 'not_installed' || installation === 'ready_to_configure') && absentComponent && check.status === 'warning') return 'info'

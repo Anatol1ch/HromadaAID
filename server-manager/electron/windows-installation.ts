@@ -2,13 +2,13 @@ import { app } from 'electron'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { cp, lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve, win32 } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import type { ServerInstallAdapters } from './installation-engine.js'
-import { canResumeInitialInstallLayout, isInitialInstallRetryJournal } from './installation-recovery.js'
+import { verifyInitialInstallCandidate } from './initial-setup.js'
 import { inspectEnvironment } from './inspection-engine.js'
 import { createWindowsInspectionAdapters } from './windows-inspection.js'
 
@@ -103,29 +103,9 @@ async function callNode(root: string, args: string[], cwd: string, input?: Buffe
 export function createWindowsInstallationAdapters(): ServerInstallAdapters {
   return {
     inspect: () => inspectEnvironment(createWindowsInspectionAdapters()),
-    canResume: async request => {
-      const current = await inspectEnvironment(createWindowsInspectionAdapters())
-      if (current.installation.status !== 'partial_installation' || current.service.status !== 'missing' || current.discovery.source !== 'installer_registry' || current.discovery.confidence !== 'corroborated') return false
-      const same = (left: string | null, right: string) => !!left && win32.resolve(left).toLocaleLowerCase('en-US') === win32.resolve(right).toLocaleLowerCase('en-US')
-      if (!same(current.configuration.programDirectory, request.programDirectory) || !same(current.configuration.dataDirectory, request.dataDirectory) || !same(current.configuration.backupDirectory, request.backupDirectory)) return false
-      if ((current.configuration.host !== null && current.configuration.host !== request.host) || (current.configuration.port !== null && current.configuration.port !== request.port)) return false
-      const program = request.programDirectory
-      const stage = join(program, 'Server.next')
-      const active = join(program, 'Server'), previous = join(program, 'Server.previous'), failed = join(program, 'Server.failed')
-      const [activeExists, previousExists, failedExists] = await Promise.all([active, previous, failed].map(path => lstat(path).then(info => info.isDirectory() && !info.isSymbolicLink(), () => false)))
-      if (previousExists) return false
-      const journalPath = join(request.dataDirectory, '.hromadaaid-update-state.json')
-      let journal: unknown = null
-      try { journal = JSON.parse(await readFile(journalPath, 'utf8')) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false }
-      const retryJournal = journal === null ? false : isInitialInstallRetryJournal(journal, program)
-      const stageExists = await lstat(stage).then(info => info.isDirectory() && !info.isSymbolicLink(), () => false)
-      if (journal !== null && !retryJournal) return false
-      if (!canResumeInitialInstallLayout({ retryJournal, stagedPackageExists: stageExists, activePackageExists: activeExists, previousPackageExists: previousExists, failedPackageExists: failedExists })) return false
-      if (stageExists) await verifyPackageCopy(payloadRoot(), stage)
-      if (activeExists) await verifyPackageCopy(payloadRoot(), active)
-      if (failedExists) await verifyPackageCopy(payloadRoot(), failed)
-      return true
-    },
+    canResume: request => verifyInitialInstallCandidate(request, {
+      inspect: () => inspectEnvironment(createWindowsInspectionAdapters()), payloadRoot, verifyPackageCopy,
+    }),
     preflight: async request => {
       const root = payloadRoot()
       const configModule = await import(pathToFileURL(join(root, 'installer', 'windows-installer-config.mjs')).href)

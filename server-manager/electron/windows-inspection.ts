@@ -3,6 +3,7 @@ import { promisify } from 'node:util'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { InspectionAdapters, InstallationLocator, ServiceMetadata } from './inspection-engine.js'
+import { inspectionDiagnostic } from './inspection-engine.js'
 
 const execFileAsync = promisify(execFile)
 const serviceQueryScript = String.raw`
@@ -27,22 +28,29 @@ try {
 
 // The installer already writes these non-secret paths under HKLM. Read them as
 // a locator only; the inspection engine still verifies every referenced item.
-const locatorQueryScript = String.raw`
+export const locatorQueryScript = String.raw`
 $ErrorActionPreference = 'Stop'
 $utf8 = New-Object System.Text.UTF8Encoding -ArgumentList $false
 [Console]::OutputEncoding = $utf8
 $keyPath = 'Registry::HKEY_LOCAL_MACHINE\Software\HromadaAID\Installer'
+$operation = 'registry.stat'
 try {
   if (-not (Test-Path -LiteralPath $keyPath)) { [Console]::Out.WriteLine('{"status":"missing"}'); exit 0 }
   $key = Get-Item -LiteralPath $keyPath -ErrorAction Stop
+  $operation = 'registry.read'
   $item = Get-ItemProperty -LiteralPath $keyPath -ErrorAction Stop
-  $acl = Get-Acl -LiteralPath $keyPath -ErrorAction Stop
+  $operation = 'registry.acl'
+  # Windows PowerShell 5.1 Get-Acl -LiteralPath misresolves registry provider paths.
+  # Read the already opened RegistryKey ACL and request SIDs without name lookup.
+  $acl = $key.GetAccessControl()
   $trustedSids = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-0', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
-  $writeMask = [System.Security.AccessControl.RegistryRights]::SetValue -bor [System.Security.AccessControl.RegistryRights]::CreateSubKey -bor [System.Security.AccessControl.RegistryRights]::WriteKey -bor [System.Security.AccessControl.RegistryRights]::FullControl
+  # Composite WriteKey/FullControl include read bits; test only mutation rights.
+  $writeMask = [System.Security.AccessControl.RegistryRights]::SetValue -bor [System.Security.AccessControl.RegistryRights]::CreateSubKey -bor [System.Security.AccessControl.RegistryRights]::Delete -bor [System.Security.AccessControl.RegistryRights]::ChangePermissions -bor [System.Security.AccessControl.RegistryRights]::TakeOwnership
   $writable = $false
-  foreach ($rule in $acl.Access) {
+  foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
     if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
-    $sid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+    if (($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0) { continue }
+    $sid = $rule.IdentityReference.Value
     if ($trustedSids -notcontains $sid -and (($rule.RegistryRights -band $writeMask) -ne 0)) { $writable = $true }
   }
   $result = [ordered]@{
@@ -55,7 +63,12 @@ try {
   [Console]::Out.WriteLine((ConvertTo-Json -InputObject $result -Compress -Depth 3))
 } catch {
   $failure = $_.Exception
-  $accessDenied = ($failure -is [System.UnauthorizedAccessException]) -or ($failure -is [System.Security.SecurityException]) -or ($failure.HResult -eq -2147024891)
+  while ($null -ne $failure.InnerException) { $failure = $failure.InnerException }
+  $nativeCode = if ($failure -is [System.ComponentModel.Win32Exception]) { $failure.NativeErrorCode } else { $null }
+  $accessDenied = ($failure.HResult -eq -2147024891) -or ($nativeCode -eq 5)
+  $status = if ($accessDenied) { 'access_denied' } else { 'query_failed' }
+  $code = if ($null -ne $nativeCode) { [string]$nativeCode } else { '0x' + $failure.HResult.ToString('X8') }
+  [Console]::Out.WriteLine((ConvertTo-Json -Compress -InputObject @{ status = $status; operation = $operation; code = $code }))
   if ($accessDenied) { [Console]::Error.WriteLine('LOCATOR_ACCESS_DENIED'); exit 13 }
   [Console]::Error.WriteLine('LOCATOR_QUERY_FAILED')
   exit 2
@@ -121,6 +134,18 @@ async function queryWindowsService(): Promise<ServiceMetadata> {
 }
 
 export type WindowsInstallationLocator = InstallationLocator
+export function classifyLocatorFailure(error: unknown): InstallationLocator {
+  const failure = error as NodeJS.ErrnoException & { stdout?: string }
+  let code = failure.code
+  let operation = 'registry.query'
+  try {
+    const detail = JSON.parse(failure.stdout?.trim() ?? '') as Record<string, unknown>
+    if (typeof detail.code === 'string' && /^(?:0x[0-9A-Fa-f]{8}|\d{1,10})$/.test(detail.code)) code = detail.code.toLowerCase()
+    if (typeof detail.operation === 'string' && ['registry.stat', 'registry.read', 'registry.acl', 'registry.identity'].includes(detail.operation)) operation = detail.operation
+  } catch { /* A child launch failure may not have stdout. */ }
+  const diagnostic = inspectionDiagnostic(operation, 'HKLM\\Software\\HromadaAID\\Installer', { code })
+  return { status: ['EACCES', 'EPERM', '5', '0x80070005'].includes(diagnostic.code) ? 'access_denied' : 'query_failed', diagnostic }
+}
 async function queryWindowsLocator(): Promise<InstallationLocator> {
   if (process.platform !== 'win32') return { status: 'query_failed' }
   const executable = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
@@ -130,12 +155,10 @@ async function queryWindowsLocator(): Promise<InstallationLocator> {
     })
     const value = JSON.parse(result.stdout.trim()) as Record<string, unknown>
     if (value.status === 'missing') return { status: 'missing' }
-    if (value.status !== 'available' || typeof value.programDirectory !== 'string' || typeof value.dataDirectory !== 'string' || typeof value.backupDirectory !== 'string' || typeof value.writableByUnprivileged !== 'boolean') return { status: 'invalid' }
+    if (value.status !== 'available' || typeof value.programDirectory !== 'string' || typeof value.dataDirectory !== 'string' || typeof value.backupDirectory !== 'string' || typeof value.writableByUnprivileged !== 'boolean') return { status: 'invalid', diagnostic: inspectionDiagnostic('registry.validate', 'HKLM\\Software\\HromadaAID\\Installer', { code: 'LOCATOR_INVALID_RESPONSE' }) }
     return { status: 'available', programDirectory: value.programDirectory, dataDirectory: value.dataDirectory, backupDirectory: value.backupDirectory, writableByUnprivileged: value.writableByUnprivileged }
   } catch (error) {
-    const failure = error as NodeJS.ErrnoException & { stderr?: string }
-    const text = `${failure.message || ''} ${failure.stderr || ''}`
-    return /LOCATOR_ACCESS_DENIED|access is denied|access denied|unauthorized|0x80070005/i.test(text) ? { status: 'access_denied' } : { status: 'query_failed' }
+    return classifyLocatorFailure(error)
   }
 }
 

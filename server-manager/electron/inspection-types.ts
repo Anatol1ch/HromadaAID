@@ -5,6 +5,8 @@ export type ApiStatus = 'available' | 'unavailable' | 'invalid_response' | 'not_
 export type DiscoverySource = 'windows_service' | 'installer_registry' | 'standard_locations' | 'none' | 'unknown'
 export type DiscoveryConfidence = 'confirmed' | 'corroborated' | 'stale' | 'untrusted' | 'unavailable'
 
+export type InspectionDiagnostic = { operation: string; target: string; code: string; message: string }
+
 export type InspectionCheck = {
   id: 'installation' | 'service' | 'configuration' | 'package' | 'api'
   title: string
@@ -12,6 +14,7 @@ export type InspectionCheck = {
   checkedAt: string
   message: string
   details?: string
+  diagnostics?: InspectionDiagnostic[]
 }
 
 export type InspectedConfiguration = {
