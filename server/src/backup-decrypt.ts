@@ -1,9 +1,8 @@
 import { readRecoveryKeyHidden } from './backup-terminal.js'
 import { DatabaseSync } from 'node:sqlite'
-import { resolve, dirname } from 'node:path'
+import { resolve } from 'node:path'
 import { existsSync, unlinkSync } from 'node:fs'
 import { decryptBackupFile, decodeRecoveryKey } from './backup-crypto.js'
-import { secureBackupDirectory } from './backup.js'
 
 function argument(name: string): string | undefined {
   const index = process.argv.indexOf(name)
@@ -24,7 +23,6 @@ async function main(): Promise<void> {
   if (normalizedOutput.endsWith('\\appdata\\roaming\\hromada-aid\\hromada-aid.sqlite') || existsSync(targetPath)) {
     throw new Error('Вихідний файл уже існує або вказує на робочу SQLite. Оберіть новий окремий файл.')
   }
-  secureBackupDirectory(dirname(targetPath))
   const key = decodeRecoveryKey(await readRecoveryKeyHidden())
   await decryptBackupFile(sourcePath, targetPath, key)
   try {

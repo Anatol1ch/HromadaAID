@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -186,3 +187,37 @@ for (const phase of ['none', 'safety', 'prepared', 'original-renamed', 'replacem
     } finally { try { f.db.close() } catch { /* closed before offline restore */ }; await f.archives.stop(); await cleanup(f.root) }
   })
 }
+
+test('offline restore preserves existing Backups ACLs and protects only restore-staging', { skip: process.platform !== 'win32' }, async () => {
+  const f = await fixture()
+  const servicePrincipal = 'NT SERVICE\\EventLog'
+  const grant = (path: string, directory = false) => {
+    const permission = directory ? '(OI)(CI)M' : 'M'
+    execFileSync('icacls.exe', [path, '/grant', `${servicePrincipal}:${permission}`], { encoding: 'utf8', windowsHide: true })
+  }
+  const hasGrant = (path: string) => execFileSync('icacls.exe', [path], { encoding: 'utf8', windowsHide: true }).includes(servicePrincipal)
+  try {
+    assert.equal((await f.service.createManualBackup()).status, 'created')
+    const archive = join(f.directory, (await f.archives.listAll())[0].fileName)
+    const preview = await f.admin.prepare(archive)
+    const candidate = join(f.directory, 'restore-staging', `${preview.id}.sqlite`)
+    const staging = join(f.directory, 'restore-staging')
+    const key = join(f.directory, '.hromadaaid-backup-key.dpapi')
+    await writeFile(key, 'test sentinel; not a cryptographic key')
+    await f.admin.confirm(preview.id, preview.confirmationToken)
+    await f.archives.stop()
+    f.db.close()
+
+    grant(f.directory, true)
+    grant(archive)
+    grant(key)
+    grant(staging, true)
+    grant(candidate)
+    for (const path of [f.directory, archive, key, staging, candidate]) assert.ok(hasGrant(path), `test ACE must exist before restore: ${path}`)
+
+    const safety = await restoreOffline(f.path, f.directory)
+    assert.ok(existsSync(safety))
+    for (const path of [f.directory, archive, key, staging, candidate]) assert.ok(hasGrant(path), `restore must preserve the existing service ACE: ${path}`)
+    validateRestoreDatabase(f.path)
+  } finally { try { f.db.close() } catch { /* closed before offline restore */ }; await f.archives.stop(); await cleanup(f.root) }
+})

@@ -287,14 +287,14 @@ else {
       if (restored.code !== 0) throw new Error(`Відновлення не завершилося. Службу залишено зупиненою для безпеки. ${restored.stderr.trim() || restored.stdout.trim()}`)
       sendStage('start', 'Запуск Windows Service після відновлення.')
       const started = await controlWindowsService('start')
-      if (!started.success) throw new Error(`Базу відновлено та перевірено, але службу не вдалося запустити: ${started.message}`)
+      if (!started.success) throw new Error(`Базу даних відновлено й перевірено, але запуск Windows Service не підтверджено: ${started.message} Попередню базу та страхову копію збережено.`)
       sendStage('health', 'Перевірка доступності API після відновлення.')
       let healthy = false
       for (let attempt = 0; attempt < 15; attempt++) {
         try { const response = await fetch(new URL('/health', paths.api), { redirect: 'error', signal: AbortSignal.timeout(2_000) }); if (response.ok) { healthy = true; break } } catch { /* bounded health retry */ }
         await new Promise(resolve => setTimeout(resolve, 1_000))
       }
-      if (!healthy) throw new Error('Базу відновлено, але API не пройшов health-check. Перевірте стан служби та діагностику.')
+      if (!healthy) throw new Error('Базу даних відновлено й перевірено, Windows Service запущено, але готовність API не підтверджено. Попередню базу та страхову копію збережено; повторне відновлення автоматично не запускалося.')
       if (imported) importedArchives.delete(value.id)
       sendStage('complete', 'Відновлення завершено; API відповідає.')
       return { success: true, message: 'Базу даних відновлено, перевірено та запущено.' }

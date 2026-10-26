@@ -5,7 +5,6 @@ import { randomUUID } from 'node:crypto'
 import { hashFile } from './backup-crypto.js'
 import { clearMaintenance, maintenancePath, restoreCandidatePath, restorePlanPath, type RestorePlan } from './backup-admin.js'
 import { acquireDatabaseOwnership, assertServerDatabasePath, durableJson, validateRestoreDatabase } from './restore-safety.js'
-import { secureBackupDirectory } from './backup.js'
 import { restoreError } from './restore-diagnostics.js'
 
 type RestoreJournal = { version: 1; id: string; safety: string; original: string; stage: string; phase: 'prepared' | 'moved' | 'installed' }
@@ -46,8 +45,6 @@ export async function restoreOffline(databasePath: string, backupDirectory: stri
       stage = 'validate-candidate'
       if ((await hashFile(candidate)).sha256 !== plan.hash) throw new Error('Підготовлена база змінилася.')
       validateRestoreDatabase(candidate)
-      stage = 'backup-directory-access'
-      secureBackupDirectory(backupDirectory)
       const id = marker.id
       journal = { version: 1, id, safety: join(backupDirectory, `hromada-aid-safety-${id}.sqlite`), original: `${databasePath}.before-restore-${id}`, stage: `${databasePath}.restore-stage-${id}`, phase: 'prepared' }
       const safetyPartial = `${journal.safety}.${randomUUID()}.partial`
