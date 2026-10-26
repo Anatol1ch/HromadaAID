@@ -1,6 +1,7 @@
 import { CircleCheck, CircleUserRound, Code2, Info, KeyRound, MapPin, Server, Wifi } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { AuthenticatedUser } from '../shared/auth-contract'
+import type { ClientUpdateState } from '../shared/api-contract'
 import type { ServerConnectionCheckResult, ServerConnectionSaveResult, ServerConnectionState } from '../shared/api-contract'
 import { USER_ROLE_LABELS } from '../shared/authorization'
 import hromadaAidLogo from '../assets/hromadaaid.svg'
@@ -20,6 +21,8 @@ export default function SettingsPage({ user, onChangePassword, connectionActions
   const [connectionMessage, setConnectionMessage] = useState('')
   const [connectionBusy, setConnectionBusy] = useState(false)
   const [appVersion, setAppVersion] = useState<string | null>(null)
+  const [clientUpdate, setClientUpdate] = useState<ClientUpdateState | null>(null)
+  const [updateCheckBusy, setUpdateCheckBusy] = useState(false)
   const structuredName = [user?.firstName?.trim(), user?.lastName?.trim()].filter(Boolean).join(' ')
   const displayName = structuredName || user?.displayName?.trim() || user?.username || ''
   const roles = user?.roles.map(role => USER_ROLE_LABELS[role]).join(', ') || ''
@@ -29,7 +32,9 @@ export default function SettingsPage({ user, onChangePassword, connectionActions
     void window.hromadaAid.appInfo.getVersion().then(version => { if (active) setAppVersion(version) }).catch(() => { if (active) setAppVersion(null) })
     void connectionActions.getState().then(value => { if (active) setConnection(value) }).catch(() => { if (active) setConnectionMessage('Не вдалося прочитати стан підключення.') })
     const unsubscribe = window.hromadaAid.connection.onStateChange(value => { if (active) setConnection(value) })
-    return () => { active = false; unsubscribe() }
+    void window.hromadaAid.clientUpdates.getState().then(value => { if (active) setClientUpdate(value) }).catch(() => {})
+    const unsubscribeUpdate = window.hromadaAid.clientUpdates.onStateChange(value => { if (active) setClientUpdate(value) })
+    return () => { active = false; unsubscribe(); unsubscribeUpdate() }
   }, [])
 
   const checkCurrentConnection = async () => {
@@ -42,6 +47,14 @@ export default function SettingsPage({ user, onChangePassword, connectionActions
       setConnection(latest)
     } catch { setConnectionMessage('Не вдалося підключитися до сервера.') }
     finally { setConnectionBusy(false) }
+  }
+
+  const checkClientUpdate = async () => {
+    if (updateCheckBusy) return
+    setUpdateCheckBusy(true)
+    try { setClientUpdate(await window.hromadaAid.clientUpdates.check()) }
+    catch { setClientUpdate(current => current ? { ...current, status: 'error', error: 'Не вдалося перевірити оновлення.' } : current) }
+    finally { setUpdateCheckBusy(false) }
   }
 
   return <div className="settings-page">
@@ -90,6 +103,11 @@ export default function SettingsPage({ user, onChangePassword, connectionActions
           <div><dt>Тип застосунку</dt><dd>Настільний застосунок для Windows</dd></div>
           <div className="settings-about-purpose"><dt>Призначення</dt><dd>Облік, призначення та супровід виплат матеріальних допомог</dd></div>
         </dl>
+      </section>
+      <section className="dashboard-panel settings-about-details client-update-settings" aria-labelledby="client-update-settings-title">
+        <div className="settings-card-heading"><span className="settings-icon"><Code2 size={19} aria-hidden="true"/></span><div><h2 id="client-update-settings-title">Оновлення Client</h2><p>Перевірка стабільних випусків HromadaAID через GitHub Releases.</p></div></div>
+        <dl className="settings-about-grid"><div><dt>Поточна версія</dt><dd>{appVersion ?? 'Не вдалося визначити'}</dd></div><div><dt>Остання перевірка</dt><dd>{clientUpdate?.checkedAt ? new Date(clientUpdate.checkedAt).toLocaleString('uk-UA') : 'Ще не виконувалась'}</dd></div><div><dt>Результат</dt><dd role="status">{clientUpdate?.error ?? (clientUpdate?.targetVersion ? `Доступна версія ${clientUpdate.targetVersion}` : clientUpdate?.status === 'up-to-date' ? 'Встановлено останню перевірену версію' : clientUpdate?.status === 'checking' ? 'Перевірка…' : 'Перевірка ще не завершена')}</dd></div></dl>
+        <div className="server-connection-panel-actions"><button type="button" className="secondary-button" disabled={updateCheckBusy || clientUpdate?.status === 'checking' || clientUpdate?.confirmed} onClick={() => void checkClientUpdate()}>{updateCheckBusy || clientUpdate?.status === 'checking' ? 'Перевіряємо…' : 'Перевірити оновлення'}</button></div>
       </section>
       <section className="dashboard-panel settings-about-details" aria-label="Технічна інформація">
         <div className="settings-card-heading"><span className="settings-icon"><Server size={19} aria-hidden="true"/></span><div><h2>Технічна інформація</h2><p>Поточний режим роботи та стан підключення.</p></div></div>

@@ -12,6 +12,7 @@ ShowUnInstDetails hide
 !include "MUI2.nsh"
 !include "nsDialogs.nsh"
 !include "LogicLib.nsh"
+!include "FileFunc.nsh"
 !define MUI_CUSTOMFUNCTION_ABORT "HromadaAidRestoreServiceAfterAbort"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\HromadaAID"
 !ifndef CLIENT_PAYLOAD
@@ -60,6 +61,7 @@ Var ModeCombinedRadio
 Var ModeClientIcon
 Var ModeServerIcon
 Var ModeCombinedIcon
+Var ClientUpdateMode
 
 !define MUI_ICON "${PROJECT_DIR}\assets\hromadaaid.ico"
 !define MUI_UNICON "${PROJECT_DIR}\assets\hromadaaid.ico"
@@ -100,12 +102,14 @@ Var ModeCombinedIcon
 !macroend
 
 !insertmacro MUI_PAGE_WELCOME
-Page custom ModePageCreate ModePageLeave
+Page custom ModePageCreate ModePageLeave ModePagePre
 !define MUI_PAGE_HEADER_TEXT "Папка встановлення"
 !define MUI_PAGE_HEADER_SUBTEXT "Виберіть папку для програмних файлів HromadaAID."
 !define MUI_DIRECTORYPAGE_TEXT_TOP "Виберіть папку для програмних файлів HromadaAID. Серверні дані зберігаються окремо."
 !define MUI_DIRECTORYPAGE_TEXT_DESTINATION "Папка програмних файлів"
+!define MUI_PAGE_CUSTOMFUNCTION_PRE DirectoryPagePre
 !insertmacro MUI_PAGE_DIRECTORY
+!undef MUI_PAGE_CUSTOMFUNCTION_PRE
 !define MUI_PAGE_HEADER_TEXT "Встановлення HromadaAID"
 !define MUI_PAGE_HEADER_SUBTEXT "Зачекайте, поки майстер завершить вибрану операцію."
 !insertmacro MUI_PAGE_INSTFILES
@@ -120,11 +124,13 @@ Page custom ModePageCreate ModePageLeave
 !insertmacro MUI_LANGUAGE "Ukrainian"
 
 Section -CloseApplications
+  ${If} $ClientUpdateMode != "1"
   ; taskkill without /F sends the normal close request; Windows file-copy errors
   ; remain fatal if an application cannot close cleanly.
   nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /IM HromadaAID.exe /T'
   nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /IM "HromadaAID Server Manager.exe" /T'
   Sleep 500
+  ${EndIf}
 SectionEnd
 
 Section -ProductBranding
@@ -203,6 +209,9 @@ serverSectionDone:
 SectionEnd
 
 Section -RemoveDeselected
+  ${If} $ClientUpdateMode == "1"
+    Goto removeDeselectedDone
+  ${EndIf}
   SectionGetFlags ${SEC_CLIENT} $0
   IntOp $0 $0 & ${SF_SELECTED}
   ${If} $0 == 0
@@ -213,6 +222,7 @@ Section -RemoveDeselected
   ${If} $0 == 0
     Call RemoveServerComponent
   ${EndIf}
+removeDeselectedDone:
 SectionEnd
 
 Section -ApplicationShortcuts
@@ -220,12 +230,39 @@ Section -ApplicationShortcuts
   IntOp $0 $0 & ${SF_SELECTED}
   SectionGetFlags ${SEC_SERVER} $1
   IntOp $1 $1 & ${SF_SELECTED}
+  ${If} $ClientUpdateMode == "1"
+    ReadRegStr $1 HKLM "Software\HromadaAID\Installer" "InstalledComponents"
+    ${If} $1 == "Server,ServerManager"
+    ${OrIf} $1 == "Client,Server,ServerManager"
+      StrCpy $1 1
+    ${Else}
+      StrCpy $1 0
+    ${EndIf}
+    !insertmacro SyncApplicationShortcuts 1 $1
+    Goto shortcutsDone
+  ${EndIf}
   !insertmacro SyncApplicationShortcuts $0 $1
+shortcutsDone:
 SectionEnd
 
 Section -UninstallMetadata
   WriteRegStr HKLM "Software\HromadaAID\Installer" "ProgramDirectory" "$INSTDIR"
   WriteRegStr HKLM "Software\HromadaAID\Installer" "InstallVersion" "${APP_VERSION}"
+  ${If} $ClientUpdateMode == "1"
+    ; Preserve installed components, data locators, and the single Installed Apps entry.
+    ReadRegStr $1 HKLM "Software\HromadaAID\Installer" "InstalledComponents"
+    WriteRegStr HKLM "Software\HromadaAID\Installer" "InstalledComponents" "$1"
+    WriteUninstaller "$INSTDIR\Uninstall.exe"
+    WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
+    FileOpen $2 "$INSTDIR\Client\client-update-success.txt" "w"
+    ${If} $2 == ""
+      MessageBox MB_ICONSTOP|MB_OK "Не вдалося підтвердити завершення оновлення Client. Повторіть оновлення після перевірки доступу до тимчасового каталогу."
+      Abort
+    ${EndIf}
+    FileWrite $2 "${APP_VERSION}"
+    FileClose $2
+    Goto updateMetadataDone
+  ${EndIf}
   SectionGetFlags ${SEC_SERVER} $0
   IntOp $0 $0 & ${SF_SELECTED}
   ${If} $0 != 0
@@ -257,6 +294,7 @@ Section -UninstallMetadata
   WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayIcon" "$\"$INSTDIR\assets\hromadaaid.ico$\",0"
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1
+updateMetadataDone:
 SectionEnd
 
 Section "Uninstall"
@@ -370,6 +408,19 @@ Function SelectCombinedMode
   ${NSD_Check} $ModeCombinedRadio
 FunctionEnd
 
+Function ModePagePre
+  ${If} $ClientUpdateMode == "1"
+    Abort
+  ${EndIf}
+FunctionEnd
+
+Function DirectoryPagePre
+  ${If} $ClientUpdateMode == "1"
+    Call SummaryLeave
+    Abort
+  ${EndIf}
+FunctionEnd
+
 Function ModePageLeave
   ${NSD_GetState} $ModeClientRadio $0
   ${NSD_GetState} $ModeServerRadio $1
@@ -421,6 +472,18 @@ Function .onInit
   ${EndIf}
   SectionSetFlags ${SEC_CLIENT} 0
   SectionSetFlags ${SEC_SERVER} 0
+  StrCpy $ClientUpdateMode ""
+  ${GetOptions} "$CMDLINE" "/CLIENTUPDATE=" $ClientUpdateMode
+  ${If} $ClientUpdateMode == "1"
+    IfFileExists "$INSTDIR\Client\HromadaAID.exe" clientUpdateTargetExists 0
+    MessageBox MB_ICONSTOP|MB_OK "Не знайдено встановлений Client HromadaAID. Вибіркове оновлення зупинено."
+    Abort
+clientUpdateTargetExists:
+    Delete "$INSTDIR\Client\client-update-success.txt"
+    SectionSetFlags ${SEC_CLIENT} ${SF_SELECTED}
+    SectionSetFlags ${SEC_SERVER} 0
+    Goto initDone
+  ${EndIf}
   ; The server branch also selects an existing Client; preserve Combined on rerun.
   IfFileExists "$INSTDIR\ServerManager\HromadaAID Server Manager.exe" selectInstalledServer 0
   IfFileExists "$INSTDIR\Server\service\HromadaAIDService.exe" selectInstalledServer 0

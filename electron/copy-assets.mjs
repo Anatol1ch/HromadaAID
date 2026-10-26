@@ -3,6 +3,9 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
+const outputShared = join(root, 'dist-electron', 'shared')
+mkdirSync(outputShared, { recursive: true })
+copyFileSync(join(root, 'shared', 'release-updates.mjs'), join(outputShared, 'release-updates.mjs'))
 const output = join(root, 'dist-electron', 'electron')
 const outputReference = join(output, 'reference')
 mkdirSync(outputReference, { recursive: true })

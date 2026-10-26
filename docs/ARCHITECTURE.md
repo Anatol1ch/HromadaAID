@@ -72,6 +72,42 @@ staging, але не перебудовує ACL кореня Backups під ко
 потребує Windows administrator; online DB recovery — також актуального RBAC.
 Після timeout lock не звільняється без підтвердження завершення дерева процесів.
 
+### Stable GitHub Releases і Client
+
+`shared/release-updates.mjs` містить спільну перевірку SemVer, Stable release
+metadata, GitHub Releases API, HTTPS-перевірку redirect host, manifest contract,
+потокове завантаження, контроль точного розміру/SHA-256 і тимчасові файли з атомарним
+перейменуванням. `assets/release-channel.json` задає owner/repository; значення
+підтверджене Git remote. Токени не використовуються. Якщо джерело недоступне до
+підтвердження нового релізу, Client працює звичайно; після підтвердження номер версії
+і метадані зберігаються в Electron `userData`, тож вимога оновлення лишається після
+перезапуску й недоступності GitHub.
+
+`release-manifest.json` описує один Windows x64 універсальний Setup і Server ZIP,
+їхні SHA-256/розміри, версію та compatibility markers. Server ZIP зберігає власний
+`package-integrity.json`; зовнішній release manifest не дублює його. Команда
+`node packaging/release-manifest.mjs --create <directory> <version>` створює й
+локально перевіряє metadata за фактичними файлами, `--verify <directory>` звіряє
+наявний manifest. Скрипт не публікує GitHub Release.
+
+Electron main виконує асинхронну перевірку на запуску та кожні три години; Settings
+дає ручну перевірку. Після підтвердженого релізу єдиний модальний gate блокує Client,
+поки перевірений Setup не встановить нову версію. Downloader тримає lock, показує
+progress, перевіряє цілісність і очищує лише власний неповний файл. Після явного
+підтвердження попередження про незбережені зміни окремий PowerShell launcher чекає
+завершення Client, викликає чинний Setup через звичайний UAC `RunAs`, чекає NSIS і
+підтверджує результат за маркером успішної секції; тоді запускає Client повторно.
+Відмова UAC/невдале встановлення повертає Client до обов'язкового gate. Автоматичний
+rollback частково перезаписаного Client не заявляється.
+
+Для цього використовується той самий NSIS Setup і запис Installed Apps. Спеціальний
+`/CLIENTUPDATE=1` обходить вибір компонентів/каталогів, виконує наявний Client
+payload section і disk preflight, пропускає видалення незазначених компонентів,
+зберігає `InstalledComponents`, шляхи Data/Backups і metadata Manager. Server section,
+service control, server files та server data не змінюються. Client-only, Server-only
+і Combined як і раніше підтримуються звичайним Setup. Реальне UAC/NSIS/Combined
+перевіряється лише у Windows VM.
+
 ## Збірка
 
 TypeScript/React/Vite, Electron, pnpm; конфігурації й команди в `package.json`,

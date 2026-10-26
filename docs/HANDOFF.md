@@ -4,14 +4,16 @@
 
 - Дата фіксації: **2026-10-26**.
 - Гілка: **`feature/client-server`**.
-- HEAD до цього документаційного коміту:
-  **`9501b086c2ab5dc8a7d8978853cff35fbfa50689`**.
-- Це baseline коду; поточний HEAD після додавання документації визначати через
-  `git rev-parse HEAD`. Документ не містить власного майбутнього commit hash.
+- HEAD до Stage 9.1.1:
+  **`0270b3f5ddb25d1c174c66aac018f75a3cfe7ac1`**.
+- Stage 9.1.1 зафіксовано одним commit на поточному HEAD. Для точного hash
+  виконай `git rev-parse HEAD`; документ не дублює власний commit hash.
+  Stage 9.1 продовжується роботою над Manager та API Server.
 - Версії кореневого проєкту та API Server: **`0.1.0`**.
 - Робоче дерево на початку документаційного завдання було чистим.
-- **Stage 8.2 завершено. Наступний напрям — Stage 9.1 Automatic Updates.**
-  Реалізацію починати за окремим завданням; погоджений план у [ROADMAP.md](ROADMAP.md).
+- **Stage 8.2 завершено. Stage 9.1.1 реалізовано; Stage 9.1 триває.**
+  Наступний напрям: Server Manager і API Server через спільні Stable release
+  contracts. Реальну перевірку NSIS/UAC виконати у Windows VM.
 
 ## Останні зміни
 
@@ -22,11 +24,28 @@
 | `92cc835` | UX Server Manager, наявна дизайн-система й усі п'ять розділів |
 | `c8ba96d` | Recovery update/restore, захист від небезпечного DB return, timeout/lock |
 | `9501b08` | Лише installer test: assertion узгоджено зі структурованою JSON/Base64 діагностикою |
+| `HEAD` | Shared Stable GitHub Releases та Client automatic updates, NSIS Client-only upgrade mode |
 
 Технічну реалізацію й source map див. в [ARCHITECTURE.md](ARCHITECTURE.md),
 обов'язкові обмеження — в [DECISIONS.md](DECISIONS.md) та [AGENTS.md](../AGENTS.md).
 
 ## Що фактично перевірено
+
+### Stage 9.1.1
+
+- `pnpm client:updates:test` — **10/10** цільових перевірок, включно з розбором
+  launcher PowerShell без його виконання.
+- `node --test scripts/windows-installer-paths.test.mjs packaging/windows-installer-space.test.mjs` — **36/36** regression checks.
+- `pnpm exec tsc -p tsconfig.electron.json --noEmit` і
+  `pnpm exec tsc -p tsconfig.app.json --noEmit` — пройшли.
+- `git diff --check` — пройшов.
+- У тестах використано синтетичні release metadata й файли; GitHub Release не
+  публікувався, Setup/Server ZIP не збирався, реальний Windows installer/Service
+  не запускався.
+- `assets/release-channel.json` містить адресу GitHub remote
+  `Anatol1ch/HromadaAID`; жоден токен не вбудовано.
+- Автоматичне оновлення реалізоване лише для Client. Server Manager і API Server
+  ще не інтегровані.
 
 За останні контрольні прогони в цьому робочому середовищі (не повторювалися
 під час створення документації):
@@ -58,8 +77,15 @@ Test-only commit не змінював ці файли. Наявність ць�
   транзакції вимагають ручного рішення; копії й журнали зберігаються.
 - Непідтверджене завершення дочірнього дерева утримує критичний lock. Безпечного
   примусового unlock або скасування restore немає.
-- Автопублікація/автозавантаження GitHub Releases, довіра до майбутнього update
-  каналу та повне налаштування Tailscale — запланована робота, не поточна гарантія.
+- GitHub Release не публікувався й не перевірявся наживо; Manager/API Server update
+  та криптографічне підтвердження видавця залишаються майбутньою роботою.
+- У Windows VM перевірити Client-only/Server-only/Combined upgrade, збереження
+  `InstalledComponents` і Installed Apps запису, Combined Server Service/файлів,
+  даних та конфігурації, штатний UAC і його відмову, download/install progress,
+  hash/HTTP/timeout/network failure, перерване встановлення, повтор після збою,
+  NSIS success marker і автоматичний повторний запуск Client. Перевірити також
+  реальний GitHub Stable Release зі створеним release manifest. Packaging і
+  публікація у цьому завданні не виконувалися.
 
 ## Як продовжувати
 

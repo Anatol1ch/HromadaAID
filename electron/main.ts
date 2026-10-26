@@ -6,6 +6,7 @@ import type { AuthActionResult, ClientAuthState } from '../shared/auth-contract.
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { cleanupGeneratedStatements, registerStatementsIpc } from './statements-ipc.js'
+import { createClientUpdateService } from './client-update-service.js'
 import { configureIpcSecurity, isTrustedAppUrl, trustedIpcMain } from './ipc-security.js'
 import { ElectronRuntimeConfigError, enforceTlsCertificateValidation, readElectronRuntimeConfig, readSavedConnectionConfig, validateServerBaseUrl, type ElectronRuntimeConfig } from './runtime-config.js'
 import { HttpClient, HttpClientError } from './http-client.js'
@@ -129,6 +130,23 @@ if (!hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     try {
       const userDataPath = app.getPath('userData')
+      const clientUpdates = createClientUpdateService({
+        currentVersion: app.getVersion(), resourcesPath: process.resourcesPath, userDataPath,
+        executablePath: app.getPath('exe'), processId: process.pid,
+        publish: state => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('client-update:state', state) },
+      })
+      await clientUpdates.restore()
+      trustedIpcMain.handle('client-update:get-state', () => clientUpdates.getState())
+      trustedIpcMain.handle('client-update:check', () => clientUpdates.check())
+      trustedIpcMain.handle('client-update:download', () => clientUpdates.download())
+      trustedIpcMain.handle('client-update:install', async () => {
+        const result = await clientUpdates.install()
+        if (result.ok) setTimeout(() => { clientUpdates.markRestarting(); app.quit() }, 300)
+        return result
+      })
+      setTimeout(() => { void clientUpdates.check() }, 0)
+      const updateCheckInterval = setInterval(() => { void clientUpdates.check() }, 3 * 60 * 60 * 1000)
+      updateCheckInterval.unref()
       const savedConnection = readSavedConnectionConfig(userDataPath, join(process.resourcesPath, 'server-connection.json'))
       savedApiUrl = savedConnection.config?.apiUrl ?? null
       runtimeConfig = readElectronRuntimeConfig(process.env, savedConnection)

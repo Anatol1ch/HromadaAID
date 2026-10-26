@@ -19,13 +19,14 @@ type ModalProps = {
   describedBy?: string
   headerIcon?: ReactNode
   busy?: boolean
+  dismissible?: boolean
 }
 
 let modalSequence = 0
 const openModalStack: number[] = []
 let initialBodyOverflow = ''
 
-export default function Modal({ title, description, children, onClose, dirty = false, size = 'compact', labelledBy, role = 'dialog', className = '', describedBy, headerIcon, busy = false }: ModalProps) {
+export default function Modal({ title, description, children, onClose, dirty = false, size = 'compact', labelledBy, role = 'dialog', className = '', describedBy, headerIcon, busy = false, dismissible = true }: ModalProps) {
   const id = useId()
   const titleId = labelledBy ?? `modal-title-${id}`
   const descriptionId = `modal-description-${id}`
@@ -68,7 +69,7 @@ export default function Modal({ title, description, children, onClose, dirty = f
     }
     const timer = window.setTimeout(focusFirst, 0)
     const requestClose = () => {
-      if (busyRef.current) return
+      if (!dismissible || busyRef.current) return
       confirmModalClose(dirtyRef.current, closeRef.current, dialogRef.current)
     }
     const onKeyDown = (event: KeyboardEvent) => {
@@ -93,16 +94,16 @@ export default function Modal({ title, description, children, onClose, dirty = f
       if (dialog) cancelCloseConfirmation(dialog)
       if (previousFocus?.isConnected && !previousFocus.matches(':disabled') && !previousFocus.closest('[inert]') && previousFocus.getClientRects().length > 0) previousFocus.focus()
     }
-  }, [])
+  }, [dismissible])
 
   const requestClose = () => {
-    if (busy) return
+    if (!dismissible || busy) return
     confirmModalClose(dirty, onClose, dialogRef.current)
   }
 
   return createPortal(<div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) { event.stopPropagation(); requestClose() } }}>
     <section ref={dialogRef} onFocusCapture={event => { if (event.target !== event.currentTarget) lastFieldRef.current = event.target as HTMLElement }} className={`app-modal app-modal-${size}${className ? ` ${className}` : ''}`} role={role} aria-modal="true" aria-busy={busy || undefined} aria-labelledby={titleId} aria-describedby={[description ? descriptionId : '', describedBy].filter(Boolean).join(' ') || undefined} tabIndex={-1}>
-      <header className="app-modal-header"><div>{headerIcon && <span className="app-modal-header-icon">{headerIcon}</span>}<h2 id={titleId}>{title}</h2>{description && <p id={descriptionId}>{description}</p>}</div><button type="button" className="icon-button" aria-label="Закрити вікно" disabled={busy} onClick={requestClose}><X size={19}/></button></header>
+      <header className="app-modal-header"><div>{headerIcon && <span className="app-modal-header-icon">{headerIcon}</span>}<h2 id={titleId}>{title}</h2>{description && <p id={descriptionId}>{description}</p>}</div>{dismissible && <button type="button" className="icon-button" aria-label="Закрити вікно" disabled={busy} onClick={requestClose}><X size={19}/></button>}</header>
       <div className="app-modal-content">{children}</div>
     </section>
   </div>, document.body)

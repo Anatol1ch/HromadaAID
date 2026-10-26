@@ -306,6 +306,13 @@ export type ServerConnectionSaveResult = { ok: true; state: ServerConnectionStat
 export type HromadaAidApi = {
   appName: string; platform: string
   appInfo: { getVersion: () => Promise<string>; openExternal: (url: string) => Promise<boolean> }
+  clientUpdates: {
+    getState: () => Promise<ClientUpdateState>
+    check: () => Promise<ClientUpdateState>
+    download: () => Promise<ClientUpdateState>
+    install: () => Promise<{ ok: boolean; message?: string }>
+    onStateChange: (listener: (state: ClientUpdateState) => void) => () => void
+  }
   auth: {
     getState: () => Promise<ClientAuthState>
     getLastLogin: () => Promise<string | null>
@@ -340,4 +347,16 @@ export type HromadaAidApi = {
   reports: { get: (sheet: ReportSheet) => Promise<ReportSourceRow[]>; summary: (year: number, period: ReportPeriod) => Promise<ReportSummary>; annualPlanList: (year: number) => Promise<AnnualAidPlan[]>; annualPlanSave: (input: AnnualAidPlanInput, expectedUpdatedAt?: string) => Promise<{ ok: boolean; message?: string }>; generate: (snapshot: ReportExportSnapshot) => Promise<{ ok: true; document: PreparedReport } | { ok: false; message: string }>; savePdf: (documentId: string) => Promise<ReportExportResult>; saveExcel: (documentId: string) => Promise<ReportExportResult>; release: (documentId: string) => Promise<void>; planList: (year: number) => Promise<AnnualPlanEntry[]>; planSave: (input: AnnualPlanInput, id?: string) => Promise<{ ok: boolean; message?: string }>; planRemove: (id: string) => Promise<{ ok: boolean; message?: string }> }
   deletion: { preview: (entity: DeleteEntity, id: string) => Promise<DeletePreview | null>; execute: (entity: DeleteEntity, id: string, confirmationToken?: string) => Promise<{ ok: boolean; message?: string }> }
   statements: { list: (year: number) => Promise<AssignmentListResult>; generate: (kind: StatementKind, assignmentIds: string[], year: number, parameters: StatementParameters[]) => Promise<{ ok: true; documents: GeneratedStatement[] } | { ok: false; message: string }>; generateBank: (assignmentIds: string[], year: number) => Promise<{ ok: true; document: GeneratedBankStatement } | { ok: false; message: string }>; save: (documentId: string) => Promise<{ ok: boolean; message?: string }>; savePdf: (documentId: string) => Promise<{ ok: boolean; message?: string }> }
+}
+
+export type ClientUpdateState = {
+  status: 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'verifying' | 'ready' | 'preparing' | 'installing' | 'restarting' | 'error'
+  currentVersion: string
+  checkedAt?: string
+  targetVersion?: string
+  notes?: string
+  receivedBytes?: number
+  totalBytes?: number
+  error?: string
+  confirmed: boolean
 }

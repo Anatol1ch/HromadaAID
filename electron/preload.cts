@@ -8,6 +8,17 @@ const api: HromadaAidApi = {
     getVersion: () => invoke('app:get-version'),
     openExternal: url => invoke('app:open-external', url),
   },
+  clientUpdates: {
+    getState: () => invoke('client-update:get-state'),
+    check: () => invoke('client-update:check'),
+    download: () => invoke('client-update:download'),
+    install: () => invoke('client-update:install'),
+    onStateChange: listener => {
+      const receive = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state)
+      ipcRenderer.on('client-update:state', receive)
+      return () => ipcRenderer.removeListener('client-update:state', receive)
+    },
+  },
   auth: {
     getState: () => invoke('auth:get-state'),
     getLastLogin: () => invoke('auth:get-last-login'),
