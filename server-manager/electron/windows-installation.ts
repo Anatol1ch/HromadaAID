@@ -11,6 +11,7 @@ import type { ServerInstallAdapters } from './installation-engine.js'
 import { verifyInitialInstallCandidate } from './initial-setup.js'
 import { inspectEnvironment } from './inspection-engine.js'
 import { createWindowsInspectionAdapters } from './windows-inspection.js'
+import { parseInstallerDiagnostic } from './server-install-diagnostic.js'
 
 async function verifyPackageCopy(source: string, candidate: string): Promise<void> {
   const sourceManifest = await readFile(join(source, 'package-integrity.json'))
@@ -233,11 +234,9 @@ export function createWindowsInstallationAdapters(): ServerInstallAdapters {
       } catch (error) {
         const failure = error as Error & { stdout?: string; stderr?: string }
         const text = `${failure.stdout ?? ''}\n${failure.stderr ?? ''}`
-        const line = text.split(/\r?\n/).find(value => value.startsWith('SERVICE_INSTALL_ERROR|'))
-        if (line) {
-          const stage = /(?:^|\|)stage=([^|]+)/.exec(line)?.[1] ?? 'невідомий'
-          const message = /(?:^|\|)message=([^|]+)/.exec(line)?.[1]
-          throw new Error(`Не вдалося налаштувати Windows Service (етап ${stage}). ${message ?? 'Перевірте діагностичний файл у %TEMP%.'}`)
+        const diagnostic = parseInstallerDiagnostic(text)
+        if (diagnostic) {
+          throw new Error(`Не вдалося налаштувати Windows Service (етап ${diagnostic.stage}). ${diagnostic.message || 'Перевірте діагностичний файл у %TEMP%.'}`)
         }
         throw new Error(safeFailure(error))
       }

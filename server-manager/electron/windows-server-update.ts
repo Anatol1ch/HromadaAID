@@ -4,9 +4,10 @@ import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { inspectEnvironment } from './inspection-engine.js'
 import { createWindowsInspectionAdapters } from './windows-inspection.js'
-import type { ServerUpdateAdapters } from './server-update.js'
+import type { ServerUpdateAdapters, ServerUpdateEnvironment } from './server-update.js'
 import type { ServerUpdateStage } from './server-update-contract.js'
 import { verifyUpdatePackage, readInstalledPackageIdentity } from './server-update.js'
+import { parseInstallerDiagnostic } from './server-install-diagnostic.js'
 
 const extractionScript = String.raw`
 $ErrorActionPreference = 'Stop'
@@ -74,7 +75,17 @@ try {
 `
 
 function psBase64(text: string): string { return Buffer.from(text, 'utf8').toString('base64') }
-function powershell(): string { return join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe') }
+function powershell(systemRoot = process.env.SystemRoot || 'C:\\Windows'): string { return join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe') }
+
+export function buildInstallerInvocation(script: string, environment: Pick<ServerUpdateEnvironment, 'programDirectory' | 'dataDirectory' | 'backupDirectory'>, systemRoot = process.env.SystemRoot || 'C:\\Windows') {
+  return {
+    executable: powershell(systemRoot),
+    args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', script,
+      '-ProgramDirectory', environment.programDirectory, '-DataDirectory', environment.dataDirectory, '-BackupDirectory', environment.backupDirectory, '-FromServerManager', '-UpdateOnly'],
+    cwd: join(systemRoot, 'System32'),
+  }
+}
+
 async function run(executable: string, args: string[], cwd: string, timeoutMs = 180_000, onStdout?: (chunk: string) => void): Promise<{ stdout: string; stderr: string }> {
   try {
     if (!(await stat(cwd)).isDirectory()) throw new Error('not a directory')
@@ -195,10 +206,10 @@ export function createWindowsServerUpdateAdapters(options: { installerScriptPath
       // Orchestration belongs to this Manager release, not to a possibly older
       // ZIP whose installer may predate UpdateOnly and live-service preflight.
       const script = options.installerScriptPath ?? resolve('packaging', 'install-server-service.ps1')
+      const invocation = buildInstallerInvocation(script, environment)
       let pending = ''
       try {
-        await run(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', script,
-          '-ProgramDirectory', environment.programDirectory, '-DataDirectory', environment.dataDirectory, '-BackupDirectory', environment.backupDirectory, '-FromServerManager', '-UpdateOnly'], join(process.env.SystemRoot || 'C:\\Windows', 'System32'), 300_000, chunk => {
+        await run(invocation.executable, invocation.args, invocation.cwd, 300_000, chunk => {
           pending += chunk
           const lines = pending.split(/\r?\n/); pending = lines.pop() ?? ''
           for (const line of lines) {
@@ -213,13 +224,15 @@ export function createWindowsServerUpdateAdapters(options: { installerScriptPath
           const match = /^HROMADAAID_INSTALL_STAGE\|(.+)$/.exec(line)
           if (match) report(mapInstallStage(match[1]), installStageLabel(match[1]))
         }
-        const errorLine = text.split(/\r?\n/).find(line => line.startsWith('SERVICE_INSTALL_ERROR|'))
-        if (errorLine) {
-          const stage = /(?:^|\|)stage=([^|]+)/.exec(errorLine)?.[1] ?? 'невідомий'
-          const message = /(?:^|\|)message=([^|]+)/.exec(errorLine)?.[1] ?? 'Перегляньте журнал у %TEMP%.'
+        const diagnostic = parseInstallerDiagnostic(text)
+        if (diagnostic) {
+          const { stage } = diagnostic
+          const message = diagnostic.message || 'Перегляньте журнал у %TEMP%.'
           const outcome = text.split(/\r?\n/).find(line => /Попередній серверний пакет відновлено|потрібне адміністративне відновлення/i.test(line))
           throw Object.assign(new Error(`Етап ${stage}: ${message}${outcome ? `; ${outcome.slice(0, 1_500)}` : ''}`), { code: 'SERVICE_INSTALL_FAILED', rollbackConfirmed: /^HROMADAAID_UPDATE_OUTCOME\|rolled-back\r?$/m.test(text), preservedBeforeSwitch: /^HROMADAAID_UPDATE_OUTCOME\|preserved-before-switch\r?$/m.test(text) })
         }
+        const normalized = normalizePowerShellDiagnostic(failure.stderr ?? '') || normalizePowerShellDiagnostic(failure.stdout ?? '')
+        if (normalized) throw Object.assign(new Error(normalized.slice(0, 2_000)), { code: 'SERVICE_INSTALL_FAILED', cause: error })
         throw error
       }
     },

@@ -31,6 +31,35 @@ const expectedFiles = [
 ]
 
 function fail(code: string, message: string): Error { return Object.assign(new Error(message), { code }) }
+
+type SemVer = { major: bigint; minor: bigint; patch: bigint; prerelease: string[] | null }
+function parseSemVer(value: string): SemVer {
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(value)
+  if (!match) throw fail('PACKAGE_VERSION_INVALID', 'Версія серверного пакета не відповідає формату SemVer.')
+  const prerelease = match[4]?.split('.') ?? null
+  if (prerelease?.some(identifier => /^\d+$/.test(identifier) && identifier.length > 1 && identifier.startsWith('0'))) {
+    throw fail('PACKAGE_VERSION_INVALID', 'Версія серверного пакета містить некоректний ідентифікатор SemVer.')
+  }
+  return { major: BigInt(match[1]), minor: BigInt(match[2]), patch: BigInt(match[3]), prerelease }
+}
+
+/** SemVer precedence: build metadata is ignored and prerelease identifiers follow SemVer 2.0.0 ordering. */
+export function compareSemVer(left: string, right: string): number {
+  const a = parseSemVer(left), b = parseSemVer(right)
+  for (const key of ['major', 'minor', 'patch'] as const) if (a[key] !== b[key]) return a[key] > b[key] ? 1 : -1
+  if (a.prerelease === null || b.prerelease === null) return a.prerelease === b.prerelease ? 0 : a.prerelease === null ? 1 : -1
+  const count = Math.min(a.prerelease.length, b.prerelease.length)
+  for (let i = 0; i < count; i++) {
+    const x = a.prerelease[i], y = b.prerelease[i]
+    if (x === y) continue
+    const xNumeric = /^\d+$/.test(x), yNumeric = /^\d+$/.test(y)
+    if (xNumeric && yNumeric) return BigInt(x) > BigInt(y) ? 1 : -1
+    if (xNumeric !== yNumeric) return xNumeric ? -1 : 1
+    return x > y ? 1 : -1
+  }
+  return Math.sign(a.prerelease.length - b.prerelease.length)
+}
+
 function safeRelativePath(value: unknown): string {
   if (typeof value !== 'string' || !value || value.includes('\\') || value.startsWith('/') || value.includes('\0')) throw fail('PACKAGE_PATH_INVALID', 'Архів містить некоректний шлях.')
   const parts = value.split('/')
@@ -185,6 +214,10 @@ export async function prepareServerUpdate(zipPath: string, adapters: ServerUpdat
     await adapters.extract(zipPath, extractedRoot)
     const metadata = await verifyUpdatePackage(extractedRoot)
     if (metadata.apiContract !== environment.apiContractVersion) throw fail('API_CONTRACT_INCOMPATIBLE', 'Пакет використовує несумісний API contract.')
+    if (parseSemVer(metadata.version).prerelease !== null) throw fail('UPDATE_PRERELEASE_UNSUPPORTED', 'Попередні версії сервера не підтримуються звичайним оновленням. Виберіть стабільний пакет.')
+    const versionOrder = compareSemVer(metadata.version, environment.serverVersion)
+    if (versionOrder === 0) throw fail('UPDATE_VERSION_ALREADY_INSTALLED', 'Ця версія сервера вже встановлена. Оновлення не потрібне.')
+    if (versionOrder < 0) throw fail('UPDATE_DOWNGRADE_BLOCKED', 'Вибраний пакет старіший за встановлену версію. Звичайне оновлення не може виконати downgrade.')
     const currentSchema = await adapters.readCurrentSchema(environment)
     const activePackageIdentity = await adapters.readActivePackageIdentity(environment)
     const candidatePackageIdentity = await readPackageManifestIdentity(extractedRoot)

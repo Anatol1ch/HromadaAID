@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 
 const { prepareServerUpdate, applyServerUpdate, verifyUpdatePackage } = await import('../../dist-server-manager/main/server-update.js')
@@ -14,6 +15,32 @@ const productionZip = process.env.HROMADAAID_TEST_SERVER_ZIP ?? join(process.cwd
 // This is the actual legacy installer payload emitted by package-windows.mjs,
 // not a reduced hand-written package or a new ZIP with metadata removed.
 const legacySource = join(process.cwd(), 'release', 'installer-payload', 'Server')
+
+async function setPackageVersion(root, nextVersion) {
+  const appPackagePath = join(root, 'app', 'package.json')
+  const appPackage = JSON.parse(await readFile(appPackagePath, 'utf8'))
+  appPackage.version = nextVersion
+  await writeFile(appPackagePath, JSON.stringify(appPackage))
+  const integrityPath = join(root, 'package-integrity.json')
+  const integrity = JSON.parse(await readFile(integrityPath, 'utf8'))
+  for (const entry of integrity.files) {
+    const bytes = await readFile(join(root, ...entry.path.split('/')))
+    entry.sizeBytes = bytes.length
+    entry.sha256 = createHash('sha256').update(bytes).digest('hex')
+  }
+  await writeFile(integrityPath, JSON.stringify(integrity))
+  const componentPath = join(root, 'package-manifest.json')
+  if (existsSync(componentPath)) {
+    const component = JSON.parse(await readFile(componentPath, 'utf8'))
+    component.version = nextVersion
+    for (const entry of component.files) {
+      const bytes = await readFile(join(root, ...entry.path.split('/')))
+      entry.sizeBytes = bytes.length
+      entry.sha256 = createHash('sha256').update(bytes).digest('hex')
+    }
+    await writeFile(componentPath, JSON.stringify(component))
+  }
+}
 
 test('production legacy and component packages update and roll back using bundled Node and real file transactions, with mock SCM', {
   skip: process.platform !== 'win32' ? 'Requires Windows production runtime' : !existsSync(productionZip) || !existsSync(legacySource) ? 'Build the Windows payload and set HROMADAAID_TEST_SERVER_ZIP' : false,
@@ -37,6 +64,9 @@ test('production legacy and component packages update and roll back using bundle
   const serviceInstaller = await readFile('packaging/install-server-service.ps1', 'utf8')
   const transactionFunction = serviceInstaller.slice(serviceInstaller.indexOf('function Invoke-PackageTransaction('), serviceInstaller.indexOf('function Get-SupportedSchemaMaximum('))
   assert.match(serviceInstaller, /Invoke-PackageTransaction \$rollbackToolRoot 'finalize-rollback' @\(\) \(Join-Path \$activeServer 'runtime\\node.exe'\)/)
+  const candidateVersion = `${Number(version.split('.')[0])}.${Number(version.split('.')[1])}.${Number(version.split('.')[2]) + 1}`
+  await setPackageVersion(modernSource, candidateVersion)
+  await verifyUpdatePackage(modernSource)
 
   function run(node, args, cwd, input) {
     const result = spawnSync(node, args, { cwd, input, encoding: 'utf8', windowsHide: true, timeout: 120_000 })
@@ -83,22 +113,23 @@ test('production legacy and component packages update and roll back using bundle
           await writeFile(file, bytes)
         }
       }
-      let service = 'running'
+      let service = 'running', installedVersion = version
       const sequence = []
       const io = {
         ...windows,
-        inspect: async () => ({ installation: { status: 'installed' }, service: { status: service }, api: { status: service === 'running' ? 'available' : 'unavailable', contractVersion: 1 }, configuration: { ...environment }, discovery: { confidence: 'confirmed' } }),
+        extract: async (_zipPath, destination) => cp(modernSource, destination, { recursive: true }),
+        inspect: async () => ({ installation: { status: 'installed' }, service: { status: service }, api: { status: service === 'running' ? 'available' : 'unavailable', contractVersion: 1 }, configuration: { ...environment, serverVersion: installedVersion }, discovery: { confidence: 'confirmed' } }),
         prepare: async (...args) => { await windows.prepare(...args); sequence.push('prepared'); if (outcome === 'preparation') throw new Error('Synthetic failure before service control') },
         runInstaller: async (_environment, report) => {
           // Real packaged transaction CLI, no SCM/ACL/DPAPI operations.
           const transaction = (packageRoot, action, extra = []) => run(join(packageRoot, 'runtime', 'node.exe'), [join(packageRoot, 'installer', 'server-package-transaction.mjs'), action, '--program-dir', programDirectory, '--data-dir', dataDirectory, ...extra], folder)
           sequence.push('stop'); service = 'stopped'; report('stop', 'Mock SCM: stopped')
           transaction(stage, 'prepare', ['--had-previous', 'true', '--old-schema', '28', '--schema-before', '28', '--service-was-running', 'true'])
-          transaction(stage, 'activate'); sequence.push('switch'); report('switch', 'Real file transaction')
+          transaction(stage, 'activate'); installedVersion = candidateVersion; sequence.push('switch'); report('switch', 'Real file transaction')
           transaction(active, 'health-check'); sequence.push('start'); service = 'running'; report('health', 'Mock API health')
           if (outcome === 'rollback') {
             service = 'stopped'; transaction(active, 'rollback', ['--schema-version', '28'])
-            service = 'running'
+            service = 'running'; installedVersion = version
             // Execute the real PowerShell transaction wrapper only (no service/ACL
             // functions) and its actual finalize-rollback invocation in isolation.
             const encode = value => Buffer.from(value, 'utf8').toString('base64')

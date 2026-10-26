@@ -7,6 +7,8 @@
   [Parameter(Mandatory = $false)][switch]$UpdateOnly
 )
 $ErrorActionPreference = 'Stop'
+$utf8Output = [Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = $utf8Output
 $serviceName = 'HromadaAIDApi'
 $serviceSid = $null
 $stagedServer = Join-Path $ProgramDirectory 'Server.next'
@@ -67,7 +69,9 @@ function Write-InstallFailureDiagnostic($Record) {
   $hresult = $Record.Exception.HResult
   $type = $Record.Exception.GetType().FullName
   $line = $Record.InvocationInfo.ScriptLineNumber
-  [Console]::Out.WriteLine("SERVICE_INSTALL_ERROR|stage=$script:InstallStage|type=$type|line=$line|hresult=$hresult|childExitCode=$script:LastChildExitCode|detailFile=$fileName|detailWritten=$detailWritten|message=$message")
+  $diagnostic = [ordered]@{ stage = $script:InstallStage; type = $type; line = $line; hresult = $hresult; childExitCode = $script:LastChildExitCode; detailFile = $fileName; detailWritten = $detailWritten; message = $message } | ConvertTo-Json -Compress
+  $encodedDiagnostic = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($diagnostic))
+  [Console]::Out.WriteLine("HROMADAAID_INSTALL_ERROR_B64|$encodedDiagnostic")
 }
 
 function Invoke-Checked([string]$File, [string[]]$Arguments, [string]$Failure) {

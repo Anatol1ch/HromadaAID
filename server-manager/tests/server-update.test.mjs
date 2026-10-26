@@ -8,8 +8,9 @@ import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { existsSync } from 'node:fs'
 
-const { verifyUpdatePackage, prepareServerUpdate, applyServerUpdate, readPackageManifestIdentity } = await import('../../dist-server-manager/main/server-update.js')
-const { createWindowsServerUpdateAdapters, buildZipCompressionRatioProbeCommand, normalizePowerShellDiagnostic } = await import('../../dist-server-manager/main/windows-server-update.js')
+const { verifyUpdatePackage, prepareServerUpdate, applyServerUpdate, readPackageManifestIdentity, compareSemVer } = await import('../../dist-server-manager/main/server-update.js')
+const { createWindowsServerUpdateAdapters, buildZipCompressionRatioProbeCommand, normalizePowerShellDiagnostic, buildInstallerInvocation } = await import('../../dist-server-manager/main/windows-server-update.js')
+const { parseInstallerDiagnostic } = await import('../../dist-server-manager/main/server-install-diagnostic.js')
 
 const payloadFiles = [
   'runtime/node.exe', 'service/HromadaAIDService.exe', 'service/HromadaAIDService.xml.template', 'app/package.json',
@@ -60,12 +61,13 @@ function snapshot({ service = 'running', installation = 'installed', confidence 
   }
 }
 
-function adapters({ current = snapshot(), conflict = false, final = snapshot(), events = [] } = {}) {
+function adapters({ current = snapshot(), conflict = false, final, events = [], packageVersion = '0.1.1' } = {}) {
   let installerCompleted = false
   let candidateIdentity = ''
+  const finalSnapshot = final ?? snapshot({ version: packageVersion })
   return {
-    inspect: async () => installerCompleted ? final : current,
-    extract: async (_zip, destination) => { await mkdir(destination, { recursive: true }); await fixturePackage(destination) },
+    inspect: async () => installerCompleted ? finalSnapshot : current,
+    extract: async (_zip, destination) => { await mkdir(destination, { recursive: true }); await fixturePackage(destination, { version: packageVersion }) },
     readCurrentSchema: async () => 4,
     readInstalledApiContract: async () => 1,
     readActivePackageIdentity: async () => installerCompleted ? candidateIdentity : 'original-package-identity',
@@ -77,7 +79,7 @@ function adapters({ current = snapshot(), conflict = false, final = snapshot(), 
   }
 }
 
-test('server ZIP payload manifests and file hashes are verified; same SemVer remains eligible', async t => {
+test('server ZIP payload manifests and file hashes are verified before update policy is applied', async t => {
   const root = await mkdtemp(join(tmpdir(), 'hromada-update-package-')); t.after(() => rm(root, { recursive: true, force: true }))
   await fixturePackage(root)
   const result = await verifyUpdatePackage(root)
@@ -104,18 +106,37 @@ test('package API contract and SQLite manifest values must match the packaged im
   await assert.rejects(verifyUpdatePackage(root), { code: 'API_CONTRACT_MANIFEST_MISMATCH' })
 })
 
-test('stopped service and same version are supported after read-only schema and contract checks', async t => {
+test('newer stable version can update a stopped service after read-only schema and contract checks', async t => {
   const root = await mkdtemp(join(tmpdir(), 'hromada-update-engine-')); t.after(() => rm(root, { recursive: true, force: true }))
   const calls = []
-  const io = adapters({ current: snapshot({ service: 'stopped', api: 'unavailable' }), events: calls })
+  const io = adapters({ current: snapshot({ service: 'stopped', api: 'unavailable' }), events: calls, packageVersion: '0.1.1' })
   const prepared = await prepareServerUpdate(join(root, 'HromadaAID Server.zip'), io)
-  assert.equal(prepared.preview.sameVersion, true)
+  assert.equal(prepared.preview.sameVersion, false)
   assert.equal(prepared.preview.currentSchema, 4)
   assert.equal(prepared.preview.apiContract, 'hromadaaid-rest v1')
   const result = await applyServerUpdate(prepared, io, 'update-1', event => calls.push(event.stage))
   assert.equal(result.success, true)
   assert.deepEqual(calls.filter(value => value.startsWith('adapter:')), ['adapter:prepare', 'adapter:installer'])
   assert.ok(calls.includes('stop'))
+})
+
+test('same and older versions are rejected after ZIP verification and before package preparation or installer invocation', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'hromada-update-version-policy-')); t.after(() => rm(root, { recursive: true, force: true }))
+  for (const [version, code] of [['0.1.0', 'UPDATE_VERSION_ALREADY_INSTALLED'], ['0.0.9', 'UPDATE_DOWNGRADE_BLOCKED']]) {
+    const calls = [], io = adapters({ packageVersion: version, events: calls })
+    await assert.rejects(prepareServerUpdate(join(root, `${version}.zip`), io), { code })
+    assert.deepEqual(calls, [], `${version}: neither Server.next preparation nor installer may run`)
+  }
+  const prerelease = adapters({ packageVersion: '0.1.1-rc.1' })
+  await assert.rejects(prepareServerUpdate(join(root, 'prerelease.zip'), prerelease), { code: 'UPDATE_PRERELEASE_UNSUPPORTED' })
+})
+
+test('SemVer precedence handles numeric components, prereleases, numeric identifiers and build metadata', () => {
+  for (const [left, right, expected] of [
+    ['0.10.0', '0.9.99', 1], ['1.0.0-alpha', '1.0.0', -1], ['1.0.0-alpha.2', '1.0.0-alpha.10', -1],
+    ['1.0.0-rc.1', '1.0.0-rc.1', 0], ['1.0.0+build.2', '1.0.0+build.1', 0], ['1.0.0-beta', '1.0.0-alpha', 1],
+  ]) assert.equal(compareSemVer(left, right), expected, `${left} vs ${right}`)
+  assert.throws(() => compareSemVer('1.0.0-01', '1.0.0'), { code: 'PACKAGE_VERSION_INVALID' })
 })
 
 test('incompatible contract and outstanding transaction stop before package preparation', async t => {
@@ -191,7 +212,7 @@ test('healthy API alone never proves rollback or unchanged package after a failu
   }
 })
 
-test('same SemVer and healthy API cannot report success for an unchanged package or unfinished transaction', async t => {
+test('healthy API cannot report success for an unchanged package or unfinished transaction', async t => {
   const root = await mkdtemp(join(tmpdir(), 'hromada-update-success-evidence-')); t.after(() => rm(root, { recursive: true, force: true }))
   for (const condition of ['unchanged', 'unfinished']) {
     const io = adapters()
@@ -305,6 +326,38 @@ test('PowerShell diagnostics omit CLIXML progress while retaining actual errors'
   assert.equal(normalizePowerShellDiagnostic('#< CLIXML\n<Objs><S S="Error">token=private-value</S></Objs>'), 'token=[redacted]')
   assert.equal(normalizePowerShellDiagnostic('Actual PowerShell failure'), 'Actual PowerShell failure')
   assert.equal(normalizePowerShellDiagnostic('#< CLIXML\n<Objs><Obj S="progress"><AV>Preparing modules for first use</AV></Obj></Objs>'), '')
+})
+
+test('service installer invocation preserves paths with spaces as separate -File arguments', () => {
+  const script = 'C:\\Program Files\\HromadaAID\\Server Manager\\resources\\server-payload\\installer\\install-server-service.ps1'
+  const environment = { programDirectory: 'C:\\Program Files\\HromadaAID', dataDirectory: 'C:\\ProgramData\\HromadaAID Data', backupDirectory: 'D:\\HromadaAID Backups' }
+  const invocation = buildInstallerInvocation(script, environment, 'C:\\Windows')
+  assert.equal(invocation.executable, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
+  assert.equal(invocation.cwd, 'C:\\Windows\\System32')
+  assert.deepEqual(invocation.args.slice(invocation.args.indexOf('-File'), invocation.args.indexOf('-File') + 2), ['-File', script])
+  for (const [flag, path] of [['-ProgramDirectory', environment.programDirectory], ['-DataDirectory', environment.dataDirectory], ['-BackupDirectory', environment.backupDirectory]]) {
+    assert.deepEqual(invocation.args.slice(invocation.args.indexOf(flag), invocation.args.indexOf(flag) + 2), [flag, path])
+  }
+})
+
+test('installer failure diagnostics preserve Ukrainian text through an ASCII-safe UTF-8 marker', async () => {
+  const message = 'Перевірка конфігурації сервера не пройшла: каталог недоступний.'
+  const payload = { stage: 'validate-server-preflight', type: 'System.Exception', line: 361, hresult: -2146233088, childExitCode: null, detailFile: 'HromadaAID-service-install-test.json', detailWritten: true, message }
+  const marker = `HROMADAAID_INSTALL_ERROR_B64|${Buffer.from(JSON.stringify(payload), 'utf8').toString('base64')}`
+  assert.deepEqual(parseInstallerDiagnostic(marker), payload)
+  assert.equal(parseInstallerDiagnostic('HROMADAAID_INSTALL_ERROR_B64|not valid!'), null)
+  const script = await readFile(join(process.cwd(), 'packaging/install-server-service.ps1'), 'utf8')
+  assert.match(script, /\[Console\]::OutputEncoding = \$utf8Output/)
+  assert.match(script, /HROMADAAID_INSTALL_ERROR_B64\|\$encodedDiagnostic/)
+})
+
+test('Windows PowerShell 5.1 emits parseable Ukrainian structured install diagnostics', { skip: process.platform !== 'win32' }, () => {
+  const powershell = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const script = String.raw`$utf8Output=[Text.UTF8Encoding]::new($false);[Console]::OutputEncoding=$utf8Output;$diagnostic=[ordered]@{stage='validate-server-preflight';type='System.Exception';line=361;hresult=-2146233088;childExitCode=$null;detailFile='HromadaAID-test.json';detailWritten=$true;message='Перевірка конфігурації сервера не пройшла: каталог недоступний.'}|ConvertTo-Json -Compress;$encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($diagnostic));[Console]::Out.WriteLine("HROMADAAID_INSTALL_ERROR_B64|$encoded")`
+  const result = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true })
+  assert.equal(result.status, 0, result.stderr || result.error?.message)
+  const parsed = parseInstallerDiagnostic(result.stdout)
+  assert.equal(parsed?.message, 'Перевірка конфігурації сервера не пройшла: каталог недоступний.')
 })
 
 test('existing service installer stops only after validations and keeps failures before transaction from stopping service', async () => {
