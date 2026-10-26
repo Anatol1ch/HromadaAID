@@ -5,9 +5,10 @@ import { randomUUID } from 'node:crypto'
 import { hashFile } from './backup-crypto.js'
 import { clearMaintenance, maintenancePath, restoreCandidatePath, restorePlanPath, type RestorePlan } from './backup-admin.js'
 import { acquireDatabaseOwnership, assertServerDatabasePath, durableJson, validateRestoreDatabase } from './restore-safety.js'
-import { restoreError } from './restore-diagnostics.js'
+import { RestoreError, restoreError } from './restore-diagnostics.js'
+import { databaseFingerprint, recordRestoreCompletion } from './restore-recovery.js'
 
-type RestoreJournal = { version: 1; id: string; safety: string; original: string; stage: string; phase: 'prepared' | 'moved' | 'installed' }
+type RestoreJournal = { version: 1; id: string; safety: string; original: string; stage: string; phase: 'prepared' | 'moved' | 'installed'; expectedCurrentFingerprint?: string; replacementFingerprint?: string; returnOf?: string }
 const flush = (path: string) => { const fd = openSync(path, 'r+'); try { fsyncSync(fd) } finally { closeSync(fd) } }
 function checkpoint(path: string): void {
   const db = new DatabaseSync(path)
@@ -33,7 +34,8 @@ export async function restoreOffline(databasePath: string, backupDirectory: stri
     if (existsSync(journalPath)) {
       stage = 'load-journal'
       journal = JSON.parse(readFileSync(journalPath, 'utf8')) as RestoreJournal
-      if (journal.version !== 1 || !/^[a-f0-9-]{36}$/.test(journal.id) || journal.original !== `${databasePath}.before-restore-${journal.id}` || journal.stage !== `${databasePath}.restore-stage-${journal.id}` || journal.safety !== join(backupDirectory, `hromada-aid-safety-${journal.id}.sqlite`)) throw new Error('Невідомий журнал відновлення. Автоматичну заміну зупинено.')
+      if (journal.version !== 1 || !/^[a-f0-9-]{36}$/.test(journal.id) || !['prepared', 'moved', 'installed'].includes(journal.phase) || journal.original !== `${databasePath}.before-restore-${journal.id}` || journal.stage !== `${databasePath}.restore-stage-${journal.id}` || journal.safety !== join(backupDirectory, `hromada-aid-safety-${journal.id}.sqlite`) ||
+          journal.expectedCurrentFingerprint !== undefined && !/^[a-f0-9]{64}$/.test(journal.expectedCurrentFingerprint) || journal.replacementFingerprint !== undefined && !/^[a-f0-9]{64}$/.test(journal.replacementFingerprint) || journal.returnOf !== undefined && !/^[a-f0-9-]{36}$/.test(journal.returnOf)) throw new Error('Невідомий журнал відновлення. Автоматичну заміну зупинено.')
     } else {
       stage = 'load-marker'
       const marker = JSON.parse(readFileSync(maintenancePath(databasePath), 'utf8')) as { version: number; id: string }
@@ -41,12 +43,15 @@ export async function restoreOffline(databasePath: string, backupDirectory: stri
       stage = 'load-plan'
       const plan = JSON.parse(readFileSync(restorePlanPath(backupDirectory, marker.id), 'utf8')) as RestorePlan
       if (!plan.confirmed || plan.id !== marker.id) throw new Error('Відновлення не підтверджено адміністратором.')
+      if (plan.expectedCurrentFingerprint && databaseFingerprint(databasePath) !== plan.expectedCurrentFingerprint) throw new RestoreError('RESTORE_RETURN_UNSAFE', 'validate-current', 'Після підготовки повернення дані змінилися. Заміна заборонена.')
       const candidate = restoreCandidatePath(backupDirectory, marker.id)
       stage = 'validate-candidate'
       if ((await hashFile(candidate)).sha256 !== plan.hash) throw new Error('Підготовлена база змінилася.')
       validateRestoreDatabase(candidate)
       const id = marker.id
       journal = { version: 1, id, safety: join(backupDirectory, `hromada-aid-safety-${id}.sqlite`), original: `${databasePath}.before-restore-${id}`, stage: `${databasePath}.restore-stage-${id}`, phase: 'prepared' }
+      if (plan.expectedCurrentFingerprint) journal.expectedCurrentFingerprint = plan.expectedCurrentFingerprint
+      if (plan.returnOf) journal.returnOf = plan.returnOf
       const safetyPartial = `${journal.safety}.${randomUUID()}.partial`
       stage = 'insurance-backup'
       // No active Fastify can acquire ownership while this command owns the lock.
@@ -74,6 +79,7 @@ export async function restoreOffline(databasePath: string, backupDirectory: stri
       checkpoint(journal.stage)
       validateRestoreDatabase(journal.stage)
       checkpoint(databasePath)
+      journal.replacementFingerprint = databaseFingerprint(journal.stage)
       stage = 'publish-journal'
       durableJson(journalPath, journal)
       fault?.('prepared')
@@ -83,6 +89,7 @@ export async function restoreOffline(databasePath: string, backupDirectory: stri
     if (!existsSync(journal.original)) {
       stage = 'move-original'
       if (!existsSync(databasePath) || !existsSync(journal.stage)) throw new Error('Неповний стан відновлення. Файли збережено для ручної перевірки.')
+      if (journal.expectedCurrentFingerprint && databaseFingerprint(databasePath) !== journal.expectedCurrentFingerprint) throw new RestoreError('RESTORE_RETURN_UNSAFE', 'validate-current', 'Поточна база змінилася. Повернення заборонене; файли збережено.')
       renameSync(databasePath, journal.original)
       fault?.('original-renamed')
       journal.phase = 'moved'; durableJson(journalPath, journal)
@@ -94,12 +101,14 @@ export async function restoreOffline(databasePath: string, backupDirectory: stri
       fault?.('replacement-renamed')
     }
     stage = 'verify-restored-database'
+    if (journal.replacementFingerprint && databaseFingerprint(databasePath) !== journal.replacementFingerprint) throw new RestoreError('RESTORE_RECOVERY_CHANGED', stage, 'Відновлена база змінилася після переривання. Файли збережено; потрібне ручне втручання.')
     validateRestoreDatabase(databasePath)
     const restored = new DatabaseSync(databasePath)
     try { restored.exec('DELETE FROM user_sessions') } finally { restored.close() }
     checkpoint(databasePath)
     journal.phase = 'installed'; durableJson(journalPath, journal)
     fault?.('installed')
+    recordRestoreCompletion(databasePath, backupDirectory, journal.id, journal.returnOf)
     stage = 'finish-maintenance'
     clearMaintenance(databasePath)
     unlinkSync(journalPath)

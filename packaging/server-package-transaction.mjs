@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync, openSync, closeSync, readFileSync, fsyncSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync, openSync, closeSync, readFileSync, fsyncSync, lstatSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -40,6 +41,8 @@ export function preparePackageUpdate({ programDirectory, dataDirectory, hadPrevi
     hadPreviousPackage: Boolean(hadPreviousPackage), oldSchemaMaximum: Number(oldSchemaMaximum),
     schemaBeforeActivation: Number(schemaBeforeActivation), serviceWasRunning: Boolean(serviceWasRunning),
     updatedAt: new Date().toISOString(),
+    previousIdentity: hadPreviousPackage ? packageIdentity(active) : null,
+    candidateIdentity: packageIdentity(staged),
   }, true)
   return journalPath
 }
@@ -119,6 +122,86 @@ export function markInitialInstallNeedsReview(dataDirectory) {
   journal.phase = 'initial-install-needs-review'; journal.updatedAt = new Date().toISOString(); writeJournal(path, journal)
 }
 
+function packageIdentity(root) {
+  try { lstatSync(root) } catch (error) { if (error.code === 'ENOENT') return null; throw error }
+  if (lstatSync(root).isSymbolicLink() || !lstatSync(root).isDirectory()) throw new Error('Каталог транзакції не може бути посиланням.')
+  const manifest = join(root, 'package-integrity.json')
+  if (!existsSync(manifest)) return null
+  const hash = createHash('sha256').update(readFileSync(manifest)).update('\0')
+  const component = join(root, 'package-manifest.json')
+  hash.update(existsSync(component) ? readFileSync(component) : 'integrity-only').update('\0')
+  return hash.digest('hex')
+}
+
+/** Filesystem reconciliation only. SCM, full package verification, schema and health
+ * are checked by the existing service installer before and after these actions. */
+export function inspectPackageRecovery({ programDirectory, dataDirectory }) {
+  const program = resolve(programDirectory), path = join(resolve(dataDirectory), '.hromadaaid-update-state.json')
+  const journal = readJournal(path)
+  if (journal.formatVersion !== 1 || resolve(journal.programDirectory ?? '') !== program || journal.hadPreviousPackage !== true ||
+      !['prepared', 'old-package-preserved', 'new-package-active', 'health-check', 'healthy', 'files-rolled-back'].includes(journal.phase) ||
+      !Number.isSafeInteger(journal.oldSchemaMaximum) || journal.oldSchemaMaximum < 1) throw new Error('Журнал не містить достатніх доказів для безпечного recovery. Артефакти збережено.')
+  // Older format-1 journals have no fingerprints. Infer roles only where the
+  // existing rename protocol and directory arrangement prove them unambiguously.
+  if (journal.previousIdentity === undefined && journal.candidateIdentity === undefined) {
+    const active = packageIdentity(join(program, 'Server')), previous = packageIdentity(join(program, 'Server.previous'))
+    const next = packageIdentity(join(program, 'Server.next')), failed = packageIdentity(join(program, 'Server.failed'))
+    const candidates = [active, next, failed].filter(Boolean)
+    if (previous && candidates.length === 1) { journal.previousIdentity = previous; journal.candidateIdentity = candidates[0] }
+    else if (journal.phase === 'prepared' && active && next && !previous && !failed) { journal.previousIdentity = active; journal.candidateIdentity = next }
+  }
+  if (!/^[a-f0-9]{64}$/.test(journal.previousIdentity ?? '') || !/^[a-f0-9]{64}$/.test(journal.candidateIdentity ?? '') || journal.previousIdentity === journal.candidateIdentity) throw new Error('Ідентичності пакетів не підтверджено. Потрібна ручна перевірка.')
+  const state = {}
+  for (const name of ['Server', 'Server.next', 'Server.previous', 'Server.failed']) {
+    const root = join(program, name)
+    const identity = packageIdentity(root)
+    if (identity === null && !existsSync(root)) { state[name] = null; continue }
+    state[name] = identity === journal.previousIdentity ? 'previous' : identity === journal.candidateIdentity ? 'candidate' : 'unknown'
+    if (state[name] === 'unknown') throw new Error('Вміст каталогу транзакції не відповідає журналу. Файли не змінено.')
+  }
+  if (state['Server.previous'] && state['Server.previous'] !== 'previous' || state['Server.next'] && state['Server.next'] !== 'candidate' || state['Server.failed'] && state['Server.failed'] !== 'candidate' || state['Server.next'] && state['Server.failed']) throw new Error('Неоднозначний склад каталогів транзакції.')
+  const oldPresent = state.Server === 'previous' || state['Server.previous'] === 'previous'
+  if (!oldPresent && !(state.Server === 'candidate' && journal.phase === 'healthy')) throw new Error('Попередній пакет відсутній до підтвердженого завершення.')
+  if (state.Server === 'previous' && state['Server.previous'] || state.Server === 'candidate' && (state['Server.next'] || state['Server.failed'])) throw new Error('Дубльовані пакети потребують ручної перевірки.')
+  if (!state.Server && !state['Server.previous']) throw new Error('Немає перевіреного пакета для повернення.')
+  return { journal, state, active: state.Server, canRollback: oldPresent }
+}
+
+export function recoverPackageRollback(options) {
+  let view = inspectPackageRecovery(options)
+  if (Number(options.schemaVersion) > view.journal.oldSchemaMaximum || !Number.isSafeInteger(Number(options.schemaVersion)) || Number(options.schemaVersion) < 1 || !view.canRollback) throw new Error('Сумісність SQLite для відкату не підтверджено.')
+  const program = resolve(options.programDirectory), path = join(resolve(options.dataDirectory), '.hromadaaid-update-state.json')
+  // Persist inferred identities before any rename so a further crash remains
+  // recoverable, including the gap after moving Server.previous back to Server.
+  writeJournal(path, view.journal)
+  if (view.active === 'candidate') renameSync(join(program, 'Server'), join(program, 'Server.failed'))
+  // Also covers a crash between either rename and the journal write.
+  view = inspectPackageRecovery(options)
+  if (!view.active) renameSync(join(program, 'Server.previous'), join(program, 'Server'))
+  view.journal.phase = 'files-rolled-back'; writeJournal(path, view.journal)
+}
+
+export function finalizePackageRecovery(options) {
+  const view = inspectPackageRecovery(options), program = resolve(options.programDirectory)
+  if (options.outcome === 'candidate' && view.active === 'candidate') {
+    view.journal.phase = 'healthy'
+  } else if (options.outcome === 'previous' && view.active === 'previous' && !view.state['Server.previous']) {
+    view.journal.phase = 'files-rolled-back'
+  } else throw new Error('Фактичний пакет не підтверджує результат recovery.')
+  const path = join(resolve(options.dataDirectory), '.hromadaaid-update-state.json')
+  writeJournal(path, view.journal)
+  // Caller confirms Running + API health before this commit. Only identified
+  // candidates/previous files are removed; unknown artifacts always fail closed.
+  for (const name of ['Server.next', 'Server.previous', 'Server.failed']) if (view.state[name]) rmSync(join(program, name), { recursive: true })
+  rmSync(path)
+}
+
+export async function verifyRecoveryServiceConfig({ packageRoot, programDirectory, dataDirectory, backupDirectory }) {
+  const { renderWinSWConfig } = await import('./windows-installer-config.mjs')
+  const expected = renderWinSWConfig(readFileSync(join(packageRoot, 'service', 'HromadaAIDService.xml.template'), 'utf8'), { mode: 'server', programDirectory, dataDirectory, backupDirectory })
+  if (readFileSync(join(packageRoot, 'service', 'HromadaAIDService.xml'), 'utf8') !== expected) throw new Error('Конфігурація WinSW не відповідає встановленим шляхам.')
+}
+
 function parseArguments(args) {
   const action = args.shift()
   const options = {}
@@ -144,6 +227,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     else if (action === 'finalize-rollback') finalizePackageRollback({ programDirectory, dataDirectory })
     else if (action === 'discard-prepared') discardPreparedPackageUpdate({ programDirectory, dataDirectory })
     else if (action === 'initial-needs-review') markInitialInstallNeedsReview(dataDirectory)
+    else if (action === 'inspect-recovery') console.log(JSON.stringify(inspectPackageRecovery({ programDirectory, dataDirectory })))
+    else if (action === 'recover-rollback') recoverPackageRollback({ programDirectory, dataDirectory, schemaVersion: options['--schema-version'] })
+    else if (action === 'recover-finalize') finalizePackageRecovery({ programDirectory, dataDirectory, outcome: options['--outcome'] })
+    else if (action === 'verify-recovery-service-config') await verifyRecoveryServiceConfig({ programDirectory, dataDirectory, packageRoot: options['--package-root'], backupDirectory: options['--backup-dir'] })
     else throw new Error('Невідома операція пакета сервера.')
   } catch (error) {
     console.error('Операцію серверного пакета не виконано: ' + (error instanceof Error ? error.message : 'невідома помилка'))

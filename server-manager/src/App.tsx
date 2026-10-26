@@ -10,6 +10,7 @@ import { apiDisplay, diagnosticLevel, initialSetupAction, inspectionFeedback, in
 import managerIcon from '../../assets/hromadaaid-server-manager.svg'
 import BackupManagement from './BackupManagement'
 import UpdateManagement from './UpdateManagement'
+import RecoveryManagement from './RecoveryManagement'
 import { IconButton, Modal, StatusBadge as Status, Toast } from './ManagerUI'
 
 const navIcons = { overview: House, configuration: Settings2, diagnostics: Activity, backups: HardDrive, updates: Download }
@@ -303,6 +304,7 @@ export default function App() {
         {mode === 'demo' ? <div className="sm-demo-banner"><Info size={17} aria-hidden="true"/><span><strong>Демонстраційний режим.</strong> Усі стани, шляхи й події тестові. Системні операції недоступні.</span></div> : null}
         <div className="sm-page-heading"><div><h1 ref={heading} tabIndex={-1}>{headings[section][0]}</h1><p>{headings[section][1]}</p></div><div className="sm-heading-controls">{scenarioPicker}{section === 'overview' && (mode === 'demo' ? <button className="secondary-button" type="button" onClick={inspect}><RefreshCw size={16} aria-hidden="true"/>Демоперевірка</button> : <button className="secondary-button" type="button" onClick={() => void inspectReal(true)} disabled={installWizard || checking || updateBusy || backupBusy || Boolean(serviceOperation)} aria-busy={checking}><RefreshCw size={16} aria-hidden="true"/>{checking ? 'Перевірка…' : 'Перевірити зараз'}</button>)}</div></div>
         {!installWizard && notice && <Toast message={notice} tone={noticeTone} onDismiss={() => setNotice('')}/>}
+        {mode === 'real' && <RecoveryManagement inspection={inspection} section={section} externalBusy={installWizard || updateBusy || backupBusy || Boolean(serviceOperation) || Boolean(updatePreview)} onBusyChange={onBackupBusyChange} onInspection={acceptInspection}/>}
 
         {mode === 'real' && <div hidden={section !== 'backups'}><BackupManagement inspection={inspection} onBusyChange={onBackupBusyChange} onInspection={acceptInspection} externalBusy={installWizard || updateBusy || Boolean(serviceOperation) || Boolean(updatePreview)}/></div>}
         {installWizard && <InstallWizard onClose={() => setInstallWizard(false)} onInstalled={() => { setInstallWizard(false); setSection('overview'); void inspectReal() }} initial={inspection?.installation.status === 'partial_installation' || inspection?.installation.status === 'ready_to_configure' ? inspection.configuration : undefined}/>}

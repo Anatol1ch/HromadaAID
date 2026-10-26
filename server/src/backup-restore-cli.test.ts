@@ -76,10 +76,13 @@ if (process.argv.includes('--test-server')) {
     assert.deepEqual(parseRestoreArguments(flags), parseRestoreArguments(['--', ...flags]))
     assert.equal(parseRestoreArguments([...flags, '--archive', 'synthetic.hraid', '--manager-confirmed']).managerConfirmed, true)
     assert.equal(parseRestoreArguments([...flags, '--archive', 'synthetic.hraid', '--verify-only']).verifyOnly, true)
-    for (const args of [[], ['--database'], [...flags, '--unknown', 'synthetic-sensitive-value'], [...flags, '--database', 'again'], [...flags, '--recovery-key']]) {
+    for (const args of [[], ['--database'], [...flags, '--unknown', 'synthetic-sensitive-value'], [...flags, '--database', 'again'], [...flags, '--recovery-key'], [...flags, '__proto__'], [...flags, 'toString'], [...flags, '--resume'], [...flags, '--resume', '--manager-confirmed', '--archive', 'synthetic.hraid']]) {
       assert.throws(() => parseRestoreArguments(args))
     }
     assert.throws(() => parseRestoreArguments([...flags, '--manager-confirmed']))
+    assert.equal(parseRestoreArguments([...flags, '--resume', '--manager-confirmed']).recovery, 'resume')
+    assert.equal(parseRestoreArguments([...flags, '--return-previous', '--manager-confirmed']).recovery, 'return')
+    assert.equal(parseRestoreArguments([...flags, '--recovery-status']).recovery, 'status')
     try { parseRestoreArguments([...flags, '--unknown', 'synthetic-sensitive-value']) }
     catch (error) { assert.equal(formatRestoreError(error).includes('synthetic-sensitive-value'), false) }
   })

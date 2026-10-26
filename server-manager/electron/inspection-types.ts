@@ -45,6 +45,9 @@ export type InspectionSnapshot = {
 }
 
 export type ManagerInspectionApi = {
+  recoveryStatus(): Promise<import('./recovery-contract.js').RecoveryStatus>
+  recoverOperation(kind: import('./recovery-contract.js').RecoveryKind, confirmed: true): Promise<{ success: boolean; message: string }>
+  onRecoveryProgress(listener: (value: { message: string }) => void): () => void
   inspectEnvironment(): Promise<InspectionSnapshot>
   controlService(operation: import('./service-control.js').ServiceControlOperation): Promise<import('./service-control.js').ServiceControlHandlerResult>
   getInstallDefaults(): Promise<{ programDirectory: string; dataDirectory: string; backupDirectory: string }>

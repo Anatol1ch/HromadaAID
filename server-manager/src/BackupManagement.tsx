@@ -42,7 +42,10 @@ export default function BackupManagement({ inspection, onBusyChange, externalBus
   useEffect(() => {
     let active = true
     void api.backupSession().then(async value => { if (!active) return; setUser(value); if (value) { const result = await api.backupList(); if (active) setList(result) } }).catch(() => { if (active) { setUser(null); setError('Не вдалося перевірити сесію або отримати перелік архівів. Увійдіть повторно.') } }).finally(() => { if (active) setInitializing(false) })
-    const unsubscribe = api.onBackupProgress(setProgress)
+    const unsubscribe = api.onBackupProgress(value => {
+      if (value.stage === 'session-cleared') { setUser(null); setList(null); setOfflineMode(false); setVerified(new Set()); return }
+      setProgress(value)
+    })
     return () => { active = false; unsubscribe() }
   }, [api])
 

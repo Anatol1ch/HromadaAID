@@ -2,7 +2,9 @@ import { createOperationCloseGuard } from './operation-close-guard.js'
 import { app, BrowserWindow, dialog, ipcMain, screen, session } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
-import { lstat, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { monitorChild, terminateProcessTree } from './managed-child.js'
+import { createExclusiveOperation } from './exclusive-operation.js'
 import { spawn } from 'node:child_process'
 import { pipeline } from 'node:stream/promises'
 import { Readable, Transform } from 'node:stream'
@@ -19,8 +21,11 @@ import { markInitialSetupReadiness } from './initial-setup.js'
 import { createServiceControlRequestHandler, runServiceControl, type ServiceControlOperation } from './service-control.js'
 import { controlWindowsService } from './windows-service-control.js'
 import { prepareServerUpdate, applyServerUpdate, type PreparedServerUpdate } from './server-update.js'
-import { createWindowsServerUpdateAdapters } from './windows-server-update.js'
+import { buildInstallerInvocation, createWindowsServerUpdateAdapters } from './windows-server-update.js'
 import { isServerBackupList, type ServerBackupList } from './backup-contract.js'
+import type { RecoveryKind, RecoveryStatus } from './recovery-contract.js'
+import { parseInstallerDiagnostic } from './server-install-diagnostic.js'
+import { assertRecoveryApiPermission, assertWindowsRecoveryAdministrator } from './recovery-authorization.js'
 
 // An independent process and profile; only a narrow read-only inspection bridge is exposed.
 app.setName('HromadaAID Server Manager')
@@ -37,8 +42,13 @@ let activeUpdateId: string | null = null
 let preparedServerUpdate: PreparedServerUpdate | null = null
 let recoveryPrompt: { operationId: string; key: string; savedPath: string | null; resolve: (saved: boolean) => void } | null = null
 let backupOperationInProgress = false
+let recoveryInspectionInProgress = false
 let backupSession: { origin: string; token: string; user: { username: string; displayName: string | null } } | null = null
 const importedArchives = new Map<string, string>()
+const runBackupOperation = createExclusiveOperation(
+  () => Boolean(recoveryInspectionInProgress || backupOperationInProgress || activeInstallId || activeUpdateId || serviceOperationInProgress || updatePreparationInProgress || preparedServerUpdate),
+  value => { backupOperationInProgress = value },
+)
 
 function requireBackupSession(): NonNullable<typeof backupSession> {
   if (!backupSession) throw new Error('Увійдіть до сервера обліковим записом із правом керувати резервними копіями.')
@@ -63,22 +73,31 @@ async function getBackupList(): Promise<ServerBackupList> {
   if (!isServerBackupList(value)) throw new Error('Сервер повернув непідтримуваний перелік архівів.')
   return value
 }
-function runRestoreCli(args: string[], input?: string): Promise<{ stdout: string; stderr: string; code: number }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(args[0], args.slice(1), { cwd: dirname(dirname(args[1])), windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'], env: { SystemRoot: process.env.SystemRoot, ProgramData: process.env.ProgramData, TEMP: process.env.TEMP } })
-    let stdout = '', stderr = '', finished = false
-    const timer = setTimeout(() => { child.kill(); finish(new Error('Час очікування серверного інструмента вичерпано.')) }, 5 * 60_000)
-    const finish = (error?: Error, code = 1) => { if (finished) return; finished = true; clearTimeout(timer); error ? reject(error) : resolve({ stdout, stderr, code }) }
-    child.stdout.setEncoding('utf8').on('data', chunk => { stdout = (stdout + chunk).slice(-1_000_000) })
-    child.stderr.setEncoding('utf8').on('data', chunk => { stderr = (stderr + chunk).slice(-1_000_000) })
-    child.once('error', error => finish(new Error(`Не вдалося запустити локальну перевірку резервної копії: ${error.message}`)))
-    child.once('close', code => finish(undefined, code ?? 1))
-    if (input) child.stdin.end(input, 'utf8'); else child.stdin.end()
-  })
+async function runRestoreCli(args: string[], input?: string, cwd = dirname(dirname(args[1]))): Promise<{ stdout: string; stderr: string; code: number }> {
+  const child = spawn(args[0], args.slice(1), { cwd, windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'], env: { SystemRoot: process.env.SystemRoot, ProgramData: process.env.ProgramData, TEMP: process.env.TEMP } })
+  const result = monitorChild(child, { timeoutMs: 5 * 60_000, terminateTree: () => terminateProcessTree(child), onTimeout: unconfirmed => {
+    const message = unconfirmed ? 'Завершення допоміжного процесу не підтверджено. Нові системні операції заблоковано; не закривайте Server Manager.' : 'Час очікування вичерпано. Очікуємо підтвердження завершення процесу.'
+    window?.webContents.send('manager:recovery-progress', { message })
+    window?.webContents.send('manager:backup-progress', { stage: 'timeout', message })
+  } })
+  child.stdin.on('error', () => { /* EPIPE after termination contains no secret material. */ })
+  if (input) child.stdin.end(input, 'utf8'); else child.stdin.end()
+  try { return await result } catch (error) {
+    if ((error as { code?: string }).code === 'RECOVERY_CHILD_TIMEOUT') {
+      const snapshot = await inspectEnvironment(createWindowsInspectionAdapters())
+      const database = snapshot.configuration.databasePath
+      const pending = database && (await pathExists(`${database}.restore-journal.json`) || await pathExists(`${database}.maintenance.json`))
+      throw new Error(`Час очікування вичерпано; процес завершено. Стан служби: ${snapshot.service.status}. ${pending ? 'Є незавершене відновлення; скористайтеся дією «Продовжити відновлення».' : 'Повторного restore не виконувалося. Перевірте стан сервера.'}`)
+    }
+    throw error
+  }
 }
-async function restorePaths(snapshot: InspectionSnapshot): Promise<{ root: string; node: string; cli: string; database: string; backups: string; api: string }> {
+async function pathExists(path: string): Promise<boolean> {
+  try { await lstat(path); return true } catch (error) { if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return false; throw error }
+}
+async function restorePaths(snapshot: InspectionSnapshot, recovery = false): Promise<{ root: string; node: string; cli: string; database: string; backups: string; api: string }> {
   const c = snapshot.configuration
-  if (process.platform !== 'win32' || snapshot.installation.status !== 'installed' || !c.programDirectory || !c.databasePath || !c.backupDirectory || !c.apiAddress) throw new Error('Не вдалося підтвердити встановлені каталоги сервера.')
+  if (process.platform !== 'win32' || (!recovery && snapshot.installation.status !== 'installed') || !['confirmed', 'corroborated'].includes(snapshot.discovery.confidence) || !c.programDirectory || !c.databasePath || !c.backupDirectory || !c.apiAddress) throw new Error('Не вдалося підтвердити встановлені каталоги сервера.')
   const root = join(c.programDirectory, 'Server'), node = join(root, 'runtime', 'node.exe'), cli = join(root, 'app', 'dist', 'server', 'src', 'backup-restore-cli.js')
   for (const path of [root, node, cli]) { const info = await lstat(path); if (info.isSymbolicLink()) throw new Error('Шлях до серверного інструмента містить символічне посилання.') }
   return { root, node, cli, database: c.databasePath, backups: c.backupDirectory, api: c.apiAddress }
@@ -92,6 +111,72 @@ async function verifyArchive(snapshot: InspectionSnapshot, archive: string, reco
   const parsed = JSON.parse(result.stdout.trim()) as { valid?: unknown; createdAt?: unknown; archiveSize?: unknown }
   if (parsed.valid !== true || !(parsed.createdAt === null || typeof parsed.createdAt === 'string') || typeof parsed.archiveSize !== 'number') throw new Error('Локальний verifier повернув некоректний результат.')
   return { createdAt: parsed.createdAt, size: parsed.archiveSize }
+}
+
+async function recoveryStatus(): Promise<RecoveryStatus> {
+  const snapshot = await inspectEnvironment(createWindowsInspectionAdapters()), c = snapshot.configuration
+  const result: RecoveryStatus = { update: { pending: false, canRecover: false, reason: '' }, restore: { pending: false, canReturn: false, reason: '' } }
+  if (!c.programDirectory || !c.dataDirectory || !c.databasePath || !c.backupDirectory) return result
+  const journal = await pathExists(join(c.dataDirectory, '.hromadaaid-update-state.json'))
+  const previous = await pathExists(join(c.programDirectory, 'Server.previous')), failed = await pathExists(join(c.programDirectory, 'Server.failed'))
+  const staged = snapshot.installation.status !== 'ready_to_configure' && await pathExists(join(c.programDirectory, 'Server.next'))
+  result.update = { pending: journal || previous || failed || staged, canRecover: journal, reason: journal ? 'Виявлено незавершене оновлення. Перед змінами пакети й сумісність бази буде перевірено повторно.' : previous || failed || staged ? 'Службові каталоги є, але журнал відсутній. Автоматичне recovery заборонено; файли збережено.' : '' }
+  if (journal) {
+    try {
+      const record = JSON.parse(await readFile(join(c.dataDirectory, '.hromadaaid-update-state.json'), 'utf8')) as { formatVersion?: unknown; hadPreviousPackage?: unknown }
+      if (record?.formatVersion === 1 && record.hadPreviousPackage === false && !previous) result.update = { pending: false, canRecover: false, reason: '' } // Existing first-setup recovery owns this journal.
+      else if (record?.formatVersion !== 1 || record.hadPreviousPackage !== true) result.update = { pending: true, canRecover: false, reason: 'Формат журналу не підтверджує транзакцію оновлення. Файли збережено для ручної перевірки.' }
+    } catch { result.update = { pending: true, canRecover: false, reason: 'Журнал оновлення пошкоджено або недоступний. Файли збережено для ручної перевірки.' } }
+  }
+  result.restore.pending = await pathExists(`${c.databasePath}.restore-journal.json`) || await pathExists(`${c.databasePath}.maintenance.json`)
+  if (result.restore.pending) { result.restore.reason = result.update.pending ? 'Одночасно знайдено транзакції пакета й SQLite. Автоматичні дії заблоковано; потрібна ручна перевірка. Файли збережено.' : 'Продовжіть уже підтверджене відновлення без повторного вибору архіву.'; return result }
+  if (snapshot.api.status !== 'available' && await pathExists(`${c.databasePath}.restore-completed.json`)) {
+    let receipt: { acknowledged?: unknown }
+    try { receipt = JSON.parse(await readFile(`${c.databasePath}.restore-completed.json`, 'utf8')) as { acknowledged?: unknown } }
+    catch { result.restore.reason = 'Запис завершення restore пошкоджено або недоступний. Повернення бази заблоковано; копії збережено для ручної перевірки.'; return result }
+    if (!receipt || typeof receipt !== 'object') { result.restore.reason = 'Запис завершення restore некоректний. Повернення бази заборонене; копії збережено.'; return result }
+    if (receipt.acknowledged === true) return result
+    if (snapshot.service.status !== 'stopped') { result.restore.reason = 'Повернення бази заблоковано, доки не підтверджено зупинку Windows Service. Зупиніть службу в розділі «Огляд» і повторіть перевірку.'; return result }
+    const paths = await restorePaths(snapshot, true)
+    const status = await runRestoreCli([paths.node, paths.cli, '--database', paths.database, '--backup-dir', paths.backups, '--recovery-status'])
+    if (status.code !== 0) { result.restore.reason = 'Не вдалося підтвердити безпечне повернення бази.'; return result }
+    const value: unknown = JSON.parse(status.stdout.trim())
+    if (!value || typeof value !== 'object' || typeof (value as { pending?: unknown }).pending !== 'boolean' || typeof (value as { canReturn?: unknown }).canReturn !== 'boolean' || typeof (value as { reason?: unknown }).reason !== 'string') throw new Error('Непідтримуваний результат перевірки recovery.')
+    result.restore = value as RecoveryStatus['restore']
+  }
+  return result
+}
+
+async function authorizeLocalRecovery(snapshot: InspectionSnapshot, databaseOperation: boolean): Promise<void> {
+  const executable = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const script = '$p=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent());if(-not $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){exit 5}'
+  const check = await runRestoreCli([executable, '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], undefined, dirname(executable))
+  assertWindowsRecoveryAdministrator(check.code === 0)
+  if (databaseOperation && snapshot.api.status === 'available') {
+    assertRecoveryApiPermission(await (await backupRequest('/auth/me')).json())
+  }
+}
+
+async function startAndConfirmRestoredServer(paths: Awaited<ReturnType<typeof restorePaths>>, send: (stage: string, message: string) => void): Promise<void> {
+  // The restore engine revokes SQLite sessions before completing. Keep the
+  // separate in-memory Manager session and its already-mounted UI consistent.
+  backupSession = null
+  window?.webContents.send('manager:backup-progress', { stage: 'session-cleared', message: 'Після відновлення потрібен повторний вхід.' })
+  send('start', 'Запуск Windows Service після відновлення.')
+  const started = await controlWindowsService('start')
+  if (!started.success) throw new Error(`Базу даних відновлено й перевірено, але запуск Windows Service не підтверджено: ${started.message} Попередню базу та страхову копію збережено.`)
+  send('health', 'Перевірка доступності API після відновлення.')
+  let healthy = false
+  for (let attempt = 0; attempt < 15; attempt++) {
+    try { const response = await fetch(new URL('/health', paths.api), { redirect: 'error', signal: AbortSignal.timeout(2_000) }); if (response.ok) { healthy = true; break } } catch { /* bounded read-only health retry */ }
+    await new Promise(resolve => setTimeout(resolve, 1_000))
+  }
+  if (!healthy) {
+    const stopped = await controlWindowsService('stop')
+    throw new Error(`Базу відновлено, але готовність API не підтверджено. ${stopped.success ? 'Службу зупинено; можна перевірити можливість повернення попередньої бази.' : 'Зупинку служби не підтверджено; повернення бази заблоковано.'} Попередню базу та страхову копію збережено.`)
+  }
+  const acknowledged = await runRestoreCli([paths.node, paths.cli, '--database', paths.database, '--backup-dir', paths.backups, '--acknowledge', '--manager-confirmed'])
+  if (acknowledged.code !== 0) throw new Error('API працює, але позначку завершення restore не підтверджено. Перевірте діагностику; повторне відновлення не запускалося.')
 }
 
 function isTrustedRenderer(event: Electron.IpcMainInvokeEvent): boolean {
@@ -171,7 +256,7 @@ async function openWindow() {
   // avoiding a visible small-window-to-maximized transition.
   window.once('ready-to-show', () => window?.show())
   window.on('close', createOperationCloseGuard(
-    () => Boolean(activeInstallId || activeUpdateId || backupOperationInProgress),
+    () => Boolean(activeInstallId || activeUpdateId || backupOperationInProgress || recoveryInspectionInProgress),
     () => dialog.showMessageBox(window!, { type: 'warning', title: activeInstallId ? 'Налаштування сервера триває' : backupOperationInProgress ? 'Операція з резервною копією триває' : 'Оновлення сервера триває', message: recoveryPrompt ? 'Збережіть аварійний ключ і підтвердьте його збереження у майстрі. Потім дочекайтеся завершення налаштування.' : 'Дочекайтеся завершення операції. Закриття зараз може перервати контрольовану дію.', buttons: ['Зрозуміло'], defaultId: 0, noLink: true }),
   ))
   window.on('closed', () => { window = null })
@@ -183,6 +268,51 @@ if (!app.requestSingleInstanceLock()) app.quit()
 else {
   const inspectRequest = createInspectionRequestHandler(inspectWithUpdateReadiness, isTrustedRenderer, failedInspection)
   ipcMain.handle('manager:inspect-environment', event => inspectRequest(event))
+  ipcMain.handle('manager:recovery-status', async event => {
+    if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
+    if (recoveryInspectionInProgress || backupOperationInProgress || activeInstallId || activeUpdateId || serviceOperationInProgress || updatePreparationInProgress) throw new Error('Зачекайте завершення поточної операції.')
+    recoveryInspectionInProgress = true
+    try { return await recoveryStatus() } finally { recoveryInspectionInProgress = false }
+  })
+  ipcMain.handle('manager:recover-operation', async (event, input: unknown) => {
+    if (!isTrustedRenderer(event) || !input || typeof input !== 'object') throw new Error('UNTRUSTED_RENDERER')
+    const { kind, confirmed } = input as { kind?: RecoveryKind; confirmed?: unknown }
+    if (confirmed !== true || !kind || !['update', 'resume-restore', 'return-database'].includes(kind)) throw new Error('Підтвердьте обрану операцію відновлення.')
+    return runBackupOperation(async () => {
+      const progress = (message: string) => { if (window && !window.isDestroyed()) window.webContents.send('manager:recovery-progress', { message }) }
+      const snapshot = await inspectEnvironment(createWindowsInspectionAdapters())
+      await authorizeLocalRecovery(snapshot, kind !== 'update')
+      const status = await recoveryStatus()
+      const c = snapshot.configuration
+      if (kind === 'update') {
+        if (!status.update.canRecover || status.restore.pending || !c.programDirectory || !c.dataDirectory || !c.backupDirectory || !['confirmed', 'corroborated'].includes(snapshot.discovery.confidence)) throw new Error(status.restore.pending ? 'Одночасні транзакції пакета й SQLite потребують ручної перевірки. Файли збережено.' : status.update.reason || 'Транзакцію оновлення не підтверджено.')
+        const script = app.isPackaged ? join(process.resourcesPath, 'server-payload', 'installer', 'install-server-service.ps1') : join(dirname(fileURLToPath(import.meta.url)), '../../packaging/install-server-service.ps1')
+        const invocation = buildInstallerInvocation(script, { programDirectory: c.programDirectory, dataDirectory: c.dataDirectory, backupDirectory: c.backupDirectory })
+        progress('Перевірка журналу, пакетів і сумісності SQLite; відновлення служби та перевірка API.')
+        const result = await runRestoreCli([invocation.executable, ...invocation.args, '-RecoverUpdate'], undefined, invocation.cwd)
+        if (result.code !== 0) {
+          const diagnostic = parseInstallerDiagnostic(`${result.stdout}\n${result.stderr}`)
+          throw new Error('Відновлення серверного пакета не завершено. Артефакти збережено. ' + (diagnostic ? `Етап ${diagnostic.stage}: ${diagnostic.message}` : (result.stderr || result.stdout).slice(-2500)))
+        }
+        const rolledBack = /^HROMADAAID_RECOVERY_OUTCOME\|rolled-back\r?$/m.test(result.stdout)
+        if (!rolledBack && !/^HROMADAAID_RECOVERY_OUTCOME\|finalized\r?$/m.test(result.stdout)) throw new Error('Результат recovery пакета не підтверджено.')
+        const final = await inspectWithUpdateReadiness()
+        if (final.installation.status !== 'installed' || final.service.status !== 'running' || final.api.status !== 'available' || !final.updateReadiness?.ready) throw new Error('Файлову операцію виконано, але службу, API або завершення транзакції не підтверджено. Перевірте діагностику.')
+        return { success: true, message: rolledBack ? 'Попередній серверний пакет повернуто. Служба працює, API доступний.' : 'Активований пакет перевірено. Оновлення завершено, API доступний.' }
+      }
+      if (status.update.pending) throw new Error('Спочатку потрібна перевірка незавершеної транзакції серверного пакета; SQLite не змінено.')
+      if (kind === 'resume-restore' ? !status.restore.pending : !status.restore.canReturn) throw new Error(status.restore.reason || 'Безпечну дію відновлення не підтверджено.')
+      const paths = await restorePaths(snapshot, true)
+      progress('Штатна зупинка Windows Service перед офлайн-відновленням.')
+      const stopped = await controlWindowsService('stop')
+      if (!stopped.success) throw new Error('Зупинку служби не підтверджено. Базу не змінено. ' + stopped.message)
+      progress(kind === 'resume-restore' ? 'Продовження наявного restore journal та перевірка SQLite.' : 'Повторна перевірка незмінності даних і повернення попередньої бази зі страховою копією.')
+      const result = await runRestoreCli([paths.node, paths.cli, '--database', paths.database, '--backup-dir', paths.backups, kind === 'resume-restore' ? '--resume' : '--return-previous', '--manager-confirmed'])
+      if (result.code !== 0) throw new Error('Офлайн-відновлення не завершено. Службу залишено зупиненою; копії та журнал збережено. ' + (result.stderr || result.stdout).slice(-2500))
+      await startAndConfirmRestoredServer(paths, (_stage, message) => progress(message))
+      return { success: true, message: kind === 'resume-restore' ? 'Незавершене відновлення завершено. SQLite перевірено, API доступний.' : 'Попередню базу повернуто й перевірено. API доступний; усім користувачам потрібно ввійти повторно.' }
+    })
+  })
   ipcMain.handle('manager:backup-login', async (event, input: unknown) => {
     if (!isTrustedRenderer(event) || !input || typeof input !== 'object') throw new Error('UNTRUSTED_RENDERER')
     const { username, password } = input as Record<string, unknown>
@@ -202,9 +332,7 @@ else {
   ipcMain.handle('manager:backup-list', async event => { if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER'); requireBackupSession(); return getBackupList() })
   ipcMain.handle('manager:backup-create', async event => {
     if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
-    if (backupOperationInProgress || activeInstallId || serviceOperationInProgress || activeUpdateId) throw new Error('Зачекайте завершення поточної операції.')
-    backupOperationInProgress = true
-    try { await backupRequest('/api/backups/server', 'POST', {}); return await getBackupList() } finally { backupOperationInProgress = false }
+    return runBackupOperation(async () => { await backupRequest('/api/backups/server', 'POST', {}); return await getBackupList() })
   })
   ipcMain.handle('manager:backup-export', async (event, id: unknown) => {
     if (!isTrustedRenderer(event) || typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) throw new Error('UNTRUSTED_RENDERER')
@@ -225,15 +353,18 @@ else {
   })
   ipcMain.handle('manager:backup-import', async (event, recoveryKey: unknown) => {
     if (!isTrustedRenderer(event) || (recoveryKey !== undefined && (typeof recoveryKey !== 'string' || recoveryKey.length > 512))) throw new Error('UNTRUSTED_RENDERER')
+    return runBackupOperation(async () => {
     const picked = await dialog.showOpenDialog(window!, { title: 'Імпортувати архів .hraid', properties: ['openFile'], filters: [{ name: 'Резервний архів HromadaAID', extensions: ['hraid'] }] })
     if (picked.canceled || !picked.filePaths[0]) return null
     const snapshot = await inspectEnvironment(createWindowsInspectionAdapters())
     const verified = await verifyArchive(snapshot, picked.filePaths[0], recoveryKey as string | undefined)
     const id = randomUUID(); importedArchives.set(id, picked.filePaths[0])
     return { id, fileName: picked.filePaths[0].split(/[\\/]/).pop(), ...verified }
+    })
   })
   ipcMain.handle('manager:backup-verify', async (event, id: unknown, recoveryKey: unknown) => {
     if (!isTrustedRenderer(event) || typeof id !== 'string' || (recoveryKey !== undefined && typeof recoveryKey !== 'string')) throw new Error('UNTRUSTED_RENDERER')
+    return runBackupOperation(async () => {
     const snapshot = await inspectEnvironment(createWindowsInspectionAdapters())
     const imported = importedArchives.get(id)
     if (!imported) requireBackupSession()
@@ -245,6 +376,7 @@ else {
     }
     if (!archive) throw new Error('Виберіть архів для перевірки.')
     return verifyArchive(snapshot, archive, recoveryKey as string | undefined)
+    })
   })
   ipcMain.handle('manager:backup-open-folder', async event => {
     if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
@@ -259,16 +391,17 @@ else {
     if (!isTrustedRenderer(event) || !request || typeof request !== 'object') throw new Error('UNTRUSTED_RENDERER')
     const value = request as Record<string, unknown>
     if (value.confirmed !== true || typeof value.id !== 'string' || (value.recoveryKey !== undefined && typeof value.recoveryKey !== 'string')) throw new Error('Потрібне явне підтвердження відновлення.')
-    if (backupOperationInProgress || activeInstallId || serviceOperationInProgress || activeUpdateId || preparedServerUpdate) throw new Error('Зачекайте завершення іншої системної операції.')
-    backupOperationInProgress = true
-    const sendStage = (stage: string, message: string) => { if (window && !window.isDestroyed() && isTrustedRenderer(event)) window.webContents.send('manager:backup-progress', { stage, message }) }
-    try {
+    const archiveId = value.id
+    return runBackupOperation(async () => {
+      const sendStage = (stage: string, message: string) => { if (window && !window.isDestroyed() && isTrustedRenderer(event)) window.webContents.send('manager:backup-progress', { stage, message }) }
       const snapshot = await inspectEnvironment(createWindowsInspectionAdapters()), paths = await restorePaths(snapshot)
-      const imported = importedArchives.get(value.id)
+      const pending = await recoveryStatus()
+      if (pending.restore.pending || pending.update.pending) throw new Error('Спочатку завершіть незавершену системну транзакцію. Нове відновлення не починалося.')
+      const imported = importedArchives.get(archiveId)
       if (!imported) requireBackupSession()
       let archive = imported
-      if (!archive && /^[a-f0-9]{64}$/.test(value.id)) {
-        const item = (await getBackupList()).archives.find(entry => entry.id === value.id)
+      if (!archive && /^[a-f0-9]{64}$/.test(archiveId)) {
+        const item = (await getBackupList()).archives.find(entry => entry.id === archiveId)
         if (!item || !snapshot.configuration.backupDirectory) throw new Error('Архів не знайдено на сервері. Оновіть перелік.')
         archive = join(snapshot.configuration.backupDirectory, item.fileName)
       }
@@ -283,20 +416,11 @@ else {
       const args = [paths.node, paths.cli, '--database', paths.database, '--backup-dir', paths.backups, '--archive', archive, '--manager-confirmed', ...(value.recoveryKey ? ['--recovery-key'] : [])]
       const restored = await runRestoreCli(args, value.recoveryKey ? `${String(value.recoveryKey).trim()}\n` : undefined)
       if (restored.code !== 0) throw new Error(`Відновлення не завершилося. Службу залишено зупиненою для безпеки. ${restored.stderr.trim() || restored.stdout.trim()}`)
-      sendStage('start', 'Запуск Windows Service після відновлення.')
-      const started = await controlWindowsService('start')
-      if (!started.success) throw new Error(`Базу даних відновлено й перевірено, але запуск Windows Service не підтверджено: ${started.message} Попередню базу та страхову копію збережено.`)
-      sendStage('health', 'Перевірка доступності API після відновлення.')
-      let healthy = false
-      for (let attempt = 0; attempt < 15; attempt++) {
-        try { const response = await fetch(new URL('/health', paths.api), { redirect: 'error', signal: AbortSignal.timeout(2_000) }); if (response.ok) { healthy = true; break } } catch { /* bounded health retry */ }
-        await new Promise(resolve => setTimeout(resolve, 1_000))
-      }
-      if (!healthy) throw new Error('Базу даних відновлено й перевірено, Windows Service запущено, але готовність API не підтверджено. Попередню базу та страхову копію збережено; повторне відновлення автоматично не запускалося.')
-      if (imported) importedArchives.delete(value.id)
+      await startAndConfirmRestoredServer(paths, sendStage)
+      if (imported) importedArchives.delete(archiveId)
       sendStage('complete', 'Відновлення завершено; API відповідає.')
       return { success: true, message: 'Базу даних відновлено, перевірено та запущено.' }
-    } finally { backupOperationInProgress = false }
+    })
   })
   const serviceControlRequest = createServiceControlRequestHandler(
     async (operation: ServiceControlOperation, operationId) => {
@@ -311,16 +435,17 @@ else {
       } finally { serviceOperationInProgress = false }
     },
     isTrustedRenderer,
-    () => activeInstallId !== null || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId !== null || preparedServerUpdate !== null || backupOperationInProgress,
+    () => recoveryInspectionInProgress || activeInstallId !== null || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId !== null || preparedServerUpdate !== null || backupOperationInProgress,
     randomUUID,
     failedInspection,
   )
   ipcMain.handle('manager:control-service', (event, operation: unknown) => serviceControlRequest(event, operation))
   ipcMain.handle('manager:select-server-update-package', async event => {
     if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
-    if (activeInstallId || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId || backupOperationInProgress) return { preview: null, code: 'OPERATION_BUSY', error: 'Зараз виконується інша системна операція.' }
+    if (recoveryInspectionInProgress || activeInstallId || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId || backupOperationInProgress) return { preview: null, code: 'OPERATION_BUSY', error: 'Зараз виконується інша системна операція.' }
     const selection = await dialog.showOpenDialog(window!, { title: 'Виберіть ZIP-пакет HromadaAID Server', properties: ['openFile'], filters: [{ name: 'ZIP-пакет сервера', extensions: ['zip'] }] })
     if (selection.canceled || !selection.filePaths[0]) return { preview: null }
+    if (recoveryInspectionInProgress || activeInstallId || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId || backupOperationInProgress) return { preview: null, code: 'OPERATION_BUSY', error: 'Зараз виконується інша системна операція.' }
     updatePreparationInProgress = true
     try {
       const adapters = updateAdapters()
@@ -346,7 +471,7 @@ else {
   ipcMain.handle('manager:apply-server-update', async (event, previewId: unknown) => {
     if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
     if (typeof previewId !== 'string' || !preparedServerUpdate || preparedServerUpdate.preview.id !== previewId) return { operationId: randomUUID(), success: false, rolledBack: false, manualRecoveryRequired: false, message: 'Перевірений пакет уже недоступний. Виберіть ZIP повторно.' }
-    if (activeInstallId || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId || backupOperationInProgress) return { operationId: randomUUID(), success: false, rolledBack: false, manualRecoveryRequired: false, message: 'Зараз виконується інша системна операція.' }
+    if (recoveryInspectionInProgress || activeInstallId || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId || backupOperationInProgress) return { operationId: randomUUID(), success: false, rolledBack: false, manualRecoveryRequired: false, message: 'Зараз виконується інша системна операція.' }
     const prepared = preparedServerUpdate
     const operationId = randomUUID()
     activeUpdateId = operationId
@@ -376,7 +501,7 @@ else {
   })
   ipcMain.handle('manager:install-server', async (event, input: unknown) => {
     if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
-    if (activeInstallId || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId || preparedServerUpdate || backupOperationInProgress) throw new Error('INSTALLATION_ALREADY_RUNNING')
+    if (recoveryInspectionInProgress || activeInstallId || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId || preparedServerUpdate || backupOperationInProgress) throw new Error('INSTALLATION_ALREADY_RUNNING')
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('INSTALL_OPTIONS_INVALID')
     const request = input as ServerInstallRequest
     if (Object.keys(request).some(key => !['programDirectory', 'dataDirectory', 'backupDirectory', 'host', 'port', 'administrator'].includes(key)) ||

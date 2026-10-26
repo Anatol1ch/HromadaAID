@@ -15,6 +15,8 @@ import { createRecoveryKey, decryptBackupFile, encryptBackupFile, hashFile } fro
 import { SqliteBackupService, listDailyBackups, listManualBackups, startDailyBackupScheduler } from './backup.js'
 import { acquireDatabaseOwnership, upgradeRestoreCandidate, validateRestoreDatabase } from './restore-safety.js'
 import { restoreOffline } from './backup-restore.js'
+import { acknowledgeRestore, completionPath, databaseFingerprint, inspectRestoreRecovery, preparePreviousDatabaseReturn } from './restore-recovery.js'
+import { fileURLToPath } from 'node:url'
 import { authenticateSession, createFirstAdministrator, login } from './auth.js'
 import { createApp } from './app.js'
 
@@ -33,6 +35,134 @@ async function cleanup(root: string) {
   assert.ok(resolve(root).startsWith(join(resolve(tmpdir()), 'hromada-restore-test-')))
   await rm(root, { recursive: true, force: true })
 }
+
+async function completedRestoreFixture() {
+  const f = await fixture()
+  await f.service.createManualBackup()
+  const item = (await f.archives.listAll())[0]
+  const preview = await f.admin.prepare(join(f.directory, item.fileName))
+  f.db.prepare("UPDATE programs SET short_name='newer state before restore' WHERE id=(SELECT id FROM programs LIMIT 1)").run()
+  await f.admin.confirm(preview.id, preview.confirmationToken)
+  await f.archives.stop(); f.db.close()
+  await restoreOffline(f.path, f.directory)
+  return f
+}
+
+test('failed API startup can return verified previous SQLite through the existing journaled engine, retaining both generations', async () => {
+  const f = await completedRestoreFixture()
+  try {
+    const firstReceipt = JSON.parse(await readFile(completionPath(f.path), 'utf8'))
+    assert.equal(inspectRestoreRecovery(f.path, f.directory).canReturn, true)
+    await preparePreviousDatabaseReturn(f.path, f.directory)
+    assert.equal(inspectRestoreRecovery(f.path, f.directory).pending, true)
+    const cli = fileURLToPath(new URL('./backup-restore-cli.js', import.meta.url))
+    execFileSync(process.execPath, [cli, '--database', f.path, '--backup-dir', f.directory, '--resume', '--manager-confirmed'], { windowsHide: true, timeout: 30_000 })
+    const db = new DatabaseSync(f.path, { readOnly: true })
+    try { assert.ok(db.prepare("SELECT 1 FROM programs WHERE short_name='newer state before restore'").get()) } finally { db.close() }
+    validateRestoreDatabase(f.path)
+    assert.ok(existsSync(`${f.path}.before-restore-${firstReceipt.id}`))
+    assert.ok(existsSync(join(f.directory, `hromada-aid-safety-${firstReceipt.id}.sqlite`)))
+    assert.equal((await readdir(f.directory)).filter(name => /^hromada-aid-safety-.*\.sqlite$/.test(name)).length, 2)
+    assert.equal(existsSync(`${f.path}.restore-journal.json`), false)
+    assert.equal(inspectRestoreRecovery(f.path, f.directory).canReturn, false, 'never offer a toggle back to the failed replacement')
+    acknowledgeRestore(f.path)
+    assert.equal(inspectRestoreRecovery(f.path, f.directory).canReturn, false)
+    await assert.rejects(preparePreviousDatabaseReturn(f.path, f.directory), { code: 'RESTORE_RECOVERY_UNSAFE' })
+  } finally { await cleanup(f.root) }
+})
+
+test('a confirmed healthy API permanently disables automatic return for that restore receipt', async () => {
+  const f = await completedRestoreFixture()
+  try {
+    assert.equal(inspectRestoreRecovery(f.path, f.directory).canReturn, true)
+    const fingerprint = databaseFingerprint(f.path)
+    acknowledgeRestore(f.path)
+    assert.equal(inspectRestoreRecovery(f.path, f.directory).canReturn, false)
+    await assert.rejects(preparePreviousDatabaseReturn(f.path, f.directory), { code: 'RESTORE_RECOVERY_UNSAFE' })
+    assert.equal(databaseFingerprint(f.path), fingerprint)
+  } finally { await cleanup(f.root) }
+})
+
+for (const phase of ['original-renamed', 'replacement-renamed']) {
+  test(`Manager resume CLI completes existing journal after ${phase} without reselecting an archive`, async () => {
+    const f = await fixture()
+    try {
+      await f.service.createManualBackup()
+      const preview = await f.admin.prepare(join(f.directory, (await f.archives.listAll())[0].fileName))
+      await f.admin.confirm(preview.id, preview.confirmationToken)
+      await f.archives.stop(); f.db.close()
+      await assert.rejects(restoreOffline(f.path, f.directory, point => { if (point === phase) throw new Error('Synthetic process interruption') }))
+      const cli = fileURLToPath(new URL('./backup-restore-cli.js', import.meta.url))
+      execFileSync(process.execPath, [cli, '--database', f.path, '--backup-dir', f.directory, '--resume', '--manager-confirmed'], { windowsHide: true, timeout: 30_000 })
+      validateRestoreDatabase(f.path)
+      assert.equal(existsSync(`${f.path}.restore-journal.json`), false)
+      assert.ok(existsSync(`${f.path}.before-restore-${preview.id}`))
+      assert.ok(existsSync(join(f.directory, `hromada-aid-safety-${preview.id}.sqlite`)))
+    } finally { try { f.db.close() } catch { /* closed before offline recovery */ }; await f.archives.stop(); await cleanup(f.root) }
+  })
+}
+
+test('return refuses new records and missing evidence without overwriting either database', async () => {
+  const f = await completedRestoreFixture()
+  try {
+    const db = new DatabaseSync(f.path)
+    try { db.prepare("UPDATE programs SET short_name='new data after restore' WHERE id=(SELECT id FROM programs LIMIT 1)").run() } finally { db.close() }
+    const fingerprint = databaseFingerprint(f.path)
+    assert.equal(inspectRestoreRecovery(f.path, f.directory).canReturn, false)
+    await assert.rejects(preparePreviousDatabaseReturn(f.path, f.directory), /Дані змінилися/)
+    assert.equal(databaseFingerprint(f.path), fingerprint)
+    assert.equal(existsSync(maintenancePath(f.path)), false)
+    await rm(completionPath(f.path))
+    await assert.rejects(preparePreviousDatabaseReturn(f.path, f.directory))
+    assert.equal(databaseFingerprint(f.path), fingerprint)
+  } finally { await cleanup(f.root) }
+})
+
+test('return refuses a valid but changed previous database and keeps the insurance copy', async () => {
+  const f = await completedRestoreFixture()
+  try {
+    const record = JSON.parse(await readFile(completionPath(f.path), 'utf8'))
+    const db = new DatabaseSync(`${f.path}.before-restore-${record.id}`)
+    try { db.prepare("UPDATE programs SET short_name='different previous copy' WHERE id=(SELECT id FROM programs LIMIT 1)").run() } finally { db.close() }
+    const fingerprint = databaseFingerprint(f.path)
+    assert.equal(inspectRestoreRecovery(f.path, f.directory).canReturn, false)
+    await assert.rejects(preparePreviousDatabaseReturn(f.path, f.directory), /Копії попередньої бази змінилися/)
+    assert.equal(databaseFingerprint(f.path), fingerprint)
+    assert.ok(existsSync(join(f.directory, `hromada-aid-safety-${record.id}.sqlite`)))
+  } finally { await cleanup(f.root) }
+})
+
+test('return rechecks the current database immediately before replacement and after an interrupted preparation', async () => {
+  const f = await completedRestoreFixture()
+  try {
+    await preparePreviousDatabaseReturn(f.path, f.directory)
+    const db = new DatabaseSync(f.path)
+    try { db.prepare("UPDATE programs SET short_name='external write after return plan' WHERE id=(SELECT id FROM programs LIMIT 1)").run() } finally { db.close() }
+    const fingerprint = databaseFingerprint(f.path)
+    await assert.rejects(restoreOffline(f.path, f.directory), /дані змінилися/)
+    assert.equal(databaseFingerprint(f.path), fingerprint)
+    assert.ok(existsSync(maintenancePath(f.path)))
+  } finally { await cleanup(f.root) }
+})
+
+test('resume refuses unexpected writes to the replacement after interruption and retains journal and originals', async () => {
+  const f = await fixture()
+  try {
+    await f.service.createManualBackup()
+    const preview = await f.admin.prepare(join(f.directory, (await f.archives.listAll())[0].fileName))
+    await f.admin.confirm(preview.id, preview.confirmationToken)
+    await f.archives.stop(); f.db.close()
+    await assert.rejects(restoreOffline(f.path, f.directory, point => { if (point === 'replacement-renamed') throw new Error('Synthetic interruption') }))
+    const db = new DatabaseSync(f.path)
+    try { db.prepare("UPDATE programs SET short_name='unexpected external write' WHERE id=(SELECT id FROM programs LIMIT 1)").run() } finally { db.close() }
+    const fingerprint = databaseFingerprint(f.path)
+    await assert.rejects(restoreOffline(f.path, f.directory), /база змінилася/)
+    assert.equal(databaseFingerprint(f.path), fingerprint)
+    assert.ok(existsSync(`${f.path}.restore-journal.json`))
+    assert.ok(existsSync(`${f.path}.before-restore-${preview.id}`))
+    assert.ok(existsSync(join(f.directory, `hromada-aid-safety-${preview.id}.sqlite`)))
+  } finally { try { f.db.close() } catch { /* closed before offline recovery */ }; await f.archives.stop(); await cleanup(f.root) }
+})
 
 test('manual and daily share one lock, retain separate accounting; format 2 decrypts independently', async () => {
   const f = await fixture()
@@ -219,5 +349,9 @@ test('offline restore preserves existing Backups ACLs and protects only restore-
     assert.ok(existsSync(safety))
     for (const path of [f.directory, archive, key, staging, candidate]) assert.ok(hasGrant(path), `restore must preserve the existing service ACE: ${path}`)
     validateRestoreDatabase(f.path)
+    await preparePreviousDatabaseReturn(f.path, f.directory)
+    await restoreOffline(f.path, f.directory)
+    for (const path of [f.directory, archive, key]) assert.ok(hasGrant(path), `return must preserve existing server/backup/key ACL: ${path}`)
+    assert.ok(existsSync(safety), 'return must retain the first insurance copy')
   } finally { try { f.db.close() } catch { /* closed before offline restore */ }; await f.archives.stop(); await cleanup(f.root) }
 })

@@ -4,7 +4,8 @@
   [Parameter(Mandatory = $true)][string]$BackupDirectory,
   [Parameter(Mandatory = $false)][string]$PreviousServiceStateFile,
   [Parameter(Mandatory = $false)][switch]$FromServerManager,
-  [Parameter(Mandatory = $false)][switch]$UpdateOnly
+  [Parameter(Mandatory = $false)][switch]$UpdateOnly,
+  [Parameter(Mandatory = $false)][switch]$RecoverUpdate
 )
 $ErrorActionPreference = 'Stop'
 $utf8Output = [Text.UTF8Encoding]::new($false)
@@ -253,7 +254,7 @@ function Get-HealthUrl($Settings) {
   $scheme = if ($Settings.mode -eq 'network') { 'https' } else { 'http' }
   return "${scheme}://${hostName}:$([int]$Settings.port)/health"
 }
-function Test-HromadaServiceHealth([string]$Url) {
+function Test-HromadaServiceHealth([string]$Url, [bool]$AllowMaintenance = $true) {
   try {
     $response = Invoke-WebRequest -Uri $Url -Method Get -TimeoutSec 3 -UseBasicParsing
     $body = $response.Content | ConvertFrom-Json
@@ -264,16 +265,16 @@ function Test-HromadaServiceHealth([string]$Url) {
     try {
       $reader = [IO.StreamReader]::new($response.GetResponseStream())
       try { $body = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
-      return ([int]$response.StatusCode -eq 503 -and $body.code -eq 'RESTORE_MAINTENANCE')
+      return ($AllowMaintenance -and [int]$response.StatusCode -eq 503 -and $body.code -eq 'RESTORE_MAINTENANCE')
     } catch { return $false }
   }
 }
-function Wait-ServiceHealthy([string]$Url, [int]$TimeoutSeconds = 60) {
+function Wait-ServiceHealthy([string]$Url, [int]$TimeoutSeconds = 60, [bool]$AllowMaintenance = $true) {
   $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
   do {
     Start-Sleep -Milliseconds 500
     $service = Get-Service -Name $serviceName -ErrorAction Stop
-    if ($service.Status -eq 'Running' -and (Test-HromadaServiceHealth $Url)) { return }
+    if ($service.Status -eq 'Running' -and (Test-HromadaServiceHealth $Url $AllowMaintenance)) { return }
   } while ([DateTime]::UtcNow -lt $deadline)
   throw "Служба або Fastify не пройшли перевірку доступності за $TimeoutSeconds секунд. Перевірте порт, TLS, конфігурацію та журнали сервера."
 }
@@ -304,6 +305,118 @@ function Unregister-ServiceIfPresent([string]$Wrapper) {
   if ($service.Status -ne 'Stopped') { Stop-Service -Name $serviceName -ErrorAction Stop; (Get-Service -Name $serviceName).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(45)) }
   if ([IO.File]::Exists($Wrapper)) { & $Wrapper uninstall; if ($LASTEXITCODE -ne 0) { throw 'Не вдалося видалити реєстрацію служби.' } }
   Wait-ServiceRemoved
+}
+
+function Invoke-RecoveryTransaction([string]$Root, [string]$Action, [string[]]$Extra = @()) {
+  # Recovery orchestration belongs to this Manager version, including when the
+  # interrupted active package predates recovery commands.
+  $output = @(& (Join-Path $Root 'runtime\node.exe') (Join-Path $PSScriptRoot 'server-package-transaction.mjs') $Action --program-dir $ProgramDirectory --data-dir $DataDirectory @Extra)
+  if ($LASTEXITCODE -ne 0) { throw 'Не вдалося підтвердити або відновити файлову транзакцію. Артефакти збережено.' }
+  return ($output -join "`n")
+}
+function Assert-RecoveryPackage([string]$Root) {
+  if (((Get-Item -LiteralPath $Root -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Каталог пакета є посиланням; recovery зупинено.' }
+  Invoke-Checked (Join-Path $Root 'runtime\node.exe') @((Join-Path $PSScriptRoot 'verify-server-package.mjs'), $Root) 'Пакет recovery не пройшов перевірку цілісності.'
+}
+function Get-RecoveryService {
+  try { return Get-Service -Name $serviceName -ErrorAction Stop }
+  catch { if ($_.FullyQualifiedErrorId -like 'NoServiceFoundForGivenName*') { return $null }; throw }
+}
+function Start-RecoveredPackage {
+  $wrapper = Join-Path $activeServer 'service\HromadaAIDService.exe'
+  $service = Get-RecoveryService
+  if ($null -ne $service) {
+    $image = [string](Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName" -Name ImagePath -ErrorAction Stop).ImagePath
+    if ($image.Trim('"') -ine $wrapper) { throw 'Реєстрація служби посилається на інший пакет. Автоматичні зміни заборонено.' }
+  }
+  # A live process may still belong to the directory renamed before a crash.
+  # Re-register/start the verified active wrapper; health alone must not let an
+  # old process attest to a different package's successful activation.
+  Unregister-ServiceIfPresent $wrapper
+  if ($null -ne (Get-RecoveryService)) { throw 'Зняття реєстрації служби не підтверджено.' }
+  Register-Service $wrapper
+  $script:serviceSid = Get-ServiceSid $serviceName
+  Assert-ServiceAccess
+  $service = Get-Service -Name $serviceName -ErrorAction Stop
+  if ($service.Status -ne 'Running') { Invoke-Checked $wrapper @('start') 'Не вдалося запустити відновлений пакет.' }
+  Wait-ServiceHealthy (Get-HealthUrl $settings) 60 $false
+  if ([IO.File]::Exists("$database.maintenance.json") -or [IO.File]::Exists("$database.restore-journal.json")) { throw 'Під час recovery зʼявилося незавершене відновлення SQLite; пакети збережено.' }
+}
+
+function Assert-RecoveryServiceIdentity {
+  $service = Get-RecoveryService
+  if ($null -ne $service) {
+    $image = [string](Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName" -Name ImagePath -ErrorAction Stop).ImagePath
+    if ($image.Trim('"') -ine (Join-Path $activeServer 'service\HromadaAIDService.exe')) { throw 'Служба посилається на іншу інсталяцію. Recovery не змінює її реєстрацію.' }
+  }
+}
+
+if ($RecoverUpdate) {
+  try {
+    $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Запустіть Server Manager від імені адміністратора для відновлення служби.' }
+    foreach ($path in @($ProgramDirectory, $DataDirectory, $BackupDirectory)) { if (-not (Test-AbsoluteLocalPath $path)) { throw 'Recovery потребує підтверджених локальних каталогів.' } }
+    $settings = Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ([IO.Path]::GetFullPath([string]$settings.programDirectory) -ine [IO.Path]::GetFullPath($ProgramDirectory) -or [IO.Path]::GetFullPath([string]$settings.backupDirectory) -ine [IO.Path]::GetFullPath($BackupDirectory)) { throw 'Конфігурація не відповідає каталогам recovery.' }
+    $database = [IO.Path]::GetFullPath([string]$settings.databasePath)
+    $databaseRoot = [IO.Path]::GetDirectoryName($database)
+    if ([IO.File]::Exists("$database.maintenance.json") -or [IO.File]::Exists("$database.restore-journal.json")) { throw 'Спочатку завершіть незавершене відновлення бази даних.' }
+    Set-InstallStage 'verify-package'
+    $toolRoot = $null
+    foreach ($root in @($activeServer, $previousServer, $stagedServer, $failedServer)) {
+      if ([IO.Directory]::Exists($root)) { Assert-RecoveryPackage $root; if (-not $toolRoot) { $toolRoot = $root } }
+    }
+    if (-not $toolRoot) { throw 'Немає цілісного серверного пакета для recovery.' }
+    $view = Invoke-RecoveryTransaction $toolRoot 'inspect-recovery' | ConvertFrom-Json
+    if ([IO.Directory]::Exists($previousServer) -and (Get-SupportedSchemaMaximum $previousServer) -ne [int]$view.journal.oldSchemaMaximum) { throw 'Попередній пакет не відповідає сумісності, записаній у журналі.' }
+    Assert-RecoveryServiceIdentity
+    # Verify generated service XML too: it is intentionally outside the ZIP hash
+    # manifest, and must still target the authoritative installed configuration.
+    foreach ($root in @($activeServer, $previousServer, $stagedServer, $failedServer)) {
+      if ([IO.Directory]::Exists($root)) { [void](Invoke-RecoveryTransaction $toolRoot 'verify-recovery-service-config' @('--package-root', $root, '--backup-dir', $BackupDirectory)) }
+    }
+    if ($view.active -eq 'candidate') {
+      $candidateHealthy = $false
+      try {
+        $candidateStatus = Get-DatabaseStatus (Join-Path $toolRoot 'runtime\node.exe') $toolRoot $database
+        if ($candidateStatus.users -ne 'present' -or [int]$candidateStatus.schemaVersion -ne (Get-SupportedSchemaMaximum $activeServer)) { throw 'Recovery не виконує міграції SQLite або первинну ініціалізацію.' }
+        Set-InstallStage 'health-check'
+        Start-RecoveredPackage
+        $candidateHealthy = $true
+      } catch { if (-not $view.canRollback) { throw } }
+      if ($candidateHealthy) {
+        [void](Invoke-RecoveryTransaction $activeServer 'recover-finalize' @('--outcome', 'candidate'))
+        [Console]::Out.WriteLine('HROMADAAID_RECOVERY_OUTCOME|finalized')
+        exit 0
+      }
+    }
+    Set-InstallStage 'stop-service'
+    $service = Get-RecoveryService
+    if ($null -ne $service) {
+      if ($service.Status -ne 'Stopped') { Stop-Service -Name $serviceName -ErrorAction Stop; $service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(45)) }
+    }
+    # Read-only database inspection. Never initializes/migrates SQLite in recovery.
+    $status = Get-DatabaseStatus (Join-Path $toolRoot 'runtime\node.exe') $toolRoot $database
+    if ([IO.File]::Exists("$database.maintenance.json") -or [IO.File]::Exists("$database.restore-journal.json")) { throw 'Є незавершене відновлення SQLite; перемикання пакетів заборонено.' }
+    if ($status.users -ne 'present' -or [int]$status.schemaVersion -ne [int]$view.journal.oldSchemaMaximum) { throw 'Повернення потребувало б несумісної SQLite або міграцій. Recovery зберігає базу та обидва пакети.' }
+    if ($null -ne $service) {
+      # Uninstall only the verified service wrapper, after the safe rollback
+      # prerequisite check; Register-Service below keeps the same service SID.
+      Unregister-ServiceIfPresent (Join-Path $toolRoot 'service\HromadaAIDService.exe')
+      if ($null -ne (Get-RecoveryService)) { throw 'Службу не знято з реєстрації; пакети не перемикалися.' }
+    }
+    Set-InstallStage 'activate-server-package'
+    [void](Invoke-RecoveryTransaction $toolRoot 'recover-rollback' @('--schema-version', [string]$status.schemaVersion))
+    Set-InstallStage 'start-service'
+    Start-RecoveredPackage
+    [void](Invoke-RecoveryTransaction $activeServer 'recover-finalize' @('--outcome', 'previous'))
+    [Console]::Out.WriteLine('HROMADAAID_RECOVERY_OUTCOME|rolled-back')
+    exit 0
+  } catch {
+    Write-InstallFailureDiagnostic $_
+    [Console]::Error.WriteLine('Recovery не завершено. Пакети й журнал збережено; перевірте технічні подробиці.')
+    exit 1
+  }
 }
 
 try {

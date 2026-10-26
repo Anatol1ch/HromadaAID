@@ -11,13 +11,18 @@ import { maintenancePath, maximumRestoreSize, restoreCandidatePath, restoreDirec
 import { secureBackupDirectory } from './backup.js'
 import { parseRestoreArguments } from './backup-restore-arguments.js'
 import { formatRestoreError, RestoreError, restoreError } from './restore-diagnostics.js'
+import { acknowledgeRestore, inspectRestoreRecovery, preparePreviousDatabaseReturn } from './restore-recovery.js'
 
 let cliStage = 'arguments'
 async function main(): Promise<void> {
-  const { database, backupDirectory: directory, archive, recoveryKey, managerConfirmed, verifyOnly } = parseRestoreArguments(process.argv.slice(2))
+  const { database, backupDirectory: directory, archive, recoveryKey, managerConfirmed, verifyOnly, recovery } = parseRestoreArguments(process.argv.slice(2))
   const databasePath = resolve(database), backupDirectory = resolve(directory)
   cliStage = 'validate-path'
   assertServerDatabasePath(databasePath)
+  if (recovery === 'status') { console.log(JSON.stringify(inspectRestoreRecovery(databasePath, backupDirectory))); return }
+  if (recovery === 'acknowledge') { acknowledgeRestore(databasePath); return }
+  if (recovery === 'return') await preparePreviousDatabaseReturn(databasePath, backupDirectory)
+  if (recovery === 'resume' && !existsSync(maintenancePath(databasePath)) && !existsSync(`${databasePath}.restore-journal.json`)) throw new RestoreError('RESTORE_PENDING_MISSING', 'load-marker', 'Незавершене відновлення не знайдено; нову операцію не розпочато.')
   if (archive) {
     if (!process.stdin.isTTY && !managerConfirmed && !verifyOnly) throw new RestoreError('RESTORE_TTY_REQUIRED', 'external-confirmation', 'Для зовнішнього архіву потрібне підтвердження через Server Manager або інтерактивний термінал.')
     if (verifyOnly) {

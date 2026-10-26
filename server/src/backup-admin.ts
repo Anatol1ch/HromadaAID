@@ -10,7 +10,7 @@ import type { BackupArchives } from './backup-archives.js'
 import { durableJson, upgradeRestoreCandidate } from './restore-safety.js'
 
 export const maximumRestoreSize = 2 * 1024 * 1024 * 1024
-export type RestorePlan = { version: 1; id: string; hash: string; tokenHash: string; createdAt: string | null; expiresAt: string; confirmed: boolean }
+export type RestorePlan = { version: 1; id: string; hash: string; tokenHash: string; createdAt: string | null; expiresAt: string; confirmed: boolean; expectedCurrentFingerprint?: string; returnOf?: string }
 const digest = (value: string) => createHash('sha256').update(value).digest('hex')
 export const restoreDirectory = (backupDirectory: string) => join(backupDirectory, 'restore-staging')
 export const restorePlanPath = (backupDirectory: string, id: string) => join(restoreDirectory(backupDirectory), `${id}.json`)

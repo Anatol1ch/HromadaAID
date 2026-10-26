@@ -1,6 +1,13 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('hromadaManager', Object.freeze({
+  recoveryStatus: () => ipcRenderer.invoke('manager:recovery-status'),
+  recoverOperation: (kind, confirmed) => ipcRenderer.invoke('manager:recover-operation', { kind, confirmed }),
+  onRecoveryProgress: listener => {
+    const handler = (_event, value) => listener(value)
+    ipcRenderer.on('manager:recovery-progress', handler)
+    return () => ipcRenderer.removeListener('manager:recovery-progress', handler)
+  },
   inspectEnvironment: () => ipcRenderer.invoke('manager:inspect-environment'),
   controlService: operation => ipcRenderer.invoke('manager:control-service', operation),
   getInstallDefaults: () => ipcRenderer.invoke('manager:get-install-defaults'),
