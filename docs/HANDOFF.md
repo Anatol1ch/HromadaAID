@@ -48,7 +48,8 @@
 - Stage 9.1.1 був зафіксований на попередньому HEAD; Stage 9.1.2 реалізацію
   та документацію зафіксовано окремим логічним commit. Для актуального hash
   виконай `git rev-parse HEAD`; HANDOFF не дублює власний commit hash.
-- Версії кореневого проєкту та API Server: **`0.1.0`**.
+- Поточна версія Client, Server Manager та API Server у вихідному коді: **`0.1.1`**;
+  Stable **`0.1.0`** опубліковано й використовується як baseline для оновлення.
 - На початку Stage 9.1.3 HEAD був **`521251067e2f9c6f81559ea337402e61dfbd78e5`**,
   гілка `feature/client-server`, дерево чисте.
 - **Stage 8.2 та реалізація Stage 9.1.1–9.1.2 завершені. Stage 9.1.3 packaging
@@ -106,9 +107,11 @@
   live GitHub check, реальний інсталятор і Windows Service на машині розробника не
   запускалися. Recovery service/health інтеграції в автоматичних тестах замокані.
 
-### Stage 9.1.3 — Stable 0.1.0 packaging prepared / Manual testing pending
+### Stage 9.1.3 — Stable 0.1.1 packaging prepared / Manual testing pending
 
-- Ручний запуск Stable 0.1.0 на чистій Windows 10 VM виявив, що первинне
+- Stable **0.1.0** опубліковано й встановлено на чистій Windows 10 x64 VM у режимі
+  Combined; основні функції Client, Server Manager та API Server пройшли початкове
+  ручне тестування. Під час подальшого тесту виявили, що первинне
   Combined налаштування з порожніми Data/Backups на інших дисках блокує
   `verifyInitialInstallCandidate`: перевірка прирівнювала початкові шляхи HKLM
   locator до вибраних у Manager. Виправлено: Program path/package залишаються
@@ -116,9 +119,10 @@
   допускаються лише за відсутності файлів. Існуючий вміст не очищується.
 - `pnpm manager:build` — успішно (Manager TypeScript та renderer build);
   `node --test server-manager/tests/installation-recovery.test.mjs` — **15/15**.
-  Новий код не вбудовано в Setup 0.1.0 і не перевірено в Windows VM. A08 у
-  [інструкції ручного тестування](stage-9.1.3-manual-testing.md) очікує свіжий
-  окремо дозволений тестовий payload і чисту Windows 10 x64 VM.
+  Власник підтвердив успішне повторне встановлення Setup 0.1.1 на чистій Windows
+  10 x64 VM, первинне налаштування API Server з Data/Backups на різних дисках та
+  працездатність системи (сценарій A08). Client/Manager/API auto-update, UAC
+  cancellation/retry і збереження серверних даних під час оновлення окремо pending.
 - `pnpm windows:installer` зібрав свіжі Client/Server production payloads,
   Server Manager та універсальний Unicode NSIS Setup. NSIS успішно завершився;
   Setup не запускався.
@@ -140,6 +144,21 @@
   Client `app.asar` містить рівно три дозволені актуальні templates з байтами,
   ідентичними tracked source; import register відсутній. Ці перевірки не запускають
   Setup і не змінюють Windows Service.
+- Комплект Stable **0.1.1** зібрано після коміту виправлення, без встановлення:
+  `release/stage-9.1.3/stable-0.1.1/HromadaAID-Setup-0.1.1.exe` — **224,801,170**
+  bytes, SHA-256 `f4ffbc6b919d28d43d6f1f62ebb6b60c614333d9487d86151a2ab627464635c3`;
+  `HromadaAID-Server-v0.1.1-win-x64.zip` — **45,324,906** bytes, SHA-256
+  `6e0e3d26639a6b28a122175c3f76db4ec7d2241f3687a125485c6eca97d890f2`;
+  поруч сформовано `release-manifest.json`. Усі компоненти й component manifest
+  мають версію 0.1.1; Server зберігає API contract v1 і schema 1–28.
+- Цільові перевірки 0.1.1: `pnpm windows:test-installer` — **51/51**;
+  `pnpm client:updates:test` — **12/12**; custom-directory recovery — **15/15**;
+  Manager/API updater tests — **24 passed, 1 skipped** (skip — production ZIP
+  scenario повторно перевірено окремо); actual production Server ZIP updater
+  integration — **7/7**; повторна перевірка production ZIP із `Server.next` — **1/1**.
+  SemVer `0.1.0 → 0.1.1`, release manifest hashes, package manifests та три Client
+  templates (ідентичні tracked source) перевірені. `Реєстр.xlsx` і runtime data
+  файлів у пакетах не виявлено.
 - Початкова NSIS компіляція показала, що custom page була оголошена з неіснуючим
   pre-callback параметром; packaging виявив ризик показу вибору компонентів при
   selective update. Creator тепер пропускає сторінку для Client-only та
@@ -148,12 +167,13 @@
   Реальну UI/UAC/selective поведінку треба перевірити у Windows VM.
 - Signing certificate не налаштований, тому electron-builder пропустив code signing;
   у VM Windows може показати попередження про видавця.
-- У налаштованого GitHub repository немає опублікованого Stable release
-  (GitHub API `releases/latest` відповів HTTP 404). Автоматичне hosted update між
-  двома версіями ще не перевірене; реліз/tag/push не створювалися.
-- Детальний план та таблиця 53 сценаріїв: [stage-9.1.3-manual-testing.md](stage-9.1.3-manual-testing.md).
-  Усі сценарії починаються зі статусу «Не перевірено». Інсталятор не
-  встановлювався, робочу Service/SQLite не змінювали.
+- Артефакти Stable 0.1.1 підготовлено. Автоматичне оновлення 0.1.0 → 0.1.1
+  потребує опублікованого Release; результат GitHub-перевірки та Windows VM
+  сценаріїв фіксується окремо від локальної підготовки пакетів.
+- Детальний план і таблиця сценаріїв: [stage-9.1.3-manual-testing.md](stage-9.1.3-manual-testing.md).
+  У таблиці PASS має лише A08 у підтвердженому власником обсязі; інші сценарії
+  лишаються «Не перевірено». На машині розробника інсталятор не запускався,
+  робочу Service/SQLite не змінювали.
 
 За останні контрольні прогони в цьому робочому середовищі (не повторювалися
 під час створення документації):
