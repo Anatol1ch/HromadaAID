@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Check, Folder, LockKeyhole, ShieldAlert } from 'lucide-react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { ArrowLeft, ArrowRight, Check, Copy, Eye, EyeOff, Folder, LockKeyhole, ShieldAlert } from 'lucide-react'
 import Alert from '../../src/components/Alert'
+import { Modal, OperationProgress, OperationResult } from './ManagerUI'
 import type { InspectionSnapshot } from '../electron/inspection-types'
 import type { InstallDirectoryKind, ServerInstallRequest, ServerInstallUpdate } from '../electron/installation-contract'
 import { installationVerificationIssues } from '../electron/installation-contract'
@@ -27,6 +28,7 @@ function childForRoot(path: string, kind: InstallDirectoryKind): string {
 function cleanMessage(value: string): string { return value.replace(/(?:password|token|secret|recovery.?key|private.?key|dpapi.?key)(\s*[:=]\s*)[^\s,;]+/gi, '$1[приховано]') }
 
 export default function InstallWizard({ onClose, onInstalled, initial }: Props) {
+  const pathId = useId()
   const [step, setStep] = useState(0)
   const [paths, setPaths] = useState({
     programDirectory: initial?.programDirectory ?? defaults.programDirectory,
@@ -44,6 +46,10 @@ export default function InstallWizard({ onClose, onInstalled, initial }: Props) 
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const installationCompleted = useRef(false)
+  const installInFlight = useRef(false)
+  const keyActionInFlight = useRef(false)
+  const [keyBusy, setKeyBusy] = useState(false)
+  const [showKey, setShowKey] = useState(false)
   const verificationInFlight = useRef(false)
   const [update, setUpdate] = useState<ServerInstallUpdate | null>(null)
   const [recovery, setRecovery] = useState<RecoveryPrompt | null>(null)
@@ -57,7 +63,7 @@ export default function InstallWizard({ onClose, onInstalled, initial }: Props) 
       if (value.status === 'succeeded' || value.status === 'verification-required') installationCompleted.current = true
       setUpdate(value)
     })
-    const stopRecovery = window.hromadaManager.onRecoveryKeyRequired(value => { setRecovery(value); setSavedPath(''); setSaveMessage('') })
+    const stopRecovery = window.hromadaManager.onRecoveryKeyRequired(value => { setRecovery(value); setShowKey(false); setSavedPath(''); setSaveMessage('') })
     if (!initial) void window.hromadaManager.getInstallDefaults().then(value => {
       if (!directoriesEdited.current) setPaths(value)
     }).catch(() => undefined)
@@ -93,8 +99,9 @@ export default function InstallWizard({ onClose, onInstalled, initial }: Props) 
   }
 
   const start = async () => {
-    if (installationCompleted.current || busy) return
+    if (installationCompleted.current || installInFlight.current) return
     if (!validateCurrentStep()) return
+    installInFlight.current = true
     setBusy(true); setError(''); setUpdate({ operationId: 'pending', stage: 'validation', status: 'running', message: 'Підготовка до встановлення.' })
     try {
       const result = await window.hromadaManager.installServer(request)
@@ -104,6 +111,7 @@ export default function InstallWizard({ onClose, onInstalled, initial }: Props) 
       setError(cleanMessage(failure instanceof Error ? failure.message : 'Встановлення не завершено.'))
       setBusy(false)
     } finally {
+      installInFlight.current = false
       setPassword(''); setConfirmation('')
     }
   }
@@ -125,45 +133,62 @@ export default function InstallWizard({ onClose, onInstalled, initial }: Props) 
   }
 
   const saveKey = async () => {
-    setSaveMessage('')
-    const result = await window.hromadaManager.saveRecoveryKey()
-    if (result.saved) { setSavedPath(result.path ?? ''); setSaveMessage('Ключ збережено у вибраному файлі. Зберігайте його окремо від комп’ютера та резервних копій.') }
-    else if (result.message) setSaveMessage(result.message)
+    if (keyActionInFlight.current) return
+    keyActionInFlight.current = true; setKeyBusy(true); setSaveMessage('')
+    try {
+      const result = await window.hromadaManager.saveRecoveryKey()
+      if (result.saved) { setSavedPath(result.path ?? ''); setSaveMessage('Ключ збережено у вибраному файлі.') }
+      else if (result.message) setSaveMessage(result.message)
+    } catch { setSaveMessage('Не вдалося зберегти ключ. Виберіть інше безпечне місце.') }
+    finally { keyActionInFlight.current = false; setKeyBusy(false) }
   }
   const confirmKey = async () => {
-    const confirmed = await window.hromadaManager.confirmRecoveryKeySaved()
-    if (confirmed) setRecovery(null)
+    if (keyActionInFlight.current || !savedPath) return
+    keyActionInFlight.current = true; setKeyBusy(true)
+    try { if (await window.hromadaManager.confirmRecoveryKeySaved()) { setRecovery(null); setShowKey(false) } }
+    catch { setSaveMessage('Підтвердження не отримано. Повторіть дію; ключ залишається на цьому екрані.') }
+    finally { keyActionInFlight.current = false; setKeyBusy(false) }
   }
-  const cancelKey = async () => { await window.hromadaManager.cancelRecoveryKey(); setRecovery(null) }
+  const copyKey = () => {
+    if (!recovery) return
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const input = document.createElement('textarea')
+    input.value = recovery.key; input.readOnly = true; input.className = 'sm-clipboard-input'
+    document.body.append(input); input.select()
+    try { setSaveMessage(document.execCommand('copy') ? 'Ключ скопійовано. Для продовження також збережіть його у файл.' : 'Не вдалося скопіювати ключ. Скористайтеся збереженням у файл.') }
+    catch { setSaveMessage('Копіювання недоступне. Збережіть ключ у файл.') }
+    finally { input.remove(); previous?.focus() }
+  }
 
-  if (recovery) return <section className="sm-install-wizard" aria-labelledby="recovery-key-title">
-    <header><span className="sm-install-step-count">Крок 5 · захист даних</span><h2 id="recovery-key-title">Збережіть аварійний ключ</h2><p>Цей ключ потрібний для відновлення резервних копій, якщо локальний DPAPI-файл буде втрачено. Ми покажемо його лише зараз.</p></header>
-    <Alert variant="warning">Не надсилайте ключ електронною поштою та не зберігайте поруч із сервером або архівами. Збережіть його в доступному лише уповноваженим особам безпечному місці.</Alert>
-    <pre className="sm-recovery-key" aria-label="Аварійний ключ відновлення">{recovery.key}</pre>
-    <div className="sm-form-actions"><button type="button" className="secondary-button" onClick={() => void saveKey()}><LockKeyhole size={17}/>Зберегти у файл</button>{savedPath && <span className="sm-muted">Файл: {savedPath}</span>}</div>
-    {saveMessage && <p className="sm-local-notice" role="status">{saveMessage}</p>}
-    <div className="sm-form-actions"><button type="button" className="primary-button" disabled={!savedPath} onClick={() => void confirmKey()}><Check size={17}/>Я зберіг ключ</button><button type="button" className="secondary-button" onClick={() => void cancelKey()}>Скасувати встановлення</button></div>
-  </section>
+  const wizardFooter = busy ? undefined : update?.status === 'succeeded' ? <button className="primary-button" type="button" onClick={onInstalled}>Готово</button> : update?.status === 'verification-required' ? <><button type="button" className="secondary-button" onClick={onInstalled}>Перейти до огляду</button><button type="button" className="primary-button" onClick={() => void recheck()}>Повторити перевірку</button></> : <><button className="secondary-button" type="button" onClick={onClose}>Скасувати</button>{step > 0 && <button className="secondary-button" type="button" onClick={() => { setError(''); setStep(value => value - 1) }}><ArrowLeft size={16}/>Назад</button>}{step < 3 ? <button className="primary-button" type="button" onClick={() => { if (validateCurrentStep()) setStep(value => value + 1) }}>Далі<ArrowRight size={16}/></button> : <button className="primary-button" type="button" onClick={() => void start()}><ShieldAlert size={16}/>Встановити сервер</button>}</>
 
-  return <section className="sm-install-wizard" aria-labelledby="install-title">
-    <header className="sm-install-header"><div><span className="sm-install-step-count">Налаштування сервера · крок {step + 1} з {steps.length}</span><h2 id="install-title">Встановлення сервера HromadaAID</h2><p>Виконується локальна конфігурація HTTP на loopback. Мережевий режим HTTPS поки недоступний у майстрі.</p></div><button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Закрити майстер</button></header>
+  if (recovery) return <Modal title="Збережіть аварійний ключ" icon={<LockKeyhole size={22}/>} busy onClose={onClose} footer={<button type="button" className="primary-button" disabled={!savedPath || keyBusy} onClick={() => void confirmKey()}><Check size={17}/>Я зберіг ключ</button>}>
+    <div className="sm-recovery-content"><p>Ключ дозволяє відновити резервні копії, якщо ключ сервера буде втрачено. Збережіть його зараз.</p><Alert variant="warning">Зберігайте ключ окремо від сервера та резервних копій у безпечному місці.</Alert>
+    <div className="sm-key-display"><pre className="sm-recovery-key" aria-label="Аварійний ключ відновлення">{showKey ? recovery.key : '•••• •••• •••• •••• •••• ••••'}</pre><button type="button" className="secondary-button" onClick={() => setShowKey(value => !value)}>{showKey ? <EyeOff size={16}/> : <Eye size={16}/>}{showKey ? 'Приховати ключ' : 'Показати ключ'}</button></div>
+    <div className="sm-form-actions"><button type="button" className="secondary-button" onClick={copyKey} disabled={keyBusy}><Copy size={17}/>Копіювати</button><button type="button" className="secondary-button" autoFocus onClick={() => void saveKey()} disabled={keyBusy}><LockKeyhole size={17}/>{keyBusy ? 'Збереження…' : 'Зберегти у файл'}</button></div>
+    {savedPath && <p className="sm-saved-path">Файл: {savedPath}</p>}{saveMessage && <p className="sm-muted" role="status">{saveMessage}</p>}
+    {!savedPath && <p className="sm-muted">Для продовження потрібно зберегти ключ у файл. Вікно залишатиметься відкритим до підтвердження.</p>}</div>
+  </Modal>
+
+  return <Modal title="Налаштування сервера" icon={<ShieldAlert size={22}/>} wide busy={busy} onClose={onClose} footer={wizardFooter}><section className="sm-install-wizard" aria-labelledby="install-title">
+    <header className="sm-install-header"><div><span className="sm-install-step-count">Налаштування сервера · крок {step + 1} з {steps.length}</span><h2 id="install-title">{steps[step]}</h2><p>Початкове підключення працюватиме на цьому комп’ютері.</p></div></header>
     <ol className="sm-install-steps" aria-label="Кроки встановлення">{steps.map((label, index) => <li key={label} className={index === step ? 'active' : index < step ? 'complete' : ''}><span>{index < step ? <Check size={14}/> : index + 1}</span>{label}</li>)}</ol>
 
     {!busy && update?.status !== 'succeeded' && update?.status !== 'verification-required' && <>
       {step === 0 && <div className="sm-install-fields">
         <p className="sm-form-intro">Каталоги можна розмістити на різних локальних дисках NTFS. Вони не створюються, доки ви не натиснете «Встановити сервер».</p>
-        {([['programDirectory', 'Каталог програми', 'Виконувані файли сервера та WinSW.'], ['dataDirectory', 'Каталог серверних даних', 'server.json, SQLite, журнали й захищені службові файли.'], ['backupDirectory', 'Каталог резервних копій', 'Архіви .hraid зберігатимуться окремо.']] as const).map(([field, label, hint]) => <label className="sm-install-path" key={field}><span>{label}<small>{hint}</small></span><input value={paths[field]} onChange={event => { directoriesEdited.current = true; setPaths(current => ({ ...current, [field]: event.target.value })) }}/><button className="secondary-button" type="button" onClick={() => void choose(field === 'programDirectory' ? 'program' : field === 'dataDirectory' ? 'data' : 'backups', field)}><Folder size={16}/>Огляд</button></label>)}
+        {([['programDirectory', 'Каталог програми', 'Виконувані файли сервера та WinSW.'], ['dataDirectory', 'Каталог серверних даних', 'server.json, SQLite, журнали й захищені службові файли.'], ['backupDirectory', 'Каталог резервних копій', 'Архіви .hraid зберігатимуться окремо.']] as const).map(([field, label, hint]) => <div className="sm-install-path" key={field}><label htmlFor={`${pathId}-${field}`}><span>{label}<small>{hint}</small></span></label><input id={`${pathId}-${field}`} title={paths[field]} value={paths[field]} onChange={event => { directoriesEdited.current = true; setPaths(current => ({ ...current, [field]: event.target.value })) }}/><button className="secondary-button" type="button" onClick={() => void choose(field === 'programDirectory' ? 'program' : field === 'dataDirectory' ? 'data' : 'backups', field)} aria-label={`Вибрати: ${label}`}><Folder size={16}/>Огляд</button></div>)}
         {rootNotice && <Alert variant="info">{rootNotice}</Alert>}
       </div>}
       {step === 1 && <div className="sm-install-fields"><p className="sm-form-intro">Початкове налаштування доступне лише на цьому комп’ютері. Пізніше мережевий доступ потребуватиме HTTPS-сертифіката.</p><label className="sm-install-control">Адреса сервера<select value={host} onChange={event => setHost(event.target.value as typeof host)}><option value="127.0.0.1">127.0.0.1 · IPv4 loopback</option><option value="::1">::1 · IPv6 loopback</option></select></label><label className="sm-install-control">Порт<input type="number" min={1024} max={65535} value={port} onChange={event => setPort(event.target.value)}/></label><div className="sm-transport-note"><ShieldAlert size={18}/>HTTP дозволений лише для loopback. Відкриття доступу до локальної мережі тут не налаштовується.</div></div>}
-      {step === 2 && <div className="sm-install-fields"><p className="sm-form-intro">Цей обліковий запис буде першим адміністратором системи. Пароль передається серверній CLI через stdin і не додається до журналів або аргументів запуску.</p><label className="sm-install-control">Ім’я користувача<input autoComplete="name" value={displayName} maxLength={150} onChange={event => setDisplayName(event.target.value)}/></label><label className="sm-install-control">Логін<input autoComplete="username" value={username} maxLength={80} onChange={event => setUsername(event.target.value)}/></label><label className="sm-install-control">Пароль<input type="password" autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)}/><small>Від 8 до 256 символів.</small></label><label className="sm-install-control">Підтвердження пароля<input type="password" autoComplete="new-password" value={confirmation} onChange={event => setConfirmation(event.target.value)}/></label></div>}
+      {step === 2 && <div className="sm-install-fields"><p className="sm-form-intro">Створіть перший обліковий запис адміністратора системи.</p><label className="sm-install-control">Ім’я користувача<input autoComplete="name" value={displayName} maxLength={150} onChange={event => setDisplayName(event.target.value)}/></label><label className="sm-install-control">Логін<input autoComplete="username" value={username} maxLength={80} onChange={event => setUsername(event.target.value)}/></label><label className="sm-install-control">Пароль<input type="password" autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)}/><small>Від 8 до 256 символів.</small></label><label className="sm-install-control">Підтвердження пароля<input type="password" autoComplete="new-password" value={confirmation} onChange={event => setConfirmation(event.target.value)}/></label></div>}
       {step === 3 && <div className="sm-install-review"><p className="sm-form-intro">Перевірте параметри. Пароль не показується в підсумку.</p><dl className="sm-details sm-summary-rows"><div><dt>Каталог програми</dt><dd>{paths.programDirectory}</dd></div><div><dt>Серверні дані</dt><dd>{paths.dataDirectory}</dd></div><div><dt>Резервні копії</dt><dd>{paths.backupDirectory}</dd></div><div><dt>Адреса</dt><dd>{host}:{port} · HTTP loopback</dd></div><div><dt>Перший адміністратор</dt><dd>{displayName.trim()} ({username.trim()})</dd></div></dl><Alert variant="warning">Встановлення створить SQLite лише за відсутності бази та ключа. Наявні або неповні серверні дані зупинять чисте встановлення без очищення.</Alert></div>}
       {error && <Alert variant="error">{error}</Alert>}
-      <footer className="sm-install-footer"><button className="secondary-button" type="button" onClick={onClose}>Скасувати</button><span/>{step > 0 && <button className="secondary-button" type="button" onClick={() => { setError(''); setStep(value => value - 1) }}><ArrowLeft size={16}/>Назад</button>}{step < 3 ? <button className="primary-button" type="button" onClick={() => { if (validateCurrentStep()) setStep(value => value + 1) }}>Далі<ArrowRight size={16}/></button> : <button className="primary-button" type="button" onClick={() => void start()}><ShieldAlert size={16}/>Встановити сервер</button>}</footer>
+
     </>}
 
-    {busy && <div className="sm-install-progress" role="status" aria-live="polite"><div className="sm-install-progress-icon"><Folder size={24}/></div><h3>{stageLabels[update?.stage ?? 'validation']}</h3><p>{update?.message ?? 'Виконується встановлення серверного середовища.'}</p><div className="sm-progress-track"><span/></div><small>Не закривайте Server Manager до завершення перевірки.</small></div>}
-    {!busy && update?.status === 'verification-required' && <div className="sm-install-review" role="status"><h3>Встановлення виконано. Потрібна перевірка</h3><Alert variant="warning">{update.message}</Alert><div className="sm-form-actions"><button type="button" className="primary-button" onClick={() => void recheck()}>Повторити перевірку</button><button type="button" className="secondary-button" onClick={onInstalled}>Перейти до огляду</button></div></div>}
-    {!busy && update?.status === 'succeeded' && update.result && <div className="sm-install-success"><span><Check size={26}/></span><h3>Сервер встановлено</h3><p>{update.message}</p><dl className="sm-details sm-summary-rows"><div><dt>Windows Service</dt><dd>HromadaAIDApi · працює</dd></div><div><dt>API</dt><dd>{update.result.apiAddress} · доступний</dd></div><div><dt>Версія сервера</dt><dd>{update.result.serverVersion}</dd></div></dl><button className="primary-button" type="button" onClick={onInstalled}>Перейти до огляду</button></div>}
-  </section>
+    {busy && <OperationProgress message={update?.message ?? stageLabels[update?.stage ?? 'validation']}/>}
+    {!busy && update?.status === 'verification-required' && <div className="sm-install-review" role="status"><h3>Встановлення виконано. Потрібна перевірка</h3><Alert variant="warning">{update.message}</Alert></div>}
+    {!busy && update?.status === 'succeeded' && update.result && <div className="sm-install-success"><OperationResult success title="Сервер встановлено" message={update.message}/><dl className="sm-details sm-summary-rows"><div><dt>Windows Service</dt><dd>HromadaAIDApi · працює</dd></div><div><dt>API</dt><dd>{update.result.apiAddress} · доступний</dd></div><div><dt>Версія сервера</dt><dd>{update.result.serverVersion}</dd></div></dl></div>}
+  </section></Modal>
 }

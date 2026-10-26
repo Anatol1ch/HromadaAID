@@ -9,6 +9,8 @@ import InstallWizard from './InstallWizard'
 import { apiDisplay, diagnosticLevel, initialSetupAction, inspectionFeedback, installationDisplay, notCheckedState, serviceDisplay, type PresentationTone } from './inspection-presentation'
 import managerIcon from '../../assets/hromadaaid-server-manager.svg'
 import BackupManagement from './BackupManagement'
+import UpdateManagement from './UpdateManagement'
+import { IconButton, Modal, StatusBadge as Status, Toast } from './ManagerUI'
 
 const navIcons = { overview: House, configuration: Settings2, diagnostics: Activity, backups: HardDrive, updates: Download }
 const headings = {
@@ -26,9 +28,6 @@ function Panel({ title, icon, children, action, example = false }: { title: stri
   </section>
 }
 
-function Status({ children, tone, plain = false }: { children: ReactNode; tone: string; plain?: boolean }) {
-  return <span className={`sm-status sm-status-${tone}${plain ? ' sm-status-plain' : ''}`}><span aria-hidden="true"/>{children}</span>
-}
 
 function discoverySourceLabel(source: string): string {
   return source === 'windows_service' ? 'Windows Service і WinSW' : source === 'installer_registry' ? 'метадані інсталятора в HKLM' : source === 'standard_locations' ? 'стандартні каталоги Windows' : source === 'none' ? 'джерело відсутнє' : 'не визначено'
@@ -54,15 +53,15 @@ function EventTable({ events, compact = false, caption = 'Демонстраці
           <td><time>{event.time}</time></td>
           <td><Status tone={event.level === 'success' || event.level === 'warning' || event.level === 'error' ? event.level : 'info'}>{event.level === 'error' ? 'Помилка' : event.level === 'success' ? 'Успіх' : event.level === 'warning' ? 'Увага' : 'Інформація'}</Status></td>
           <td>{event.title}</td>
-          <td><span>{event.detail}</span>{!compact && <button id={toggleId} className="sm-event-details-toggle" type="button" aria-expanded={isExpanded} aria-controls={detailId} onClick={() => setExpanded(current => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next })}>{isExpanded ? 'Сховати технічні відомості' : 'Технічні відомості'}</button>}</td>
+          <td><span className="sm-event-message" title={event.detail}>{event.detail}</span>{!compact && <IconButton label={isExpanded ? 'Сховати технічні подробиці' : 'Технічні подробиці'} id={toggleId} aria-expanded={isExpanded} aria-controls={detailId} onClick={() => setExpanded(current => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next })}><ChevronRight size={16} className={isExpanded ? 'sm-chevron-open' : undefined}/></IconButton>}</td>
         </tr>
-        {!compact && <tr hidden={!isExpanded} key={`${key}-details`} className="sm-event-details-row"><td colSpan={4}><dl id={detailId} aria-labelledby={toggleId} className="sm-event-details"><div><dt>Код</dt><dd>{event.code}</dd></div><div><dt>Ідентифікатор</dt><dd>{event.id}</dd></div>{event.diagnostics?.map((item, diagnosticIndex) => <Fragment key={diagnosticIndex}><div><dt>Операція</dt><dd>{item.operation}</dd></div><div><dt>Об’єкт</dt><dd>{item.target}</dd></div><div><dt>Системний код</dt><dd>{item.code}</dd></div><div><dt>Пояснення</dt><dd>{item.message}</dd></div></Fragment>)}</dl></td></tr>}
+        {!compact && <tr hidden={!isExpanded} key={`${key}-details`} className="sm-event-details-row"><td colSpan={4}><dl id={detailId} aria-labelledby={toggleId} className="sm-event-details"><div><dt>Повідомлення</dt><dd>{event.detail}</dd></div><div><dt>Код</dt><dd>{event.code}</dd></div><div><dt>Ідентифікатор</dt><dd>{event.id}</dd></div>{event.diagnostics?.map((item, diagnosticIndex) => <Fragment key={diagnosticIndex}><div><dt>Операція</dt><dd>{item.operation}</dd></div><div><dt>Об’єкт</dt><dd>{item.target}</dd></div><div><dt>Системний код</dt><dd>{item.code}</dd></div><div><dt>Пояснення</dt><dd>{item.message}</dd></div></Fragment>)}</dl></td></tr>}
       </Fragment>
-    })}{events.length === 0 && <tr><td colSpan={4} className="sm-empty">У вибраному сценарії немає діагностичних подій.</td></tr>}</tbody>
+    })}{events.length === 0 && <tr><td colSpan={4} className="sm-empty">Результатів перевірки ще немає.</td></tr>}</tbody>
   </table></div>
 }
 
-function RealContent({ section, inspection, checking, serviceOperation, controlService, refresh, filter, setFilter, startInstall, updatePreview, updateBusy, updateProgress, updateResult, updateError, updateErrorDetails, chooseUpdate, cancelUpdate, applyUpdate, backupBusy, onBackupBusyChange }: { section: Section; inspection: InspectionSnapshot | null; checking: boolean; serviceOperation: ServiceControlOperation | null; controlService: (operation: ServiceControlOperation) => void; refresh: () => void; filter: 'all' | 'issues'; setFilter: (value: 'all' | 'issues') => void; startInstall: () => void; updatePreview: ServerUpdatePreview | null; updateBusy: boolean; updateProgress: ServerUpdateProgress | null; updateResult: ServerUpdateResult | null; updateError: string; updateErrorDetails: string; chooseUpdate: () => void; cancelUpdate: () => void; applyUpdate: () => void; backupBusy: boolean; onBackupBusyChange: (busy: boolean) => void }) {
+function RealContent({ section, inspection, checking, serviceOperation, controlService, refresh, filter, setFilter, startInstall, updatePreview, updateBusy, updateProgress, updateResult, lastUpdateResult, updateError, updateErrorDetails, chooseUpdate, cancelUpdate, applyUpdate, backupBusy }: { section: Section; inspection: InspectionSnapshot | null; checking: boolean; serviceOperation: ServiceControlOperation | null; controlService: (operation: ServiceControlOperation) => void; refresh: () => void; filter: 'all' | 'issues'; setFilter: (value: 'all' | 'issues') => void; startInstall: () => void; updatePreview: ServerUpdatePreview | null; updateBusy: boolean; updateProgress: ServerUpdateProgress | null; updateResult: ServerUpdateResult | null; lastUpdateResult: ServerUpdateResult | null; updateError: string; updateErrorDetails: string; chooseUpdate: () => void; cancelUpdate: () => void; applyUpdate: () => void; backupBusy: boolean }) {
   const snapshot = inspection
   const pending = notCheckedState(checking)
   const install = snapshot ? installationDisplay(snapshot.installation.status) : pending
@@ -113,7 +112,7 @@ function RealContent({ section, inspection, checking, serviceOperation, controlS
   const statusExplanation = !snapshot
     ? 'Натисніть «Перевірити зараз», щоб отримати актуальні відомості про службу, конфігурацію та доступність API.'
     : serviceOperation ? 'Очікуємо підтвердження від Windows Service Control Manager, після чого перевіримо health endpoint.'
-      : snapshot.installation.status !== 'installed' ? `${snapshot.installation.message} ${snapshot.api.message}`
+      : snapshot.installation.status !== 'installed' ? snapshot.api.message
         : snapshot.service.status === 'running' && snapshot.api.status !== 'available' ? `${snapshot.service.message} ${snapshot.api.message}`
         : snapshot.service.status === 'running' && snapshot.api.status === 'available' ? 'Сервер готовий до підключення користувачів HromadaAID.' : snapshot.service.status === 'stopped' ? 'Запустіть сервер, щоб користувачі могли підключитися до HromadaAID.' : snapshot.installation.message
   const serviceCanControl = snapshot?.installation.status === 'installed' && (snapshot.service.status === 'running' || snapshot.service.status === 'stopped')
@@ -122,57 +121,41 @@ function RealContent({ section, inspection, checking, serviceOperation, controlS
       : serviceOperation === 'restart' ? { label: 'Перезапускається', tone: 'warning' }
         : service
 
-  if (section === 'backups') return <BackupManagement inspection={inspection} onBusyChange={onBackupBusyChange}/>
 
   if (section === 'overview') return <>
-    <section className="sm-health-summary" aria-labelledby="real-state-title">
-      <div className={`sm-scenario-notice sm-scenario-${overall.tone}`}><h2 id="real-state-title">{statusHeading}</h2><p>{statusExplanation}</p></div>
+    {initialSetupLabel && <section className="dashboard-panel sm-setup-callout"><span className="sm-card-icon"><Server size={27}/></span><div><h2>{snapshot?.installation.status === 'ready_to_configure' ? 'Сервер готовий до налаштування' : 'Налаштуйте сервер HromadaAID'}</h2><p>Завершіть початкове налаштування, щоб користувачі могли підключитися.</p></div><button className="primary-button" type="button" onClick={startInstall} disabled={checking || updateBusy || backupBusy || Boolean(serviceOperation)}><Settings2 size={17}/>{initialSetupLabel}</button></section>}
+    <section className="sm-health-summary" aria-label="Стан серверних компонентів">
+      {!initialSetupLabel && <div className={`sm-scenario-notice sm-scenario-${overall.tone}`}><h2 id="real-state-title">{statusHeading}</h2><p>{statusExplanation}</p></div>}
       <div className="sm-state-grid">
         <div className="sm-state-card"><span className="sm-card-icon">{serviceOperation ? <LoaderCircle className="sm-service-spinner" size={25} aria-hidden="true"/> : <Cog size={25} aria-hidden="true"/>}</span><div className="sm-state-content"><h3>Служба Windows</h3><Status tone={serviceState.tone} plain>{serviceState.label}</Status><p aria-live="polite">{serviceOperation ? 'Очікується штатний перехід стану через Windows.' : snapshot?.service.message ?? 'Очікується перевірка диспетчера служб.'}</p></div></div>
-        <div className="sm-state-card"><span className="sm-card-icon"><Wifi size={25} aria-hidden="true"/></span><div className="sm-state-content"><h3>Доступність API</h3><Status tone={api.tone} plain>{api.label}</Status><p>{snapshot?.configuration.apiAddress ?? 'Адресу не визначено'}</p><p>{snapshot?.api.message ?? 'Health-check ще не виконувався.'}</p></div></div>
+        <div className="sm-state-card"><span className="sm-card-icon"><Wifi size={25} aria-hidden="true"/></span><div className="sm-state-content"><h3>Доступність API</h3><Status tone={api.tone} plain>{api.label}</Status><p>{snapshot?.configuration.apiAddress ?? 'Адресу не визначено'}</p>{snapshot?.api.status !== 'available' && <p>{snapshot?.api.message ?? 'Health-check ще не виконувався.'}</p>}</div></div>
         <div className="sm-state-card"><span className="sm-card-icon"><Package size={25} aria-hidden="true"/></span><div className="sm-state-content"><h3>Серверний пакет</h3><strong>{config?.serverVersion ?? 'Не визначено'}</strong><p>{snapshot?.installation.status === 'installed' ? 'Версія встановленого серверного компонента.' : 'Фактичну версію пакета не підтверджено.'}</p></div></div>
       </div>
       {serviceCanControl && <div className="sm-service-toolbar"><div><strong>Керування сервером</strong><p>Під час зупинки чи перезапуску підключення користувачів тимчасово перериваються.</p></div><div className="sm-service-actions" aria-label="Керування сервером">{snapshot.service.status === 'stopped' ? <button className="primary-button" type="button" disabled={Boolean(serviceOperation) || checking || updateBusy || backupBusy || Boolean(updatePreview)} onClick={() => controlService('start')}><Play size={15} aria-hidden="true"/>Запустити сервер</button> : <><button className="secondary-button" type="button" disabled={Boolean(serviceOperation) || checking || updateBusy || backupBusy || Boolean(updatePreview)} onClick={() => controlService('stop')}><Square size={14} aria-hidden="true"/>Зупинити сервер</button><button className="secondary-button" type="button" disabled={Boolean(serviceOperation) || checking || updateBusy || backupBusy || Boolean(updatePreview)} onClick={() => controlService('restart')}><RotateCw size={15} aria-hidden="true"/>Перезапустити</button></>}</div></div>}
       <div className="sm-health-footer"><span><Clock3 size={16} aria-hidden="true"/>Остання перевірка: {snapshot ? new Date(snapshot.checkedAt).toLocaleString('uk-UA') : 'Не виконувалась'}</span><Status tone={overall.tone}>{install.label}</Status></div>
     </section>
-    <div className="sm-two-columns">
-      <Panel title="Виявлена конфігурація" icon={<Settings2 size={21} aria-hidden="true"/>} action={<span className="sm-readonly-label">Лише читання</span>}><dl className="sm-details sm-summary-rows">{([['Адреса API', config?.apiAddress ?? null], ...directoryRows.map(([label, path]) => [label, path] as const)] as const).map(([label, item]) => <div key={label}><dt>{label}</dt><dd>{item ?? 'Не визначено'}</dd></div>)}</dl></Panel>
-      <Panel title="Серверний пакет" icon={<Download size={21} aria-hidden="true"/>} action={<span className="sm-readonly-label">Локальний ZIP</span>}><p className="sm-card-lead">Встановлена версія</p><strong className="sm-real-version">{config?.serverVersion ?? 'Не визначено'}</strong><p className="sm-card-note">API health contract: {snapshot?.api.contractVersion ?? 'Не отримано'}.</p></Panel>
-    </div>
-    <Panel title="Результати останньої перевірки" icon={<Activity size={21} aria-hidden="true"/>}><EventTable events={events.slice(0, 3)} compact caption="Останні результати перевірки серверного середовища"/></Panel>
-    {initialSetupLabel && <div className="sm-future-action"><button className="primary-button" type="button" onClick={startInstall} disabled={checking}>{initialSetupLabel}</button><span>{notInstalled ? 'Локальний HTTP · Windows Service · серверні дані зберігаються окремо.' : 'Підготовлений пакет і стан транзакції перевірено. Завершіть початкове налаштування сервера.'}</span></div>}
+    <details className="dashboard-panel sm-disclosure"><summary>Технічні відомості та останні перевірки</summary><dl className="sm-details sm-summary-rows">{([['Адреса API', config?.apiAddress ?? null], ['API Contract', snapshot?.api.contractVersion?.toString() ?? null], ...directoryRows.map(([label, path]) => [label, path] as const)] as const).map(([label, item]) => <div key={label}><dt>{label}</dt><dd>{item ?? 'Не визначено'}</dd></div>)}</dl><EventTable events={events} caption="Останні результати перевірки серверного середовища"/></details>
+
   </>
 
   if (section === 'configuration') return <>
     {(notInstalled || !snapshot) && <Alert variant="info">{notInstalled ? 'Конфігурацію сервера не знайдено. Параметри стануть доступними після встановлення та налаштування серверної служби.' : 'Конфігурацію сервера ще не перевірено. Запустіть перевірку, щоб отримати фактичні параметри.'}</Alert>}
-    <div className="sm-discovery-summary" role="status"><strong>Виявлення інсталяції</strong><span>Джерело: {discoverySourceLabel(snapshot?.discovery.source ?? 'unknown')}</span><span>Достовірність: {discoveryConfidenceLabel(snapshot?.discovery.confidence ?? 'unavailable')}</span><p>{snapshot?.discovery.message ?? 'Джерело інсталяції ще не перевірено.'}</p></div>
+    <details className="sm-discovery-summary"><summary>Джерело параметрів</summary><span>Джерело: {discoverySourceLabel(snapshot?.discovery.source ?? 'unknown')}</span><span>Достовірність: {discoveryConfidenceLabel(snapshot?.discovery.confidence ?? 'unavailable')}</span><p>{snapshot?.discovery.message ?? 'Джерело інсталяції ще не перевірено.'}</p></details>
     <Panel title="Виявлені каталоги" icon={<Folder size={21} aria-hidden="true"/>} action={<span className="sm-readonly-label">Лише читання</span>}><dl className="sm-directory-list">{directoryRows.map(([label, path, owner]) => <div key={label}><span className="sm-card-icon"><Folder size={21} aria-hidden="true"/></span><div><dt>{label}</dt></div><dd>{value(path, owner)}</dd></div>)}</dl></Panel>
     <Panel title="Параметри сервера" icon={<Settings2 size={21} aria-hidden="true"/>} action={<span className="sm-readonly-label">Лише читання</span>}><dl className="sm-details sm-setting-rows">{settings.map(([label, item, owner]) => <div key={label}><dt>{label}</dt><dd>{value(item, owner)}</dd></div>)}</dl></Panel>
-    {snapshot?.installation.status !== 'not_installed' && <Alert variant="info">Показано лише дозволені технічні метадані. Файли SQLite, резервні копії, приватні ключі та секрети не читаються.</Alert>}
   </>
 
   if (section === 'diagnostics') return <>
     <Panel title="Остання перевірка середовища" icon={<Activity size={21} aria-hidden="true"/>} action={<Status tone={overall.tone}>{install.label}</Status>}>
       <p className="sm-operation-message"><Info size={19} aria-hidden="true"/>{snapshot?.installation.message ?? 'Очікується запуск перевірки.'}</p>
       <dl className="sm-details sm-operation-grid"><div><dt>Час</dt><dd>{snapshot ? new Date(snapshot.checkedAt).toLocaleString('uk-UA') : 'Не перевірено'}</dd></div><div><dt>Служба</dt><dd>{snapshot?.configuration.serviceName ?? 'HromadaAIDApi'}</dd></div><div><dt>Обліковий запис</dt><dd>{value(config?.serviceAccount, 'service')}</dd></div><div><dt>Версія сервера</dt><dd>{value(config?.serverVersion, 'package')}</dd></div></dl>
-      <div className="sm-future-action"><button className="secondary-button" type="button" onClick={refresh} disabled={checking || updateBusy || Boolean(serviceOperation)} aria-busy={checking}><RefreshCw size={16} aria-hidden="true"/>{checking ? 'Перевірка…' : 'Запустити перевірку'}</button><span>Лише читання; системні налаштування не змінюються.</span></div>
+      <div className="sm-future-action"><button className="primary-button" type="button" onClick={refresh} disabled={checking || updateBusy || backupBusy || Boolean(serviceOperation)} aria-busy={checking}><RefreshCw size={16} aria-hidden="true"/>{checking ? 'Перевірка…' : 'Запустити перевірку'}</button><span>Лише читання; системні налаштування не змінюються.</span></div>
     </Panel>
     <Panel title="Структуровані результати" icon={<Clock3 size={21} aria-hidden="true"/>} action={<label className="sm-filter">Показати<select value={filter} onChange={event => setFilter(event.target.value as 'all' | 'issues')}><option value="all">Усі перевірки</option><option value="issues">Проблеми й застереження</option></select></label>}><EventTable events={events.filter(event => filter === 'all' || event.level === 'error' || event.level === 'warning')} caption="Структуровані результати перевірок Windows та API"/></Panel>
   </>
 
-  return <>
-    <Panel title="Встановлений серверний пакет" icon={<Package size={21} aria-hidden="true"/>} action={<Status tone={install.tone}>{install.label}</Status>}>
-      <div className="sm-update-versions"><div><span>Фактична встановлена версія</span><strong>{config?.serverVersion ?? 'Не визначено'}</strong></div><span className="sm-update-separator" aria-hidden="true"/><div><span>Контракт API</span><strong>{snapshot?.api.contractVersion ?? 'Не визначено'}</strong></div></div>
-      <dl className="sm-details sm-summary-rows"><div><dt>Стан Windows Service</dt><dd>{service.label}</dd></div><div><dt>Доступність API</dt><dd>{api.label}</dd></div></dl>
-    </Panel>
-    <Panel title="Оновлення з ZIP-файлу" icon={<RefreshCw size={21} aria-hidden="true"/>}>
-      {!updatePreview && !updateBusy && !updateResult && <><p className="sm-card-lead">Виберіть локальний серверний пакет. Сумісність перевіряється до зупинки служби.</p><button className="primary-button" type="button" onClick={chooseUpdate} disabled={checking || Boolean(serviceOperation) || snapshot?.updateReadiness?.ready !== true}><Package size={16} aria-hidden="true"/>Оновити сервер</button>{snapshot?.updateReadiness?.ready !== true && <p className="sm-card-note">{snapshot?.updateReadiness?.reason ?? 'Спочатку виконайте перевірку середовища.'}</p>}</>}
-      {updatePreview && !updateBusy && <div className="sm-update-review"><h3>Оновлення HromadaAID Server</h3><dl className="sm-details sm-summary-rows"><div><dt>Поточна версія</dt><dd>{updatePreview.currentVersion}</dd></div><div><dt>Нова версія</dt><dd>{updatePreview.newVersion}</dd></div><div><dt>API Contract</dt><dd>{updatePreview.apiContract}</dd></div><div><dt>Сумісність SQLite</dt><dd>Схема {updatePreview.currentSchema} підтримується (діапазон {updatePreview.sqliteRange.minimum}–{updatePreview.sqliteRange.maximum})</dd></div><div><dt>Пакет</dt><dd>{updatePreview.sourceName}</dd></div></dl>{updatePreview.sameVersion && <Alert variant="warning">Версії збігаються. Пакет пройшов перевірку вмісту; повторне встановлення дозволене для тестового оновлення.</Alert>}<Alert variant="warning">Пакет не має цифрового підпису. SHA-256 перевіряють цілісність відносно маніфесту, але не підтверджують видавця. Продовжуйте лише з довіреним ZIP.</Alert><p className="sm-card-note">Під час оновлення сервер буде тимчасово недоступний. SQLite, конфігурація, ключі та резервні копії не замінюються.</p><div className="sm-install-footer"><button className="secondary-button" type="button" onClick={cancelUpdate}>Скасувати</button><span/><button className="primary-button" type="button" onClick={applyUpdate}><RefreshCw size={16} aria-hidden="true"/>Встановити оновлення</button></div></div>}
-      {updateBusy && <div className="sm-install-progress" role="status" aria-live="polite"><div className="sm-install-progress-icon"><RefreshCw size={24} className="sm-service-spinner"/></div><h3>{updateProgress?.message ?? 'Підготовка оновлення.'}</h3><p>Не закривайте Server Manager. Службу буде зупинено лише після перевірки пакета та сумісності.</p></div>}
-      {updateError && <><Alert variant="error">{updateError}</Alert>{updateErrorDetails && <details className="sm-update-details"><summary>Технічні подробиці</summary><pre>{updateErrorDetails}</pre></details>}</>}
-      {updateResult && <div className={updateResult.success ? 'sm-install-success' : 'sm-update-failure'}><h3>{updateResult.success ? 'Оновлення завершено' : 'Оновлення не завершено'}</h3><p>{updateResult.message}</p>{updateResult.rolledBack && <Alert variant="info">Попередній пакет відновлено автоматично. Перевірте стан служби та API.</Alert>}{updateResult.manualRecoveryRequired && <Alert variant="error">Транзакція потребує ручного відновлення. Не видаляйте Server.next, Server.previous, Server.failed або файл журналу оновлення.</Alert>}{updateResult.details && <details className="sm-update-details"><summary>Безпечні технічні подробиці</summary><pre>{updateResult.details}</pre></details>}<div className="sm-install-footer"><span/><button type="button" className="secondary-button" onClick={refresh} disabled={checking || updateBusy || Boolean(serviceOperation)} aria-busy={checking}><RefreshCw size={16} aria-hidden="true" className={checking ? 'sm-service-spinner' : undefined}/>{checking ? 'Перевірка…' : 'Перевірити стан'}</button><button type="button" className="primary-button" onClick={cancelUpdate}>Закрити результат</button></div></div>}
-    </Panel>
-  </>
+  return <UpdateManagement inspection={inspection} preview={updatePreview} busy={updateBusy} progress={updateProgress} result={updateResult} lastResult={lastUpdateResult} error={updateError} errorDetails={updateErrorDetails} disabled={checking || backupBusy || Boolean(serviceOperation)} choose={chooseUpdate} cancel={cancelUpdate} apply={applyUpdate} refresh={refresh}/>
+
 }
 
 export default function App() {
@@ -183,11 +166,13 @@ export default function App() {
   const [inspection, setInspection] = useState<InspectionSnapshot | null>(null)
   const [checking, setChecking] = useState(false)
   const [serviceOperation, setServiceOperation] = useState<ServiceControlOperation | null>(null)
+  const [serviceConfirmation, setServiceConfirmation] = useState<'stop' | 'restart' | null>(null)
   const [updatePreview, setUpdatePreview] = useState<ServerUpdatePreview | null>(null)
   const [updateBusy, setUpdateBusy] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
   const [updateProgress, setUpdateProgress] = useState<ServerUpdateProgress | null>(null)
   const [updateResult, setUpdateResult] = useState<ServerUpdateResult | null>(null)
+  const [lastUpdateResult, setLastUpdateResult] = useState<ServerUpdateResult | null>(null)
   const [updateError, setUpdateError] = useState('')
   const [updateErrorDetails, setUpdateErrorDetails] = useState('')
   const [filter, setFilter] = useState<'all' | 'issues'>('all')
@@ -205,9 +190,7 @@ export default function App() {
   const isDevelopment = import.meta.env.DEV
   const acceptInspection = useCallback((result: InspectionSnapshot) => {
     setInspection(result)
-    const feedback = inspectionFeedback(result)
-    setNotice(feedback.message)
-    setNoticeTone(feedback.tone)
+    setNotice('')
   }, [])
   const inspectReal = useCallback(async (manual = false) => {
     if (inspectionInFlight.current || serviceOperationInFlight.current || updateOperationInFlight.current || backupOperationInFlight.current) return
@@ -217,6 +200,7 @@ export default function App() {
     try {
       const result = await window.hromadaManager.inspectEnvironment()
       acceptInspection(result)
+      if (manual) { const feedback = inspectionFeedback(result); setNotice(feedback.message); setNoticeTone(feedback.tone) }
     } catch {
       setInspection(null)
       setNoticeTone('error')
@@ -225,7 +209,6 @@ export default function App() {
   }, [acceptInspection])
   const controlService = useCallback(async (operation: ServiceControlOperation) => {
     if (serviceOperationInFlight.current || updateOperationInFlight.current || backupOperationInFlight.current || updatePreview) return
-    if (operation === 'stop' && !window.confirm('Зупинити сервер? Підключені користувачі тимчасово втратять доступ до HromadaAID.')) return
     serviceOperationInFlight.current = true
     setServiceOperation(operation)
     setNotice('')
@@ -244,7 +227,7 @@ export default function App() {
     }
   }, [updatePreview, acceptInspection])
   const chooseUpdate = useCallback(async () => {
-    if (updateOperationInFlight.current) return
+    if (updateOperationInFlight.current || serviceOperationInFlight.current || backupOperationInFlight.current) return
     updateOperationInFlight.current = true
     setUpdateBusy(true)
     setUpdateError(''); setUpdateErrorDetails(''); setUpdateResult(null); setUpdateProgress({ operationId: 'package-validation', stage: 'package', message: 'Перевірка ZIP-файлу, структури та сумісності.' })
@@ -252,21 +235,23 @@ export default function App() {
       const result = await window.hromadaManager.selectServerUpdatePackage()
       if (result.preview) { setUpdatePreview(result.preview); setSection('updates') }
       else if (result.error) { setUpdateError(result.error); setUpdateErrorDetails(result.details ?? ''); setSection('updates') }
-    } catch { setUpdateError('Не вдалося відкрити або перевірити ZIP-пакет. Переконайтеся, що Server Manager запущено від імені адміністратора.') }
+      else setUpdateProgress(null)
+    } catch { setUpdateError('Не вдалося відкрити або перевірити ZIP-пакет. Повторіть дію та перегляньте діагностику.') }
     finally { updateOperationInFlight.current = false; setUpdateBusy(false) }
   }, [])
   const cancelUpdate = useCallback(() => {
+    if (updateOperationInFlight.current) return
     const id = updatePreview?.id
     if (id && !updateOperationInFlight.current) void window.hromadaManager.cancelServerUpdatePreview(id)
     setUpdatePreview(null); setUpdateResult(null); setUpdateError(''); setUpdateErrorDetails(''); setUpdateProgress(null)
   }, [updatePreview])
   const applyUpdate = useCallback(async () => {
-    if (!updatePreview || updateOperationInFlight.current) return
+    if (!updatePreview || updateOperationInFlight.current || serviceOperationInFlight.current || backupOperationInFlight.current) return
     updateOperationInFlight.current = true
-    setUpdateBusy(true); setUpdateError(''); setUpdateResult(null)
+    setUpdateBusy(true); setUpdateError(''); setUpdateResult(null); setUpdateProgress({ operationId: 'applying-update', stage: 'compatibility', message: 'Повторна перевірка перед оновленням.' })
     try {
       const result = await window.hromadaManager.applyServerUpdate(updatePreview.id)
-      setUpdateResult(result)
+      setUpdateResult(result); setLastUpdateResult(result)
       setUpdatePreview(null)
       if (!result.success) setUpdateError('')
       try { acceptInspection(await window.hromadaManager.inspectEnvironment()) } catch { setNotice('Не вдалося оновити діагностику після операції. Повторіть перевірку стану.'); setNoticeTone('error') }
@@ -301,6 +286,7 @@ export default function App() {
     setNoticeTone('info')
     setNotice('Демонстраційний результат оновлено локально. Запитів до служби чи API не виконано.')
   }
+  const onBackupBusyChange = useCallback((busy: boolean) => { backupOperationInFlight.current = busy; setBackupBusy(busy) }, [])
   const viewButton = (target: Section, label = 'Переглянути') => <button className="sm-view-button" type="button" onClick={() => setSection(target)}>{label}<ArrowRight size={16} aria-hidden="true"/></button>
   const scenarioPicker = isDevelopment && mode === 'demo' && <div className="sm-scenario"><label htmlFor="demo-scenario">Демонстраційний стан</label><select id="demo-scenario" value={scenarioId} onChange={event => { setScenarioId(event.target.value as ScenarioId); setCheckedAt(DEMO_CHECKED_AT); setNotice('') }}>{scenarioIds.map(id => <option key={id} value={id}>{scenarios[id].label}</option>)}</select></div>
 
@@ -312,13 +298,16 @@ export default function App() {
       <div className="sm-sidebar-footer"><ShieldCheck size={20} aria-hidden="true"/><div><strong>{mode === 'real' ? 'Адміністрування сервера' : 'Демонстраційні дані'}</strong><span>{mode === 'real' ? 'Керовані системні операції' : 'Стан можна перемикати'}</span></div></div>
     </aside>
     <div className="sm-workspace">
-      <header className="sm-topbar"><div><strong>HromadaAID Server Manager</strong><span>Керування серверною службою та технічна діагностика</span></div><div className="sm-topbar-meta"><span className="sm-version">Версія {__MANAGER_VERSION__}</span><Status tone={mode === 'real' ? 'success' : 'info'}>{mode === 'real' ? 'Реальний стан' : 'Демонстраційний режим'}</Status>{isDevelopment && <button className="sm-mode-toggle" type="button" onClick={() => { setMode(current => current === 'real' ? 'demo' : 'real'); setNotice('') }}>{mode === 'real' ? 'Показати демо' : 'Повернути реальний стан'}</button>}</div></header>
+      <header className="sm-topbar"><div><strong>HromadaAID Server Manager</strong><span>Керування серверною службою та технічна діагностика</span></div><div className="sm-topbar-meta"><span className="sm-version">Версія {__MANAGER_VERSION__}</span>{mode === 'demo' && <Status tone="info">Демонстраційний режим</Status>}{isDevelopment && <button className="sm-mode-toggle" type="button" disabled={installWizard || updateBusy || backupBusy || Boolean(serviceOperation)} onClick={() => { setMode(current => current === 'real' ? 'demo' : 'real'); setNotice('') }}>{mode === 'real' ? 'Показати демо' : 'Повернути реальний стан'}</button>}</div></header>
       <main id="manager-content" className="sm-main" tabIndex={-1}>
         {mode === 'demo' ? <div className="sm-demo-banner"><Info size={17} aria-hidden="true"/><span><strong>Демонстраційний режим.</strong> Усі стани, шляхи й події тестові. Системні операції недоступні.</span></div> : null}
         <div className="sm-page-heading"><div><h1 ref={heading} tabIndex={-1}>{headings[section][0]}</h1><p>{headings[section][1]}</p></div><div className="sm-heading-controls">{scenarioPicker}{section === 'overview' && (mode === 'demo' ? <button className="secondary-button" type="button" onClick={inspect}><RefreshCw size={16} aria-hidden="true"/>Демоперевірка</button> : <button className="secondary-button" type="button" onClick={() => void inspectReal(true)} disabled={installWizard || checking || updateBusy || backupBusy || Boolean(serviceOperation)} aria-busy={checking}><RefreshCw size={16} aria-hidden="true"/>{checking ? 'Перевірка…' : 'Перевірити зараз'}</button>)}</div></div>
-        {!installWizard && notice && <p className={`sm-local-notice sm-local-notice-${noticeTone}`} role={noticeTone === 'error' ? 'alert' : 'status'}>{notice}</p>}
+        {!installWizard && notice && <Toast message={notice} tone={noticeTone} onDismiss={() => setNotice('')}/>}
 
-        {installWizard ? <InstallWizard onClose={() => setInstallWizard(false)} onInstalled={() => { setInstallWizard(false); setSection('overview'); void inspectReal() }} initial={inspection?.installation.status === 'partial_installation' || inspection?.installation.status === 'ready_to_configure' ? inspection.configuration : undefined}/> : mode === 'real' ? <RealContent section={section} inspection={inspection} checking={checking} serviceOperation={serviceOperation} controlService={operation => void controlService(operation)} refresh={() => void inspectReal(true)} filter={filter} setFilter={setFilter} startInstall={() => setInstallWizard(true)} updatePreview={updatePreview} updateBusy={updateBusy} updateProgress={updateProgress} updateResult={updateResult} updateError={updateError} updateErrorDetails={updateErrorDetails} chooseUpdate={() => void chooseUpdate()} cancelUpdate={cancelUpdate} applyUpdate={() => void applyUpdate()} backupBusy={backupBusy} onBackupBusyChange={busy => { backupOperationInFlight.current = busy; setBackupBusy(busy) }}/> : <>
+        {mode === 'real' && <div hidden={section !== 'backups'}><BackupManagement inspection={inspection} onBusyChange={onBackupBusyChange} onInspection={acceptInspection} externalBusy={installWizard || updateBusy || Boolean(serviceOperation) || Boolean(updatePreview)}/></div>}
+        {installWizard && <InstallWizard onClose={() => setInstallWizard(false)} onInstalled={() => { setInstallWizard(false); setSection('overview'); void inspectReal() }} initial={inspection?.installation.status === 'partial_installation' || inspection?.installation.status === 'ready_to_configure' ? inspection.configuration : undefined}/>}
+        {serviceConfirmation && <Modal title={serviceConfirmation === 'stop' ? 'Зупинити сервер?' : 'Перезапустити сервер?'} icon={<CircleAlert size={21}/>} onClose={() => setServiceConfirmation(null)} footer={<><button type="button" className="secondary-button" onClick={() => setServiceConfirmation(null)}>Скасувати</button><button type="button" className="danger-button" onClick={() => { const action = serviceConfirmation; setServiceConfirmation(null); void controlService(action) }}>{serviceConfirmation === 'stop' ? 'Зупинити' : 'Перезапустити'}</button></>}><p>Підключені користувачі тимчасово втратять доступ до HromadaAID.</p></Modal>}
+        {mode === 'real' ? section !== 'backups' && <RealContent section={section} inspection={inspection} checking={checking} serviceOperation={serviceOperation} controlService={operation => operation === 'start' ? void controlService(operation) : setServiceConfirmation(operation)} refresh={() => void inspectReal(true)} filter={filter} setFilter={setFilter} startInstall={() => setInstallWizard(true)} updatePreview={updatePreview} updateBusy={updateBusy} updateProgress={updateProgress} updateResult={updateResult} lastUpdateResult={lastUpdateResult} updateError={updateError} updateErrorDetails={updateErrorDetails} chooseUpdate={() => void chooseUpdate()} cancelUpdate={cancelUpdate} applyUpdate={() => void applyUpdate()} backupBusy={backupBusy}/> : <>
         {section === 'overview' && <>
           <section className="sm-health-summary" aria-labelledby="server-state-title">
             <div className={scenarioId === 'running' ? 'visually-hidden' : `sm-scenario-notice sm-scenario-${scenario.tone}`}><h2 id="server-state-title">{scenario.title}</h2><p>{scenario.message}</p></div>

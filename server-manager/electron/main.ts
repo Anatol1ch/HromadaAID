@@ -1,3 +1,4 @@
+import { createOperationCloseGuard } from './operation-close-guard.js'
 import { app, BrowserWindow, dialog, ipcMain, screen, session } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
@@ -34,7 +35,6 @@ let serviceOperationInProgress = false
 let updatePreparationInProgress = false
 let activeUpdateId: string | null = null
 let preparedServerUpdate: PreparedServerUpdate | null = null
-let updateCloseWarningOpen = false
 let recoveryPrompt: { operationId: string; key: string; savedPath: string | null; resolve: (saved: boolean) => void } | null = null
 let backupOperationInProgress = false
 let backupSession: { origin: string; token: string; user: { username: string; displayName: string | null } } | null = null
@@ -170,12 +170,10 @@ async function openWindow() {
   // The window stays hidden until Chromium has painted the maximized layout,
   // avoiding a visible small-window-to-maximized transition.
   window.once('ready-to-show', () => window?.show())
-  window.on('close', event => {
-    if ((!activeUpdateId && !backupOperationInProgress) || updateCloseWarningOpen) return
-    event.preventDefault()
-    updateCloseWarningOpen = true
-    void dialog.showMessageBox(window!, { type: 'warning', title: backupOperationInProgress ? 'Операція з резервною копією триває' : 'Оновлення сервера триває', message: 'Дочекайтеся завершення операції. Закриття зараз може перервати контрольовану дію.', buttons: ['Зрозуміло'], defaultId: 0, noLink: true }).finally(() => { updateCloseWarningOpen = false })
-  })
+  window.on('close', createOperationCloseGuard(
+    () => Boolean(activeInstallId || activeUpdateId || backupOperationInProgress),
+    () => dialog.showMessageBox(window!, { type: 'warning', title: activeInstallId ? 'Налаштування сервера триває' : backupOperationInProgress ? 'Операція з резервною копією триває' : 'Оновлення сервера триває', message: recoveryPrompt ? 'Збережіть аварійний ключ і підтвердьте його збереження у майстрі. Потім дочекайтеся завершення налаштування.' : 'Дочекайтеся завершення операції. Закриття зараз може перервати контрольовану дію.', buttons: ['Зрозуміло'], defaultId: 0, noLink: true }),
+  ))
   window.on('closed', () => { window = null })
   if (development) await window.loadURL(devOrigin)
   else await window.loadFile(fileURLToPath(page))
