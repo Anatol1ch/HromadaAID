@@ -37,6 +37,50 @@ test('partial first install can be retried from an active package only with its 
   assert.equal(canResumeInitialInstallLayout({ ...base, retryJournal: false, stagedPackageExists: true, activePackageExists: false }), true)
 })
 
+test('fresh staged installation accepts different existing empty data and backup directories', async t => {
+  const f = await stagedFixture(t)
+  const dataDirectory = join(dirname(f.dataDirectory), 'Selected Data')
+  const backupDirectory = join(dirname(f.backupDirectory), 'Selected Backups')
+  await mkdir(dataDirectory, { recursive: true }); await mkdir(backupDirectory, { recursive: true })
+  const request = { ...f.request, dataDirectory, backupDirectory }
+  assert.equal(await f.verify(request), true, 'the NSIS locator defaults must not override the Manager wizard choices')
+
+  let preflightRequest
+  await runServerInstallation(request, {
+    inspect: f.inspect, canResume: f.verify,
+    preflight: async value => { preflightRequest = value }, stagePackage: async () => {}, prepareConfiguration: async () => {}, recordLocator: async () => {},
+    initialize: async () => {}, databaseStatus: async () => ({ users: 'present' }), hasPendingAdminMarker: async () => false,
+    createAdministrator: async () => assert.fail('Existing administrator must not be replaced'), installService: async () => {},
+  }, 'custom-paths', () => {}, async () => true)
+  assert.equal(preflightRequest.dataDirectory, dataDirectory)
+  assert.equal(preflightRequest.backupDirectory, backupDirectory)
+})
+
+test('custom first-install paths remain blocked when selected or locator data directories contain files', async t => {
+  const f = await stagedFixture(t)
+  const selectedData = join(dirname(f.dataDirectory), 'Selected Data')
+  const selectedBackups = join(dirname(f.backupDirectory), 'Selected Backups')
+  await mkdir(selectedData, { recursive: true }); await mkdir(selectedBackups, { recursive: true })
+  const selectedDatabase = join(selectedData, 'Database', 'hromada-aid.sqlite')
+  await mkdir(dirname(selectedDatabase), { recursive: true }); await writeFile(selectedDatabase, 'synthetic database sentinel')
+  await assert.rejects(f.verify({ ...f.request, dataDirectory: selectedData, backupDirectory: selectedBackups }), { code: 'INSTALL_DIRECTORY_NOT_EMPTY' })
+  assert.equal(await readFile(selectedDatabase, 'utf8'), 'synthetic database sentinel')
+
+  const h = await stagedFixture(t)
+  const protectedBackups = join(dirname(h.backupDirectory), 'Selected Backups')
+  await mkdir(protectedBackups, { recursive: true })
+  const archive = join(protectedBackups, 'existing.hraid')
+  await writeFile(archive, 'synthetic archive sentinel')
+  await assert.rejects(h.verify({ ...h.request, dataDirectory: join(dirname(h.dataDirectory), 'Selected Data'), backupDirectory: protectedBackups }), { code: 'INSTALL_DIRECTORY_NOT_EMPTY' })
+  assert.equal(await readFile(archive, 'utf8'), 'synthetic archive sentinel')
+
+  const g = await stagedFixture(t)
+  const locatorConfig = join(g.dataDirectory, 'server.json')
+  await mkdir(g.dataDirectory, { recursive: true }); await writeFile(locatorConfig, 'synthetic existing configuration')
+  await assert.rejects(g.verify({ ...g.request, dataDirectory: join(dirname(g.dataDirectory), 'Selected Data'), backupDirectory: join(dirname(g.backupDirectory), 'Selected Backups') }), { code: 'INSTALL_DIRECTORY_NOT_EMPTY' })
+  assert.equal(await readFile(locatorConfig, 'utf8'), 'synthetic existing configuration')
+})
+
 async function stagedFixture(t, source = 'standard_locations') {
   const root = await mkdtemp(join(tmpdir(), 'hromada-initial-setup-'))
   t.after(() => rm(root, { recursive: true, force: true }))

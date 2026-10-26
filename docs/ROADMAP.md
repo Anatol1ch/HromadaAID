@@ -12,7 +12,7 @@
 | Stage 8.2.10.2 + Final Test Fix | Контрольні Windows-артефакти; виправлено застарілий test assertion; installer tests 51/51 |
 | Stage 9.1.1 | Shared Stable GitHub Releases metadata/checksum/download infrastructure, local release-manifest verification, Client automatic update та client-only режим чинного NSIS; цільові перевірки 10/10, TypeScript checks пройшли |
 | Stage 9.1.2 | Server Manager mandatory update через Manager-only режим універсального NSIS; API Server Stable ZIP через чинний транзакційний update/recovery; цільові provider/Manager, NSIS/path, recovery й TypeScript перевірки пройшли |
-| Stage 9.1.3 | **Stable 0.1.0 packaging prepared / Manual testing pending** — fresh Universal Setup, Server ZIP and SHA-256 manifest verified in `release/stage-9.1.3/stable-0.1.0/`; Client portable excluded from required release; GitHub live update and Windows VM scenarios remain pending |
+| Stage 9.1.3 | **Stable 0.1.0 packaging prepared / Manual testing pending** — fresh Universal Setup, Server ZIP and SHA-256 manifest verified in `release/stage-9.1.3/stable-0.1.0/`; Client portable excluded from required release; custom Data/Backups initial-setup fix is implemented but needs a fresh test payload and clean Windows 10 VM; GitHub live update and remaining Windows VM scenarios remain pending |
 
 Stage 8.2 завершено за рішенням власника проєкту. Це статус реалізації,
 а не твердження про виконання всіх ручних VM-сценаріїв або production readiness.

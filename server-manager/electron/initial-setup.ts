@@ -1,4 +1,4 @@
-import { lstat, readFile } from 'node:fs/promises'
+import { lstat, readFile, readdir } from 'node:fs/promises'
 import { dirname, join, win32 } from 'node:path'
 import type { InspectionSnapshot } from './inspection-types.js'
 import type { ServerInstallRequest } from './installation-contract.js'
@@ -22,6 +22,14 @@ async function directoryExists(path: string): Promise<boolean> {
   } catch (error) { if (missing(error)) return false; throw error }
 }
 
+async function requireEmptyOrMissingDirectory(path: string): Promise<void> {
+  try {
+    const info = await lstat(path)
+    if (info.isSymbolicLink() || !info.isDirectory()) throw Object.assign(new Error('Небезпечний або некоректний каталог інсталяції.'), { code: 'INSTALL_DIRECTORY_INVALID', path })
+    if ((await readdir(path)).length) throw Object.assign(new Error('Вибраний каталог уже містить вміст; наявні дані не змінено.'), { code: 'INSTALL_DIRECTORY_NOT_EMPTY', path })
+  } catch (error) { if (!missing(error)) throw error }
+}
+
 /** The same revalidation runs before showing the wizard and immediately before installation. */
 export async function verifyInitialInstallCandidate(request: ServerInstallRequest, adapters: {
   inspect(): Promise<InspectionSnapshot>
@@ -31,12 +39,19 @@ export async function verifyInitialInstallCandidate(request: ServerInstallReques
   const current = await adapters.inspect()
   if (!isInitialSetupCandidate(current)) return false
   const same = (left: string | null, right: string) => !!left && win32.resolve(left).toLowerCase() === win32.resolve(right).toLowerCase()
-  if (!same(current.configuration.programDirectory, request.programDirectory) || !same(current.configuration.dataDirectory, request.dataDirectory) || !same(current.configuration.backupDirectory, request.backupDirectory)) return false
+  // The NSIS locator records default data/backup paths before the Manager
+  // wizard lets the administrator choose custom locations. Only the program
+  // path owns the staged package; data locations may change while no install
+  // has been initialized, provided both old and selected targets are empty.
+  if (!same(current.configuration.programDirectory, request.programDirectory)) return false
   if ((current.configuration.host !== null && current.configuration.host !== request.host) || (current.configuration.port !== null && current.configuration.port !== request.port)) return false
   // Missing data/backup directories are normal before first setup; errors and links are not.
   for (const path of [request.programDirectory, request.dataDirectory, request.backupDirectory]) {
     for (let parent = path; dirname(parent) !== parent; parent = dirname(parent)) await directoryExists(parent)
   }
+  const dataPaths = new Set([current.configuration.dataDirectory, request.dataDirectory].filter((path): path is string => !!path))
+  const backupPaths = new Set([current.configuration.backupDirectory, request.backupDirectory].filter((path): path is string => !!path))
+  for (const path of [...dataPaths, ...backupPaths]) await requireEmptyOrMissingDirectory(path)
   const program = request.programDirectory
   const stage = join(program, 'Server.next')
   const active = join(program, 'Server'), previous = join(program, 'Server.previous'), failed = join(program, 'Server.failed')

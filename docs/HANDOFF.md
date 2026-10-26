@@ -108,6 +108,17 @@
 
 ### Stage 9.1.3 — Stable 0.1.0 packaging prepared / Manual testing pending
 
+- Ручний запуск Stable 0.1.0 на чистій Windows 10 VM виявив, що первинне
+  Combined налаштування з порожніми Data/Backups на інших дисках блокує
+  `verifyInitialInstallCandidate`: перевірка прирівнювала початкові шляхи HKLM
+  locator до вибраних у Manager. Виправлено: Program path/package залишаються
+  прив'язаними до перевіреного payload; старі locator і вибрані Data/Backups
+  допускаються лише за відсутності файлів. Існуючий вміст не очищується.
+- `pnpm manager:build` — успішно (Manager TypeScript та renderer build);
+  `node --test server-manager/tests/installation-recovery.test.mjs` — **15/15**.
+  Новий код не вбудовано в Setup 0.1.0 і не перевірено в Windows VM. A08 у
+  [інструкції ручного тестування](stage-9.1.3-manual-testing.md) очікує свіжий
+  окремо дозволений тестовий payload і чисту Windows 10 x64 VM.
 - `pnpm windows:installer` зібрав свіжі Client/Server production payloads,
   Server Manager та універсальний Unicode NSIS Setup. NSIS успішно завершився;
   Setup не запускався.
