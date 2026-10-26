@@ -7,10 +7,12 @@ import { fileURLToPath } from 'node:url'
 const installer = await readFile(new URL('../packaging/windows-installer.nsi', import.meta.url), 'utf8')
 const launcher = await readFile(new URL('../packaging/client-update-launcher.ps1', import.meta.url), 'utf8')
 const copyAssets = await readFile(new URL('../electron/copy-assets.mjs', import.meta.url), 'utf8')
+const clientPackager = await readFile(new URL('../scripts/package-client-portable.mjs', import.meta.url), 'utf8')
+const builderConfig = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 
 test('Client-only NSIS update bypasses component selection and never invokes server removal/update paths', () => {
-  assert.match(installer, /Page custom ModePageCreate ModePageLeave ModePagePre/)
-  assert.match(installer, /Function ModePagePre[\s\S]*?ClientUpdateMode == "1"[\s\S]*?Abort[\s\S]*?FunctionEnd/)
+  assert.match(installer, /Page custom ModePageCreate ModePageLeave "Вибір компонентів"/)
+  assert.match(installer, /Function ModePageCreate[\s\S]*?ClientUpdateMode == "1"[\s\S]*?ManagerUpdateMode == "1"[\s\S]*?Abort[\s\S]*?nsDialogs::Create/)
   assert.match(installer, /Function DirectoryPagePre[\s\S]*?ClientUpdateMode == "1"[\s\S]*?Abort[\s\S]*?FunctionEnd/)
   assert.match(installer, /\$\{GetOptions\}\s+"\$CMDLINE"\s+"\/CLIENTUPDATE="\s+\$ClientUpdateMode/)
   assert.match(installer, /SectionSetFlags \$\{SEC_CLIENT\} \$\{SF_SELECTED\}[\s\S]*?SectionSetFlags \$\{SEC_SERVER\} 0[\s\S]*?Goto initDone/)
@@ -32,7 +34,7 @@ test('external launcher waits for Client, uses the standard UAC verb, waits for 
 test('Manager-only NSIS mode replaces only Manager, preserves installation metadata and bypasses server/service work', () => {
   assert.match(installer, /\$\{GetOptions\} "\$CMDLINE" "\/MANAGERUPDATE=" \$ManagerUpdateMode/)
   assert.match(installer, /Section -ManagerOnlyUpdate[\s\S]*?SetOutPath "\$INSTDIR\\ServerManager\.next"[\s\S]*?File \/r "\$\{MANAGER_PAYLOAD\}\\\*"[\s\S]*?Rename "\$INSTDIR\\ServerManager\.next" "\$INSTDIR\\ServerManager"[\s\S]*?SectionEnd/)
-  assert.match(installer, /managerRestoreInterrupted:[\s\S]*?Rename "\$INSTDIR\\ServerManager\.previous" "\$INSTDIR\\ServerManager"/)
+  assert.match(installer, /managerPreviousPresent:[\s\S]*?ReadINIStr \$ManagerVersion[\s\S]*?Rename "\$INSTDIR\\ServerManager\.previous" "\$INSTDIR\\ServerManager"/)
   assert.match(installer, /ManagerUpdateMode == "1"[\s\S]*?InstalledComponents[\s\S]*?manager-update-success\.txt/)
   assert.match(installer, /Section -RemoveDeselected[\s\S]*?ClientUpdateMode == "1"[\s\S]*?ManagerUpdateMode == "1"[\s\S]*?Goto removeDeselectedDone/)
   const section = installer.slice(installer.indexOf('Section -ManagerOnlyUpdate'), installer.indexOf('Section -ProductBranding'))
@@ -43,6 +45,15 @@ test('Manager-only NSIS mode replaces only Manager, preserves installation metad
 test('the common release updater module is copied into Electron runtime output', () => {
   assert.match(copyAssets, /const outputShared = join\(root, 'dist-electron', 'shared'\)/)
   assert.match(copyAssets, /copyFileSync\(join\(root, 'shared', 'release-updates\.mjs'\), join\(outputShared, 'release-updates\.mjs'\)\)/)
+})
+
+test('Client packaging copies only the three allowlisted document templates and excludes the import register', () => {
+  const copiedReferenceNames = [...copyAssets.matchAll(/copyFileSync\(join\(root, 'reference', '([^']+)'\)/g)].map(match => match[1])
+  assert.deepEqual(copiedReferenceNames.sort(), ['ПриватБанк.xlsx', 'Зведений список.xlsx', 'Список.xlsx'].sort())
+  assert.doesNotMatch(copyAssets, /Реєстр\.xlsx/)
+  assert.ok(builderConfig.build.files.includes('dist-electron/**/*'), 'electron-builder must include the Client runtime payload')
+  assert.match(clientPackager, /for \(const name of \['Список\.xlsx', 'Зведений список\.xlsx', 'ПриватБанк\.xlsx'\]\)/)
+  assert.doesNotMatch(clientPackager, /Реєстр\.xlsx/)
 })
 
 test('the client update PowerShell launcher parses without executing it', { skip: process.platform !== 'win32' }, () => {

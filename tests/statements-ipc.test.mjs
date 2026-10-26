@@ -20,7 +20,7 @@ test('Statements IPC: isolated SQLite, independent parameters, actual Excel/PDF 
  const build=spawnSync(process.execPath,['node_modules/typescript/bin/tsc','-p','tsconfig.electron.json','--outDir',output],{encoding:'utf8',windowsHide:true})
  assert.equal(build.status,0,build.stdout+build.stderr)
  mkdirSync(join(runtime,'reference'))
- for(const name of ['Список.xlsx','Зведений список.xlsx','ПриватБанк.xlsx'])copyFileSync(join('reference',name),join(output,'reference',name))
+ for(const name of ['Список.xlsx','Зведений список.xlsx','ПриватБанк.xlsx'])copyFileSync(join('reference',name),join(runtime,'reference',name))
  copyFileSync('electron/excel-templates.ps1',join(runtime,'excel-templates.ps1'))
  copyFileSync('electron/excel-privatbank.ps1',join(runtime,'excel-privatbank.ps1'))
  globalThis.__statementHandlers=new Map()

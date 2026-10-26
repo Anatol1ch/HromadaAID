@@ -47,6 +47,8 @@ async function verifyRendererPayload(directory) {
     for (const name of ['Список.xlsx', 'Зведений список.xlsx', 'ПриватБанк.xlsx']) {
       assert((await readFile(join(tempRoot, 'dist-electron', 'electron', 'reference', name))).equals(await readFile(join(root, 'reference', name))), `Шаблон у app.asar відсутній або змінений: ${name}`)
     }
+    const packagedTemplates = (await readdir(join(tempRoot, 'dist-electron', 'electron', 'reference'))).sort()
+    assert(JSON.stringify(packagedTemplates) === JSON.stringify(['ПриватБанк.xlsx', 'Зведений список.xlsx', 'Список.xlsx'].sort()), 'Client payload містить неочікувані reference-файли.')
     return references
   } finally {
     await rm(tempRoot, { recursive: true, force: true })

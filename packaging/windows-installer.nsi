@@ -103,14 +103,13 @@ Var ManagerUpdateMode
 !macroend
 
 !insertmacro MUI_PAGE_WELCOME
-Page custom ModePageCreate ModePageLeave ModePagePre
+Page custom ModePageCreate ModePageLeave "Вибір компонентів"
 !define MUI_PAGE_HEADER_TEXT "Папка встановлення"
 !define MUI_PAGE_HEADER_SUBTEXT "Виберіть папку для програмних файлів HromadaAID."
 !define MUI_DIRECTORYPAGE_TEXT_TOP "Виберіть папку для програмних файлів HromadaAID. Серверні дані зберігаються окремо."
 !define MUI_DIRECTORYPAGE_TEXT_DESTINATION "Папка програмних файлів"
 !define MUI_PAGE_CUSTOMFUNCTION_PRE DirectoryPagePre
 !insertmacro MUI_PAGE_DIRECTORY
-!undef MUI_PAGE_CUSTOMFUNCTION_PRE
 !define MUI_PAGE_HEADER_TEXT "Встановлення HromadaAID"
 !define MUI_PAGE_HEADER_SUBTEXT "Зачекайте, поки майстер завершить вибрану операцію."
 !insertmacro MUI_PAGE_INSTFILES
@@ -396,6 +395,10 @@ Section "Uninstall"
 SectionEnd
 
 Function ModePageCreate
+  ${If} $ClientUpdateMode == "1"
+  ${OrIf} $ManagerUpdateMode == "1"
+    Abort
+  ${EndIf}
   nsDialogs::Create 1018
   Pop $ModeDialog
   ${If} $ModeDialog == error
@@ -483,15 +486,6 @@ Function SelectCombinedMode
   ${NSD_Uncheck} $ModeClientRadio
   ${NSD_Uncheck} $ModeServerRadio
   ${NSD_Check} $ModeCombinedRadio
-FunctionEnd
-
-Function ModePagePre
-  ${If} $ClientUpdateMode == "1"
-    Abort
-  ${EndIf}
-  ${If} $ManagerUpdateMode == "1"
-    Abort
-  ${EndIf}
 FunctionEnd
 
 Function DirectoryPagePre
@@ -582,7 +576,6 @@ managerPreviousPresent:
       RMDir /r "$INSTDIR\ServerManager.previous"
       Goto managerUpdateContinue
     ${EndIf}
-managerRestoreInterrupted:
     IfFileExists "$INSTDIR\ServerManager.previous\resources\app.asar" managerPreviousValid 0
     MessageBox MB_ICONSTOP|MB_OK "Попередня копія Server Manager неповна. Обидві папки збережено для ручної перевірки."
     Abort

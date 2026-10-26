@@ -13,8 +13,22 @@ release/
 # Local environment and credentials
 .env
 .env.*
+*.env
 !.env.example
 !.env.template
+# Private key stores and local key files. Keep the committed self-signed
+# TLS test fixtures explicit; they are not production credentials.
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.ppk
+*.jks
+*.keystore
+!server/test-fixtures/tls-test-cert.pem
+!server/test-fixtures/tls-test-key.pem
+!server/test-fixtures/tls-other-test-key.pem
 
 # Local SQLite data, journals and backups
 *.sqlite
@@ -40,6 +54,14 @@ release/
 *.err
 *.out
 *.pid
+*.dmp
+*.mdmp
+*.core
+core
+core.*
+*.crash
+*.stackdump
+*.dump
 
 # Local generated documents and exports
 generated-documents/
@@ -50,9 +72,12 @@ private/
 *.generated.pdf
 *.generated.xlsx
 
-# Original Excel templates contain real personal and banking data.
-# Keep only reviewed, sanitized replacements under version control.
-reference/*.xlsx
+# Only the owner-approved Client document templates belong in the repository.
+# Keep every other local document under reference/ ignored.
+reference/*
+!reference/Список.xlsx
+!reference/Зведений список.xlsx
+!reference/ПриватБанк.xlsx
 
 # Test and tool artefacts
 __pycache__/

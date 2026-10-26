@@ -1,5 +1,45 @@
 # Контекст для наступного чату
 
+## Follow-up: підготовка до публікації
+
+- Власник вирішив зробити `Anatol1ch/HromadaAID` публічним у тому самому
+  репозиторії; окремий release repository не створюється. Власник дозволив
+  публікацію контактної картки `src/App.tsx`: її не змінювати й Git history через
+  неї не переписувати.
+- Власник вручну знеособив `reference/Список.xlsx`,
+  `reference/Зведений список.xlsx` і `reference/ПриватБанк.xlsx` та гарантує їхню
+  придатність до публікації. Вміст повторно не оцінювати. Вони є потрібними
+  runtime templates для трьох потоків генерації документів; залишити їх у Git.
+  `.gitignore` дозволяє лише ці три книги та ігнорує решту `reference/`.
+- `reference/Реєстр.xlsx` власник видалив; не відновлювати. Воно було лише вхідним
+  джерелом окремого імпортера, не Client runtime і не packaging.
+- Client portable ZIP не є обов'язковим release asset: release manifest і updater
+  використовують universal Setup та Server ZIP. Manager runtime payload потрібний
+  Setup; Server ZIP потрібний API Server update.
+- Наявні Stage 9.1.3 Setup/Server ZIP зібрані до оновлення templates; не публікувати
+  їх як нові. Після проходження перевірок потрібне окреме погоджене packaging.
+- Контактна картка є в історії лише local `feature/client-server` і відсутня в
+  `origin/main`; з дозволу власника історію не переписувати.
+- Цільові перевірки після оновлення файлів: Excel COM statements IPC test — 1/1
+  (3 персональні, 2 зведені й банківська відомість на синтетичних даних);
+  параметри персональної/зведеної форм у en-US і uk-UA — 1/1; packaging,
+  NSIS, server package, manifest та shared updater — 52/52. Один початковий запуск
+  IPC тесту виявив помилковий шлях у його fixture setup; виправлено шлях копіювання
+  тестових шаблонів без зміни production generator.
+- Installer/Server ZIP не перебудовували. Client Setup за поточною конфігурацією
+  включатиме рівно три дозволені книги через `electron/copy-assets.mjs`;
+  `Реєстр.xlsx` у payload немає. Release manifest contract лишився Setup + Server ZIP.
+- Client portable ZIP — необов'язковий ручний формат; updater використовує Setup,
+  а manifest містить лише Setup і Server ZIP. Manager portable runtime потрібний
+  для збирання універсального Setup; Server ZIP потрібний API Server update.
+- Контактна картка `src/App.tsx` є в feature HEAD і 60 доступних commit trees з
+  моменту `f4f4a29890a64e250ebfa07cd169c43af753ee77`; `origin/main` її не містить.
+  Потрібно замінити контакт і окремо погодити очищення feature history перед її
+  публікацією/merge. Історію не переписували; безпечний план backup/rewrite наведено
+  у [аудиті публікації](stage-9.1.3-publication-security-audit.md).
+- У цьому follow-up змінено лише документацію. Packaging і тести не запускалися;
+  `git diff --check` перевірити перед завершенням.
+
 ## Checkpoint
 
 - Дата фіксації: **2026-10-26**.
@@ -8,10 +48,10 @@
   та документацію зафіксовано окремим логічним commit. Для актуального hash
   виконай `git rev-parse HEAD`; HANDOFF не дублює власний commit hash.
 - Версії кореневого проєкту та API Server: **`0.1.0`**.
-- Робоче дерево було чистим перед Stage 9.1.2; після commit перевірити
-  `git status --short`.
-- **Stage 8.2 та реалізація Stage 9.1.1–9.1.2 завершені. Stage 9.1 і продукт
-  не production-ready до ручних Windows VM перевірок.**
+- На початку Stage 9.1.3 HEAD був **`521251067e2f9c6f81559ea337402e61dfbd78e5`**,
+  гілка `feature/client-server`, дерево чисте.
+- **Stage 8.2 та реалізація Stage 9.1.1–9.1.2 завершені. Stage 9.1.3 packaging
+  завершено; ручне тестування pending. Stage 9.1 і продукт не production-ready.**
 
 ## Останні зміни
 
@@ -64,6 +104,38 @@
 - Release metadata, файли й мережеві відповіді синтетичні. Packaging, GitHub Release,
   live GitHub check, реальний інсталятор і Windows Service на машині розробника не
   запускалися. Recovery service/health інтеграції в автоматичних тестах замокані.
+
+### Stage 9.1.3 — Packaging completed / Manual testing pending
+
+- `pnpm windows:installer` зібрав свіжі Client/Server production payloads,
+  Server Manager та універсальний Unicode NSIS Setup. NSIS успішно завершився;
+  Setup не запускався.
+- Історична packaging-перевірка створила Client portable ZIP, однак він не потрібен
+  обов'язковому release workflow. Наявний packaging не має окремого Manager portable
+  ZIP: збережено Manager portable `win-unpacked` каталог, який потрібний універсальному Setup.
+- Старі контрольні артефакти розташовані в `release/stage-9.1.3/` (ігнорується Git), версія
+  всіх компонентів **0.1.0**. Вони створені до оновлення власником document templates
+  і не є актуальними для публікації. Окремої команди Server ZIP у packaging немає:
+  ZIP створено системним `tar.exe` зі свіжого перевіреного Server каталогу;
+  після витягу пройшли integrity та runtime probes для 1483 manifest files.
+  Release manifest перевірив names, sizes, SHA-256 та compatibility.
+- Client portable assets перевірені; Manager packager підтвердив `app.asar`,
+  shared updater, version marker і payload layout. Цільові packaging regression
+  тести — **50/50**.
+- Початкова NSIS компіляція показала, що custom page була оголошена з неіснуючим
+  pre-callback параметром; packaging виявив ризик показу вибору компонентів при
+  selective update. Creator тепер пропускає сторінку для Client-only та
+  Manager-only, зайвий `!undef` і невикористану recovery мітку прибрано.
+  Regression checks — **42/42**; повторна NSIS компіляція пройшла без warnings.
+  Реальну UI/UAC/selective поведінку треба перевірити у Windows VM.
+- Signing certificate не налаштований, тому electron-builder пропустив code signing;
+  у VM Windows може показати попередження про видавця.
+- У налаштованого GitHub repository немає опублікованого Stable release
+  (GitHub API `releases/latest` відповів HTTP 404). Автоматичне hosted update між
+  двома версіями ще не перевірене; реліз/tag/push не створювалися.
+- Детальний план та таблиця 53 сценаріїв: [stage-9.1.3-manual-testing.md](stage-9.1.3-manual-testing.md).
+  Усі сценарії починаються зі статусу «Не перевірено». Інсталятор не
+  встановлювався, робочу Service/SQLite не змінювали.
 
 За останні контрольні прогони в цьому робочому середовищі (не повторювалися
 під час створення документації):
