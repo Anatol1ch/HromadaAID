@@ -16,8 +16,9 @@
 - Client portable ZIP не є обов'язковим release asset: release manifest і updater
   використовують universal Setup та Server ZIP. Manager runtime payload потрібний
   Setup; Server ZIP потрібний API Server update.
-- Наявні Stage 9.1.3 Setup/Server ZIP зібрані до оновлення templates; не публікувати
-  їх як нові. Після проходження перевірок потрібне окреме погоджене packaging.
+- Попередні Stage 9.1.3 артефакти в корені `release/stage-9.1.3/` застарілі.
+  Свіжі Setup, Server ZIP і manifest `0.1.0` зібрані в
+  `release/stage-9.1.3/stable-0.1.0/`; Client portable не створювався.
 - Контактна картка є в історії лише local `feature/client-server` і відсутня в
   `origin/main`; з дозволу власника історію не переписувати.
 - Цільові перевірки після оновлення файлів: Excel COM statements IPC test — 1/1
@@ -105,7 +106,7 @@
   live GitHub check, реальний інсталятор і Windows Service на машині розробника не
   запускалися. Recovery service/health інтеграції в автоматичних тестах замокані.
 
-### Stage 9.1.3 — Packaging completed / Manual testing pending
+### Stage 9.1.3 — Stable 0.1.0 packaging prepared / Manual testing pending
 
 - `pnpm windows:installer` зібрав свіжі Client/Server production payloads,
   Server Manager та універсальний Unicode NSIS Setup. NSIS успішно завершився;
@@ -113,15 +114,21 @@
 - Історична packaging-перевірка створила Client portable ZIP, однак він не потрібен
   обов'язковому release workflow. Наявний packaging не має окремого Manager portable
   ZIP: збережено Manager portable `win-unpacked` каталог, який потрібний універсальному Setup.
-- Старі контрольні артефакти розташовані в `release/stage-9.1.3/` (ігнорується Git), версія
-  всіх компонентів **0.1.0**. Вони створені до оновлення власником document templates
-  і не є актуальними для публікації. Окремої команди Server ZIP у packaging немає:
-  ZIP створено системним `tar.exe` зі свіжого перевіреного Server каталогу;
-  після витягу пройшли integrity та runtime probes для 1483 manifest files.
-  Release manifest перевірив names, sizes, SHA-256 та compatibility.
+- Свіжі артефакти в `release/stage-9.1.3/stable-0.1.0/`, усі компоненти **0.1.0**.
+  Universal Setup створено штатним `pnpm windows:installer`. Server ZIP зібрано з
+  перевіреного server payload та чинного component-manifest механізму; updater
+  integration перевірив його через тимчасову транзакцію. Manifest сформований із
+  готових файлів і повторно перевірив names, sizes, SHA-256 та compatibility.
+- Client portable ZIP не створювався, бо він не входить до обов'язкового release
+  contract. У target folder також є `RELEASE-READINESS.md`.
 - Client portable assets перевірені; Manager packager підтвердив `app.asar`,
   shared updater, version marker і payload layout. Цільові packaging regression
   тести — **50/50**.
+- Після підготовки Stable 0.1.0: `pnpm windows:test-installer` — **51/51**,
+  `pnpm client:updates:test` — **12/12**, Server ZIP updater integration — **7/7**.
+  Client `app.asar` містить рівно три дозволені актуальні templates з байтами,
+  ідентичними tracked source; import register відсутній. Ці перевірки не запускають
+  Setup і не змінюють Windows Service.
 - Початкова NSIS компіляція показала, що custom page була оголошена з неіснуючим
   pre-callback параметром; packaging виявив ризик показу вибору компонентів при
   selective update. Creator тепер пропускає сторінку для Client-only та
