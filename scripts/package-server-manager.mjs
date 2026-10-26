@@ -34,6 +34,8 @@ for (const required of [
 for (const target of [packageRoot, outputRoot]) await rm(target, { recursive: true, force: true })
 await mkdir(packageRoot, { recursive: true })
 await cp(resolve(root, 'dist-server-manager/main'), resolve(packageRoot, 'main'), { recursive: true })
+await mkdir(resolve(packageRoot, 'main/shared'), { recursive: true })
+await cp(resolve(root, 'shared/release-updates.mjs'), resolve(packageRoot, 'main/shared/release-updates.mjs'))
 await cp(resolve(root, 'dist-server-manager/renderer'), resolve(packageRoot, 'renderer'), { recursive: true })
 await writeFile(resolve(packageRoot, 'package.json'), `${JSON.stringify({
   name: 'hromadaaid-server-manager',
@@ -89,7 +91,7 @@ try {
 }
 if (!asar) throw new Error('Cannot inspect app.asar using electron-builder’s bundled @electron/asar.')
 const archiveEntries = asar.listPackage(asarPath).map(path => path.replace(/\\/g, '/').replace(/^\/+/, ''))
-for (const expected of ['main/main.js', 'main/preload.cjs', 'main/inspection-engine.js', 'main/installation-recovery.js', 'renderer/index.html']) {
+for (const expected of ['main/main.js', 'main/preload.cjs', 'main/inspection-engine.js', 'main/installation-recovery.js', 'main/shared/release-updates.mjs', 'renderer/index.html']) {
   if (!archiveEntries.includes(expected)) throw new Error(`Packaged Server Manager is missing ${expected}.`)
 }
 if (archiveEntries.some(path => /(^|[\\/])(server|node_modules|client|electron|fixtures|tests)([\\/]|$)|\.sqlite(?:3)?$|\.hraid$|\.dpapi/i.test(path))) {

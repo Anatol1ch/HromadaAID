@@ -24,13 +24,13 @@ export async function createReleaseManifest(directory, version) {
   }
   return { formatVersion: 1, version, platform: 'win32', architecture: 'x64', compatibility: {
     installer: 'hromadaaid-universal-nsis-v1', installModes: ['Client-only', 'Server-only', 'Combined'],
-    api: { contract: 'hromadaaid-rest', version: 1 }, client: { versionPolicy: 'same-release-version' }, server: { integrity: 'embedded-package-integrity-v1' },
+    api: { contract: 'hromadaaid-rest', version: 1 }, client: { versionPolicy: 'same-release-version' }, manager: { versionPolicy: 'same-release-version', apiContract: 'hromadaaid-rest', apiContractVersion: 1 }, server: { integrity: 'embedded-package-integrity-v1' },
   }, artifacts }
 }
 
 export async function verifyReleaseManifest(directory, value) {
   if (!value || value.formatVersion !== 1 || !isStableReleaseVersion(value.version) || value.platform !== 'win32' || value.architecture !== 'x64') throw new Error('Метадані release-manifest.json некоректні.')
-  if (value.compatibility?.installer !== 'hromadaaid-universal-nsis-v1' || !['Client-only', 'Server-only', 'Combined'].every(mode => value.compatibility?.installModes?.includes(mode)) || value.compatibility?.api?.contract !== 'hromadaaid-rest' || value.compatibility?.api?.version !== 1 || value.compatibility?.server?.integrity !== 'embedded-package-integrity-v1') throw new Error('Метадані сумісності release manifest некоректні.')
+  if (value.compatibility?.installer !== 'hromadaaid-universal-nsis-v1' || !['Client-only', 'Server-only', 'Combined'].every(mode => value.compatibility?.installModes?.includes(mode)) || value.compatibility?.api?.contract !== 'hromadaaid-rest' || value.compatibility?.api?.version !== 1 || value.compatibility?.manager?.versionPolicy !== 'same-release-version' || value.compatibility?.manager?.apiContract !== 'hromadaaid-rest' || value.compatibility?.manager?.apiContractVersion !== 1 || value.compatibility?.server?.integrity !== 'embedded-package-integrity-v1') throw new Error('Метадані сумісності release manifest некоректні.')
   const root = resolve(directory)
   const expected = [
     { component: 'installer', name: `HromadaAID-Setup-${value.version}.exe` },

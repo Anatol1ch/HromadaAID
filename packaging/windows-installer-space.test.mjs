@@ -26,6 +26,14 @@ test('requirements on a shared volume are summed once', () => {
   assert.equal(requirements.get('D:\\'), Math.ceil((base.clientBytes + base.serverBytes) * 1.15) + 40 * 1024 * 1024 + base.supportBytes)
 })
 
+test('Manager-only update reserves only the Manager payload and installer support', () => {
+  const managerBytes = 90 * 1024 * 1024
+  const requirements = computeInstallerVolumeRequirements({ ...base, mode: 'manager', managerBytes })
+  assert.equal(requirements.get('D:\\'), Math.ceil(managerBytes * 1.15))
+  assert.equal(requirements.has('E:\\'), false)
+  assert.equal(requirements.get('C:\\'), base.supportBytes + 8 * 1024 * 1024)
+})
+
 test('insufficient space is reported against the specific volume requirement', () => {
   const needed = computeInstallerVolumeRequirements({ ...base, mode: 'server-client' })
   const available = new Map([['D:\\', needed.get('D:\\') - 1], ['E:\\', needed.get('E:\\')], ['C:\\', needed.get('C:\\') - 1]])

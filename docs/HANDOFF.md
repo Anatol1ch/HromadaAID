@@ -4,16 +4,14 @@
 
 - Дата фіксації: **2026-10-26**.
 - Гілка: **`feature/client-server`**.
-- HEAD до Stage 9.1.1:
-  **`0270b3f5ddb25d1c174c66aac018f75a3cfe7ac1`**.
-- Stage 9.1.1 зафіксовано одним commit на поточному HEAD. Для точного hash
-  виконай `git rev-parse HEAD`; документ не дублює власний commit hash.
-  Stage 9.1 продовжується роботою над Manager та API Server.
+- Stage 9.1.1 був зафіксований на попередньому HEAD; Stage 9.1.2 реалізацію
+  та документацію зафіксовано окремим логічним commit. Для актуального hash
+  виконай `git rev-parse HEAD`; HANDOFF не дублює власний commit hash.
 - Версії кореневого проєкту та API Server: **`0.1.0`**.
-- Робоче дерево на початку документаційного завдання було чистим.
-- **Stage 8.2 завершено. Stage 9.1.1 реалізовано; Stage 9.1 триває.**
-  Наступний напрям: Server Manager і API Server через спільні Stable release
-  contracts. Реальну перевірку NSIS/UAC виконати у Windows VM.
+- Робоче дерево було чистим перед Stage 9.1.2; після commit перевірити
+  `git status --short`.
+- **Stage 8.2 та реалізація Stage 9.1.1–9.1.2 завершені. Stage 9.1 і продукт
+  не production-ready до ручних Windows VM перевірок.**
 
 ## Останні зміни
 
@@ -24,7 +22,8 @@
 | `92cc835` | UX Server Manager, наявна дизайн-система й усі п'ять розділів |
 | `c8ba96d` | Recovery update/restore, захист від небезпечного DB return, timeout/lock |
 | `9501b08` | Лише installer test: assertion узгоджено зі структурованою JSON/Base64 діагностикою |
-| `HEAD` | Shared Stable GitHub Releases та Client automatic updates, NSIS Client-only upgrade mode |
+| Попередній HEAD | Shared Stable GitHub Releases та Client automatic updates, NSIS Client-only upgrade mode |
+| `HEAD` | Server Manager обов’язкове оновлення через Manager-only NSIS; API Server автоматичне завантаження та чинний ZIP update/recovery |
 
 Технічну реалізацію й source map див. в [ARCHITECTURE.md](ARCHITECTURE.md),
 обов'язкові обмеження — в [DECISIONS.md](DECISIONS.md) та [AGENTS.md](../AGENTS.md).
@@ -44,8 +43,27 @@
   не запускався.
 - `assets/release-channel.json` містить адресу GitHub remote
   `Anatol1ch/HromadaAID`; жоден токен не вбудовано.
-- Автоматичне оновлення реалізоване лише для Client. Server Manager і API Server
-  ще не інтегровані.
+
+### Stage 9.1.2
+
+- Shared Stable provider повертає Setup і Server ZIP з одного manifest та проводить
+  SHA-256/size-verified streaming download. Release manifest вимагає same-release
+  Server Manager та API contract v1 сумісність.
+- Server Manager перевіряє реліз при запуску, кожні 3 години та вручну. Підтверджене
+  оновлення зберігається, блокує звичайні IPC/UI операції, а recovery залишається
+  доступним. Універсальний NSIS має `/MANAGERUPDATE=1`, який замінює лише каталог
+  Manager, зберігає компонентний склад/Installed Apps і не зупиняє службу.
+- API Server ZIP проходить спільний downloader і потім чинний
+  `prepareServerUpdate` / `applyServerUpdate`; Manager має бути тієї самої версії
+  релізу. Служба зупиняється лише після підтвердження адміністратора. Результат
+  успіху залежить від чинних перевірок активного пакета, SCM та API health.
+- Перевірки: `pnpm client:updates:test` — 11/11; новий Manager release updater разом
+  із shared provider/manifest/client service тестами — 7/7; installer path/space та
+  Client/Manager NSIS regression — 42/42; server-package/update/recovery/process —
+  45/45; чотири TypeScript no-emit checks; `git diff --check`.
+- Release metadata, файли й мережеві відповіді синтетичні. Packaging, GitHub Release,
+  live GitHub check, реальний інсталятор і Windows Service на машині розробника не
+  запускалися. Recovery service/health інтеграції в автоматичних тестах замокані.
 
 За останні контрольні прогони в цьому робочому середовищі (не повторювалися
 під час створення документації):
@@ -77,15 +95,25 @@ Test-only commit не змінював ці файли. Наявність ць�
   транзакції вимагають ручного рішення; копії й журнали зберігаються.
 - Непідтверджене завершення дочірнього дерева утримує критичний lock. Безпечного
   примусового unlock або скасування restore немає.
-- GitHub Release не публікувався й не перевірявся наживо; Manager/API Server update
-  та криптографічне підтвердження видавця залишаються майбутньою роботою.
-- У Windows VM перевірити Client-only/Server-only/Combined upgrade, збереження
+- GitHub Release не публікувався й не перевірявся наживо. SHA-256 підтверджує
+  цілісність відносно manifest, але не ідентичність видавця.
+- NSIS Manager-only update staging/swap використовує `ServerManager.next` і
+  `ServerManager.previous`, а перерваний rename відновлює на наступному Setup.
+  Після видалення previous-folder повного rollback не гарантовано; перевірити
+  переривання й повторний запуск у VM. Success marker визначає завершення Setup;
+  його відсутність зберігає обов’язковий gate.
+- У Windows VM перевірити Client-only/Server-only/Combined Manager-only upgrade,
+  збереження
   `InstalledComponents` і Installed Apps запису, Combined Server Service/файлів,
-  даних та конфігурації, штатний UAC і його відмову, download/install progress,
-  hash/HTTP/timeout/network failure, перерване встановлення, повтор після збою,
-  NSIS success marker і автоматичний повторний запуск Client. Перевірити також
-  реальний GitHub Stable Release зі створеним release manifest. Packaging і
-  публікація у цьому завданні не виконувалися.
+  даних і конфігурації, штатний UAC та його відмову, прогрес Manager Setup,
+  success marker і повторний запуск Manager. Окремо перевірити Server-only і
+  Combined: Manager update не зупиняє API Service/не змінює Server; Manager upgrade
+  виконується першим, а API ZIP блокується до версійної сумісності.
+- У VM також перевірити Server ZIP download/hash/HTTP/timeout/часткове завантаження,
+  адміністраторське підтвердження зупинки, `Server.next`/`previous`/`failed`, журнал,
+  recovery, SCM status і API health, невдалий health та фактичне повідомлення
+  результату. Реальний GitHub Stable Release і його manifest перевіряються тільки
+  після окремого релізного процесу.
 
 ## Як продовжувати
 

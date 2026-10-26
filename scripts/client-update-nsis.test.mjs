@@ -20,10 +20,24 @@ test('Client-only NSIS update bypasses component selection and never invokes ser
 })
 
 test('external launcher waits for Client, uses the standard UAC verb, waits for NSIS, and restarts Client', () => {
-  assert.match(launcher, /Wait-Process -Id \$ClientProcessId -Timeout 600/)
-  assert.match(launcher, /Start-Process -FilePath \$InstallerPath -ArgumentList @\('\/CLIENTUPDATE=1'\) -Verb RunAs -Wait -PassThru/)
+  assert.match(launcher, /Wait-Process -Id \$ProcessId -Timeout 600/)
+  assert.match(launcher, /Start-Process -FilePath \$InstallerPath -ArgumentList @\(\$mode\) -Verb RunAs -Wait -PassThru/)
+  assert.match(launcher, /ValidateSet\('Client','ServerManager'\)/)
+  assert.match(launcher, /\$Component -eq 'Client'[\s\S]*?\/CLIENTUPDATE=1/)
+  assert.match(launcher, /else \{ 'manager-update-success\.txt' \}/)
   assert.match(launcher, /client-update-success\.txt[\s\S]*\$process\.ExitCode -eq 0/)
-  assert.match(launcher, /Start-Process -FilePath \$ClientExecutable/)
+  assert.match(launcher, /Start-Process -FilePath \$ApplicationExecutable/)
+})
+
+test('Manager-only NSIS mode replaces only Manager, preserves installation metadata and bypasses server/service work', () => {
+  assert.match(installer, /\$\{GetOptions\} "\$CMDLINE" "\/MANAGERUPDATE=" \$ManagerUpdateMode/)
+  assert.match(installer, /Section -ManagerOnlyUpdate[\s\S]*?SetOutPath "\$INSTDIR\\ServerManager\.next"[\s\S]*?File \/r "\$\{MANAGER_PAYLOAD\}\\\*"[\s\S]*?Rename "\$INSTDIR\\ServerManager\.next" "\$INSTDIR\\ServerManager"[\s\S]*?SectionEnd/)
+  assert.match(installer, /managerRestoreInterrupted:[\s\S]*?Rename "\$INSTDIR\\ServerManager\.previous" "\$INSTDIR\\ServerManager"/)
+  assert.match(installer, /ManagerUpdateMode == "1"[\s\S]*?InstalledComponents[\s\S]*?manager-update-success\.txt/)
+  assert.match(installer, /Section -RemoveDeselected[\s\S]*?ClientUpdateMode == "1"[\s\S]*?ManagerUpdateMode == "1"[\s\S]*?Goto removeDeselectedDone/)
+  const section = installer.slice(installer.indexOf('Section -ManagerOnlyUpdate'), installer.indexOf('Section -ProductBranding'))
+  assert.doesNotMatch(section, /Server\.next|HromadaAIDApi|service-control|install-server-service|DataDirectory|BackupDirectory/)
+  assert.match(installer, /-Mode "manager"[\s\S]*?-ManagerBytes \$\{MANAGER_PAYLOAD_BYTES\}/)
 })
 
 test('the common release updater module is copied into Electron runtime output', () => {

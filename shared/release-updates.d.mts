@@ -1,5 +1,5 @@
 export type ReleaseArtifact = { component: 'installer' | 'server'; name: string; sha256: string; sizeBytes: number; packageIntegrity?: string }
-export type ReleaseCheck = { available: false; checkedAt: string } | { available: true; checkedAt: string; version: string; notes: string; artifact: ReleaseArtifact; url: string }
+export type ReleaseCheck = { available: false; checkedAt: string } | { available: true; checkedAt: string; version: string; notes: string; artifact: ReleaseArtifact; url: string; serverArtifact: ReleaseArtifact; serverUrl: string }
 export function parseStableVersion(value: unknown): { major: number; minor: number; patch: number; prerelease: string[] } | null
 export function compareVersions(left: string, right: string): number
 export function validateRepository(value: unknown): string

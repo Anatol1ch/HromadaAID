@@ -108,6 +108,38 @@ service control, server files та server data не змінюються. Client
 і Combined як і раніше підтримуються звичайним Setup. Реальне UAC/NSIS/Combined
 перевіряється лише у Windows VM.
 
+Server Manager повторно використовує той самий `shared/release-updates.mjs`,
+`assets/release-channel.json`, `release-manifest.json`, SemVer і SHA-256 downloader.
+У Manager package script додає модуль до `main/shared/`; токени й інші credentials
+не використовуються. Main process перевіряє Stable реліз під час запуску й кожні
+три години, а розділ «Оновлення» дає ручну перевірку. Стан Manager з підтвердженим
+релізом атомарно зберігається в окремому `userData`; якщо GitHub згодом недоступний,
+обов’язковий gate залишається. Завантаження Setup перевіряється повторно перед
+запуском launcher. NSIS success marker підтверджує завершення; marker відсутній —
+після рестарту Manager зберігає вимогу оновлення. Менеджер оновлюється першим.
+
+Спільний release manifest описує сумісність Manager за `same-release-version` та
+API contract v1. Менеджер дозволяє автоматичне серверне оновлення лише коли його
+встановлена версія збігається з версією релізу. Це виключає запуск ZIP-транзакції
+старішим Manager. Серверний ZIP завантажується тим самим verifier і передається
+наявним `prepareServerUpdate` / `applyServerUpdate`; перевірки внутрішніх integrity
+manifests, API/schema compatibility, SemVer, `Server.next` / `Server.previous` /
+`Server.failed`, журнал, SCM та API health лишаються у чинному engine. Зупинка API
+починається лише після окремого підтвердження адміністратора. Успіх UI відображає
+лише результат після підтвердження активного пакета, SCM і health.
+
+Універсальний Setup має `/MANAGERUPDATE=1` для Server Manager-only Upgrade.
+Режим перевіряє місце для Manager payload, пропускає вибір компонентів і каталогів,
+замінює лише `ServerManager`, зберігає `InstalledComponents`, Installed Apps запис,
+Data/Backups locators та не викликає server section, service control чи видалення
+інших компонентів. Зовнішній launcher чекає завершення Manager, запускає чинний
+Setup через стандартний UAC `RunAs`, перевіряє exit code і marker, потім запускає
+Manager повторно. NSIS стадіює payload у `ServerManager.next`, виконує swap через
+`ServerManager.previous` і відновлює попередню папку, якщо rename перервався. Setup
+має візуальний progress. Після видалення попередньої папки повний rollback не
+гарантується. Реальні UAC, NSIS, переривання копіювання та перезапуск потребують
+Windows VM.
+
 ## Збірка
 
 TypeScript/React/Vite, Electron, pnpm; конфігурації й команди в `package.json`,

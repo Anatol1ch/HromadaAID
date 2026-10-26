@@ -1,5 +1,5 @@
 ﻿param(
-  [Parameter(Mandatory = $true)][ValidateSet('client', 'server', 'server-client')][string]$Mode,
+  [Parameter(Mandatory = $true)][ValidateSet('client', 'server', 'server-client', 'manager')][string]$Mode,
   [Parameter(Mandatory = $true)][string]$ProgramDirectory,
   [Parameter(Mandatory = $false)][string]$DataDirectory,
   [Parameter(Mandatory = $false)][string]$BackupDirectory,
@@ -121,7 +121,7 @@ function Is-Within([string]$parent, [string]$candidate) {
 }
 
 $paths = @{ 'програми' = $ProgramDirectory }
-if ($Mode -ne 'client') {
+if ($Mode -in @('server', 'server-client')) {
   if ([string]::IsNullOrWhiteSpace($DataDirectory) -or [string]::IsNullOrWhiteSpace($BackupDirectory)) {
     Stop-WithMessage 'Для серверного компонента потрібно вказати каталоги даних і резервних копій.'
   }
@@ -161,11 +161,11 @@ function Add-VolumeRequirement([string]$Path, [Int64]$Bytes) {
   if (-not $requirements.ContainsKey($root)) { $requirements[$root] = [Int64]0 }
   $requirements[$root] += $Bytes
 }
-$includesClient = $Mode -ne 'server'
-$includesServer = $Mode -ne 'client'
+$includesClient = $Mode -in @('client', 'server-client')
+$includesServer = $Mode -in @('server', 'server-client')
 $programPayload = [Int64]0
-if ($includesClient) { $programPayload += $ClientBytes }
-if ($includesServer) { $programPayload += $ServerBytes + $ManagerBytes }
+if ($Mode -eq 'manager') { $programPayload = $ManagerBytes }
+else { if ($includesClient) { $programPayload += $ClientBytes }; if ($includesServer) { $programPayload += $ServerBytes + $ManagerBytes } }
 $programReserve = [Math]::Ceiling($programPayload * 0.15)
 Add-VolumeRequirement $resolved['програми'] ($programPayload + $programReserve)
 if ($includesServer) {
@@ -204,13 +204,13 @@ for ($i = 0; $i -lt $labels.Count; $i++) {
   }
 }
 
-if ($Mode -ne 'client' -and ((Is-Within $resolved['програми'] $resolved['серверних даних']) -or (Is-Within $resolved['програми'] $resolved['резервних копій']))) {
+if ($Mode -in @('server', 'server-client') -and ((Is-Within $resolved['програми'] $resolved['серверних даних']) -or (Is-Within $resolved['програми'] $resolved['резервних копій']))) {
   Stop-WithMessage 'Серверні дані та резервні копії мають бути поза каталогом програми.'
 }
 $programFilesRoots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
 foreach ($root in $programFilesRoots) {
   $canonicalRoot = Resolve-PotentialPath $root
-  if ($Mode -ne 'client' -and ((Is-Within $canonicalRoot $resolved['серверних даних']) -or (Is-Within $canonicalRoot $resolved['резервних копій']))) {
+  if ($Mode -in @('server', 'server-client') -and ((Is-Within $canonicalRoot $resolved['серверних даних']) -or (Is-Within $canonicalRoot $resolved['резервних копій']))) {
     Stop-WithMessage 'Серверні дані та резервні копії не можна розміщувати в каталозі програмних файлів.'
   }
 }
@@ -218,7 +218,7 @@ foreach ($root in $programFilesRoots) {
 $script:PreflightStage = 'existing-data-check'
 $config = $null
 $database = $null
-if ($Mode -ne 'client') {
+if ($Mode -in @('server', 'server-client')) {
   $config = Join-Path $DataDirectory 'server.json'
   $database = Join-Path $DataDirectory 'hromada-aid.sqlite'
   $freshDatabase = Join-Path (Join-Path $DataDirectory 'Database') 'hromada-aid.sqlite'

@@ -45,6 +45,7 @@ export function validateReleaseManifest(value, release, currentVersion) {
   if (compareVersions(value.version, currentVersion) <= 0) return null
   if (value.compatibility?.installer !== 'hromadaaid-universal-nsis-v1' || !Array.isArray(value.compatibility?.installModes) || !['Client-only', 'Server-only', 'Combined'].every(mode => value.compatibility.installModes.includes(mode))) throw new Error('Маніфест не підтверджує сумісність з універсальним інсталятором HromadaAID.')
   if (value.compatibility?.api?.contract !== 'hromadaaid-rest' || value.compatibility?.api?.version !== 1) throw new Error('Маніфест має некоректний API contract compatibility marker.')
+  if (value.compatibility?.manager?.versionPolicy !== 'same-release-version' || value.compatibility?.manager?.apiContract !== 'hromadaaid-rest' || value.compatibility?.manager?.apiContractVersion !== 1) throw new Error('Маніфест не підтверджує сумісність Server Manager із сервером цього релізу.')
   if (!Array.isArray(value.artifacts)) throw new Error('У маніфесті відсутній перелік артефактів.')
   const setupName = `HromadaAID-Setup-${value.version}.exe`
   const serverName = `HromadaAID-Server-v${value.version}-win-x64.zip`
@@ -52,7 +53,7 @@ export function validateReleaseManifest(value, release, currentVersion) {
   const server = value.artifacts.find(item => item?.component === 'server' && item.name === serverName)
   for (const artifact of [setup, server]) if (!artifact || !/^[a-f0-9]{64}$/.test(artifact.sha256) || !Number.isSafeInteger(artifact.sizeBytes) || artifact.sizeBytes < 1 || artifact.sizeBytes > 2_000_000_000) throw new Error('Маніфест містить неповні або некоректні артефакти.')
   if (server.packageIntegrity !== 'embedded-package-integrity-v1') throw new Error('Маніфест має посилатися на наявний package-integrity.json сервера.')
-  return { version: value.version, notes: safeReleaseNotes(release.body), artifact: setup }
+  return { version: value.version, notes: safeReleaseNotes(release.body), artifact: setup, serverArtifact: server }
 }
 
 export function safeReleaseNotes(value) {
@@ -114,7 +115,11 @@ export async function checkLatestRelease({ repository, currentVersion, fetchImpl
   if (!asset || typeof asset.browser_download_url !== 'string') throw new Error('У релізі відсутній інсталятор, зазначений у маніфесті.')
   const artifactUrl = new URL(asset.browser_download_url)
   if (artifactUrl.protocol !== 'https:' || artifactUrl.hostname !== 'github.com') throw new Error('Посилання на інсталятор не належить GitHub Releases.')
-  return { available: true, checkedAt: new Date().toISOString(), version: manifest.version, notes: manifest.notes, artifact: manifest.artifact, url: artifactUrl.href }
+  const serverAsset = release.assets.find(item => item?.name === manifest.serverArtifact.name)
+  if (!serverAsset || typeof serverAsset.browser_download_url !== 'string') throw new Error('У релізі відсутній серверний ZIP, зазначений у маніфесті.')
+  const serverUrl = new URL(serverAsset.browser_download_url)
+  if (serverUrl.protocol !== 'https:' || serverUrl.hostname !== 'github.com') throw new Error('Посилання на серверний ZIP не належить GitHub Releases.')
+  return { available: true, checkedAt: new Date().toISOString(), version: manifest.version, notes: manifest.notes, artifact: manifest.artifact, url: artifactUrl.href, serverArtifact: manifest.serverArtifact, serverUrl: serverUrl.href }
 }
 
 export async function downloadVerifiedArtifact({ url, artifact, directory, fetchImpl = fetch, timeoutMs = 60_000, onProgress = () => {} }) {
@@ -123,7 +128,9 @@ export async function downloadVerifiedArtifact({ url, artifact, directory, fetch
   await mkdir(directory, { recursive: true })
   const volume = await statfs(directory)
   if (BigInt(volume.bavail) * BigInt(volume.bsize) < BigInt(artifact.sizeBytes) + 64n * 1024n * 1024n) throw new Error('Недостатньо вільного місця для завантаження інсталятора.')
-  const id = randomUUID(), temporary = join(directory, `client-update-${id}.part`), destination = join(directory, `client-update-${artifact.sha256}.exe`)
+  const prefix = artifact.component === 'installer' ? 'client-update' : 'server-update'
+  const extension = artifact.component === 'installer' ? 'exe' : 'zip'
+  const id = randomUUID(), temporary = join(directory, `${prefix}-${id}.part`), destination = join(directory, `${prefix}-${artifact.sha256}.${extension}`)
   let file
   let closeRequestTimeout = () => {}
   try {

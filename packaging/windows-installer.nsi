@@ -62,6 +62,7 @@ Var ModeClientIcon
 Var ModeServerIcon
 Var ModeCombinedIcon
 Var ClientUpdateMode
+Var ManagerUpdateMode
 
 !define MUI_ICON "${PROJECT_DIR}\assets\hromadaaid.ico"
 !define MUI_UNICON "${PROJECT_DIR}\assets\hromadaaid.ico"
@@ -125,6 +126,7 @@ Page custom ModePageCreate ModePageLeave ModePagePre
 
 Section -CloseApplications
   ${If} $ClientUpdateMode != "1"
+  ${AndIf} $ManagerUpdateMode != "1"
   ; taskkill without /F sends the normal close request; Windows file-copy errors
   ; remain fatal if an application cannot close cleanly.
   nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /IM HromadaAID.exe /T'
@@ -133,10 +135,59 @@ Section -CloseApplications
   ${EndIf}
 SectionEnd
 
+Section -ManagerOnlyUpdate
+  ${If} $ManagerUpdateMode != "1"
+    Goto managerOnlyUpdateDone
+  ${EndIf}
+  IfFileExists "$INSTDIR\ServerManager\HromadaAID Server Manager.exe" managerOnlyTargetExists 0
+  MessageBox MB_ICONSTOP|MB_OK "Не знайдено встановлений Server Manager. Вибіркове оновлення зупинено."
+  Abort
+managerOnlyTargetExists:
+  RMDir /r "$INSTDIR\ServerManager.next"
+  SetOutPath "$INSTDIR\ServerManager.next"
+  File /r "${MANAGER_PAYLOAD}\*"
+  IfFileExists "$INSTDIR\ServerManager.next\HromadaAID Server Manager.exe" managerStageExecutablePresent 0
+  MessageBox MB_ICONSTOP|MB_OK "Підготовлений пакет Manager неповний. Чинну програму збережено; повторіть оновлення."
+  Abort
+managerStageExecutablePresent:
+  IfFileExists "$INSTDIR\ServerManager.next\resources\app.asar" managerStageReady 0
+  MessageBox MB_ICONSTOP|MB_OK "Підготовлений пакет Manager неповний. Чинну програму збережено; повторіть оновлення."
+  Abort
+managerStageReady:
+  IfFileExists "$INSTDIR\ServerManager.previous\HromadaAID Server Manager.exe" 0 managerPreviousMissing
+  MessageBox MB_ICONSTOP|MB_OK "Знайдено попередню копію Server Manager. Спершу перевірте її відновлення; файли збережено."
+  Abort
+managerPreviousMissing:
+  ClearErrors
+  Rename "$INSTDIR\ServerManager" "$INSTDIR\ServerManager.previous"
+  IfErrors managerPreserveOld
+  ClearErrors
+  Rename "$INSTDIR\ServerManager.next" "$INSTDIR\ServerManager"
+  IfErrors managerRestoreOld
+  ClearErrors
+  RMDir /r "$INSTDIR\ServerManager.previous"
+  IfErrors managerPreservePrevious
+  Goto managerOnlyUpdateDone
+managerRestoreOld:
+  RMDir /r "$INSTDIR\ServerManager"
+  Rename "$INSTDIR\ServerManager.previous" "$INSTDIR\ServerManager"
+managerPreserveOld:
+  MessageBox MB_ICONSTOP|MB_OK "Не вдалося замінити Server Manager. Попередні файли збережено; повторіть оновлення."
+  Abort
+managerPreservePrevious:
+  MessageBox MB_ICONSTOP|MB_OK "Manager оновлено, але попередню копію не видалено. Файли збережено для перевірки."
+  Abort
+managerOnlyUpdateDone:
+SectionEnd
+
 Section -ProductBranding
+  ${If} $ManagerUpdateMode == "1"
+    Goto productBrandingDone
+  ${EndIf}
   ; Always available for Installed Apps, including Server-only.
   SetOutPath "$INSTDIR\assets"
   File /oname=hromadaaid.ico "${PROJECT_DIR}\assets\hromadaaid.ico"
+productBrandingDone:
 SectionEnd
 
 Section "Клієнт HromadaAID" SEC_CLIENT
@@ -210,6 +261,7 @@ SectionEnd
 
 Section -RemoveDeselected
   ${If} $ClientUpdateMode == "1"
+  ${OrIf} $ManagerUpdateMode == "1"
     Goto removeDeselectedDone
   ${EndIf}
   SectionGetFlags ${SEC_CLIENT} $0
@@ -241,6 +293,17 @@ Section -ApplicationShortcuts
     !insertmacro SyncApplicationShortcuts 1 $1
     Goto shortcutsDone
   ${EndIf}
+  ${If} $ManagerUpdateMode == "1"
+    ReadRegStr $1 HKLM "Software\HromadaAID\Installer" "InstalledComponents"
+    ${If} $1 == "Server,ServerManager"
+    ${OrIf} $1 == "Client,Server,ServerManager"
+      StrCpy $1 1
+    ${Else}
+      StrCpy $1 0
+    ${EndIf}
+    !insertmacro SyncApplicationShortcuts 0 $1
+    Goto shortcutsDone
+  ${EndIf}
   !insertmacro SyncApplicationShortcuts $0 $1
 shortcutsDone:
 SectionEnd
@@ -257,6 +320,20 @@ Section -UninstallMetadata
     FileOpen $2 "$INSTDIR\Client\client-update-success.txt" "w"
     ${If} $2 == ""
       MessageBox MB_ICONSTOP|MB_OK "Не вдалося підтвердити завершення оновлення Client. Повторіть оновлення після перевірки доступу до тимчасового каталогу."
+      Abort
+    ${EndIf}
+    FileWrite $2 "${APP_VERSION}"
+    FileClose $2
+    Goto updateMetadataDone
+  ${EndIf}
+  ${If} $ManagerUpdateMode == "1"
+    ReadRegStr $1 HKLM "Software\HromadaAID\Installer" "InstalledComponents"
+    WriteRegStr HKLM "Software\HromadaAID\Installer" "InstalledComponents" "$1"
+    WriteUninstaller "$INSTDIR\Uninstall.exe"
+    WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
+    FileOpen $2 "$INSTDIR\ServerManager\manager-update-success.txt" "w"
+    ${If} $2 == ""
+      MessageBox MB_ICONSTOP|MB_OK "Не вдалося підтвердити завершення оновлення Server Manager."
       Abort
     ${EndIf}
     FileWrite $2 "${APP_VERSION}"
@@ -412,9 +489,15 @@ Function ModePagePre
   ${If} $ClientUpdateMode == "1"
     Abort
   ${EndIf}
+  ${If} $ManagerUpdateMode == "1"
+    Abort
+  ${EndIf}
 FunctionEnd
 
 Function DirectoryPagePre
+  ${If} $ManagerUpdateMode == "1"
+    Abort
+  ${EndIf}
   ${If} $ClientUpdateMode == "1"
     Call SummaryLeave
     Abort
@@ -473,6 +556,7 @@ Function .onInit
   SectionSetFlags ${SEC_CLIENT} 0
   SectionSetFlags ${SEC_SERVER} 0
   StrCpy $ClientUpdateMode ""
+  StrCpy $ManagerUpdateMode ""
   ${GetOptions} "$CMDLINE" "/CLIENTUPDATE=" $ClientUpdateMode
   ${If} $ClientUpdateMode == "1"
     IfFileExists "$INSTDIR\Client\HromadaAID.exe" clientUpdateTargetExists 0
@@ -483,6 +567,50 @@ clientUpdateTargetExists:
     SectionSetFlags ${SEC_CLIENT} ${SF_SELECTED}
     SectionSetFlags ${SEC_SERVER} 0
     Goto initDone
+  ${EndIf}
+  ${GetOptions} "$CMDLINE" "/MANAGERUPDATE=" $ManagerUpdateMode
+  ${If} $ManagerUpdateMode == "1"
+    IfFileExists "$INSTDIR\ServerManager\HromadaAID Server Manager.exe" managerUpdateTargetExists 0
+    MessageBox MB_ICONSTOP|MB_OK "Не знайдено встановлений Server Manager. Вибіркове оновлення зупинено."
+    Abort
+managerUpdateTargetExists:
+    IfFileExists "$INSTDIR\ServerManager.previous\HromadaAID Server Manager.exe" managerPreviousPresent 0
+    Goto managerUpdateContinue
+managerPreviousPresent:
+    ReadINIStr $ManagerVersion "$INSTDIR\ServerManager\resources\manager-version.ini" "manager" "version"
+    ${If} $ManagerVersion == "${APP_VERSION}"
+      RMDir /r "$INSTDIR\ServerManager.previous"
+      Goto managerUpdateContinue
+    ${EndIf}
+managerRestoreInterrupted:
+    IfFileExists "$INSTDIR\ServerManager.previous\resources\app.asar" managerPreviousValid 0
+    MessageBox MB_ICONSTOP|MB_OK "Попередня копія Server Manager неповна. Обидві папки збережено для ручної перевірки."
+    Abort
+managerPreviousValid:
+    RMDir /r "$INSTDIR\ServerManager"
+    ClearErrors
+    Rename "$INSTDIR\ServerManager.previous" "$INSTDIR\ServerManager"
+    IfErrors managerCannotRestorePrevious
+managerUpdateContinue:
+    RMDir /r "$INSTDIR\ServerManager.next"
+    Delete "$INSTDIR\ServerManager\manager-update-success.txt"
+    StrCpy $ValidationMode "manager"
+    Push "$INSTDIR"
+    Call TrimPathTrailingSeparator
+    Pop $PreflightProgramDirectory
+    SetOutPath "$PLUGINSDIR\Preflight"
+    File /oname=windows-installer-paths.ps1 "${PROJECT_DIR}\packaging\windows-installer-paths.ps1"
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\Preflight\windows-installer-paths.ps1" -Mode "manager" -ProgramDirectory "$PreflightProgramDirectory" -ClientBytes 0 -ServerBytes 0 -ManagerBytes ${MANAGER_PAYLOAD_BYTES} -SupportBytes ${INSTALLER_SUPPORT_BYTES}'
+    Pop $2
+    Pop $3
+    ${If} $2 != 0
+      MessageBox MB_ICONSTOP|MB_OK "Не вдалося перевірити місце для Server Manager. Файли сервера не змінено.$\r$\n$3"
+      Abort
+    ${EndIf}
+    Goto initDone
+managerCannotRestorePrevious:
+    MessageBox MB_ICONSTOP|MB_OK "Не вдалося відновити попередній Server Manager. Папки збережено для ручної перевірки."
+    Abort
   ${EndIf}
   ; The server branch also selects an existing Client; preserve Combined on rerun.
   IfFileExists "$INSTDIR\ServerManager\HromadaAID Server Manager.exe" selectInstalledServer 0

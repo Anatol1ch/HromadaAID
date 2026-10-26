@@ -7,17 +7,17 @@ export const installerSpaceBudgets = Object.freeze({
   payloadReserveRatio: 0.15,
 })
 
-export function computeInstallerVolumeRequirements({ mode, programDirectory, dataDirectory, backupDirectory, temporaryDirectory, clientBytes, serverBytes, supportBytes }) {
-  if (!['client', 'server', 'server-client'].includes(mode)) throw new Error('Невідомий режим інсталяції.')
-  for (const value of [clientBytes, serverBytes, supportBytes]) if (!Number.isSafeInteger(value) || value < 0) throw new Error('Розмір пакета має бути невід’ємним цілим числом.')
+export function computeInstallerVolumeRequirements({ mode, programDirectory, dataDirectory, backupDirectory, temporaryDirectory, clientBytes, serverBytes, managerBytes = 0, supportBytes }) {
+  if (!['client', 'server', 'server-client', 'manager'].includes(mode)) throw new Error('Невідомий режим інсталяції.')
+  for (const value of [clientBytes, serverBytes, managerBytes, supportBytes]) if (!Number.isSafeInteger(value) || value < 0) throw new Error('Розмір пакета має бути невід’ємним цілим числом.')
   const volumes = new Map()
   const add = (path, bytes) => {
     const root = win32.parse(win32.resolve(path)).root.toLocaleUpperCase('en-US')
     volumes.set(root, (volumes.get(root) ?? 0) + bytes)
   }
-  const includesClient = mode !== 'server'
-  const includesServer = mode !== 'client'
-  const programPayload = (includesClient ? clientBytes : 0) + (includesServer ? serverBytes : 0)
+  const includesClient = mode === 'client' || mode === 'server-client'
+  const includesServer = mode === 'server' || mode === 'server-client'
+  const programPayload = mode === 'manager' ? managerBytes : (includesClient ? clientBytes : 0) + (includesServer ? serverBytes + managerBytes : 0)
   add(programDirectory, programPayload + Math.ceil(programPayload * installerSpaceBudgets.payloadReserveRatio))
   if (includesServer) {
     add(dataDirectory, installerSpaceBudgets.dataBytes)

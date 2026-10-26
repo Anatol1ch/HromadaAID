@@ -146,8 +146,8 @@ export function createClientUpdateService(options: {
       setState({ status: 'preparing', error: undefined })
       const child = (options.spawnProcess ?? spawn)('powershell.exe', [
         '-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', launcher,
-        '-ClientProcessId', String(options.processId), '-InstallerPath', pending.downloadedPath, '-ClientExecutable', options.executablePath,
-        '-ExpectedVersion', pending.version,
+        '-ProcessId', String(options.processId), '-InstallerPath', pending.downloadedPath, '-ApplicationExecutable', options.executablePath,
+        '-ExpectedVersion', pending.version, '-Component', 'Client',
       ], { detached: true, windowsHide: true, stdio: 'ignore' })
       const started = await new Promise<boolean>(resolve => {
         child.once('spawn', () => resolve(true))

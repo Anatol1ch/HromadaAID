@@ -11,6 +11,7 @@
 | Stage 8.2.10.1 | Контрольоване recovery update/restore, безпечне повернення бази, timeout/operation lock |
 | Stage 8.2.10.2 + Final Test Fix | Контрольні Windows-артефакти; виправлено застарілий test assertion; installer tests 51/51 |
 | Stage 9.1.1 | Shared Stable GitHub Releases metadata/checksum/download infrastructure, local release-manifest verification, Client automatic update та client-only режим чинного NSIS; цільові перевірки 10/10, TypeScript checks пройшли |
+| Stage 9.1.2 | Server Manager mandatory update через Manager-only режим універсального NSIS; API Server Stable ZIP через чинний транзакційний update/recovery; цільові provider/Manager, NSIS/path, recovery й TypeScript перевірки пройшли |
 
 Stage 8.2 завершено за рішенням власника проєкту. Це статус реалізації,
 а не твердження про виконання всіх ручних VM-сценаріїв або production readiness.
@@ -20,10 +21,11 @@ Stage 8.2 завершено за рішенням власника проєкт
 
 | Етап | Обсяг | Основні передумови |
 | --- | --- | --- |
-| **9.1 — Automatic Updates** | Client, Manager та API Server через GitHub Releases | Stage 9.1.1 реалізує спільну основу і Client. Наступне завдання: Server Manager та API Server через ті самі Stable release contracts; потрібні UAC/NSIS VM-перевірки Client |
+| **9.1 — Automatic Updates** | Client, Manager та API Server через GitHub Releases | Реалізацію Stage 9.1.1–9.1.2 завершено; потрібні реальні UAC/NSIS/component-preservation, Server Service/API health та failure/recovery сценарії у Windows VM. Stage 9.1 і продукт не production-ready до цих перевірок |
 | **9.2 — Tailscale Connectivity** | Підключення клієнтів, конфігурація адреси й необхідні мережеві перевірки | Зберегти TLS/auth/RBAC; перевірити реальне підключення кількох машин і дозволені маршрути/порти |
 | **9.3 — Project Cleanup** | Цільове очищення застарілих файлів і технічного боргу | Підтвердити недосяжність/відсутність залежностей; зберегти чинні SQL modules, копії й сумісність |
 | **9.4 — Production Release** | Фінальна перевірка, версія, production-збірка, GitHub Release та підготовка до використання | Прийняті VM-перевірки, правила релізу й оновлення, явний дозвіл на packaging/publication |
 
-Ці етапи заплановані. Поточна документаційна задача їх не реалізує й не дозволяє
-автоматично виконувати публікацію, зміну версії або пакування.
+Stage 9.1 позначає реалізацію, а не production readiness; потрібні VM перевірки з
+HANDOFF. Наступні етапи не дозволяють автоматично виконувати публікацію, зміну
+версії або пакування.

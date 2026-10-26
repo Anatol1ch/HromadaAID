@@ -13,8 +13,9 @@ const hash = createHash('sha256').update(bytes).digest('hex')
 const release = { tag_name: 'v1.2.0', draft: false, prerelease: false, body: 'Виправлення', assets: [
   { name: 'release-manifest.json', browser_download_url: 'https://github.com/owner/repo/releases/download/v1.2.0/release-manifest.json' },
   { name: 'HromadaAID-Setup-1.2.0.exe', browser_download_url: 'https://github.com/owner/repo/releases/download/v1.2.0/HromadaAID-Setup-1.2.0.exe' },
+  { name: 'HromadaAID-Server-v1.2.0-win-x64.zip', browser_download_url: 'https://github.com/owner/repo/releases/download/v1.2.0/HromadaAID-Server-v1.2.0-win-x64.zip' },
 ] }
-const manifest = { formatVersion: 1, version: '1.2.0', platform: 'win32', architecture: 'x64', compatibility: { installer: 'hromadaaid-universal-nsis-v1', installModes: ['Client-only', 'Server-only', 'Combined'], api: { contract: 'hromadaaid-rest', version: 1 } }, artifacts: [
+const manifest = { formatVersion: 1, version: '1.2.0', platform: 'win32', architecture: 'x64', compatibility: { installer: 'hromadaaid-universal-nsis-v1', installModes: ['Client-only', 'Server-only', 'Combined'], api: { contract: 'hromadaaid-rest', version: 1 }, manager: { versionPolicy: 'same-release-version', apiContract: 'hromadaaid-rest', apiContractVersion: 1 } }, artifacts: [
   { component: 'installer', name: 'HromadaAID-Setup-1.2.0.exe', sha256: hash, sizeBytes: bytes.length },
   { component: 'server', name: 'HromadaAID-Server-v1.2.0-win-x64.zip', sha256: 'a'.repeat(64), sizeBytes: 100, packageIntegrity: 'embedded-package-integrity-v1' },
 ] }

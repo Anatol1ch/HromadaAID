@@ -45,6 +45,12 @@ export type InspectionSnapshot = {
 }
 
 export type ManagerInspectionApi = {
+  releaseUpdateState(): Promise<{ manager: import('./server-update-contract.js').ReleaseUpdateState; server: import('./server-update-contract.js').ServerReleaseState }>
+  checkReleaseUpdates(): Promise<{ manager: import('./server-update-contract.js').ReleaseUpdateState; server: import('./server-update-contract.js').ServerReleaseState }>
+  downloadManagerUpdate(): Promise<{ packagePath: string; version: string }>
+  installManagerUpdate(): Promise<boolean>
+  downloadServerRelease(): Promise<{ preview: import('./server-update-contract.js').ServerUpdatePreview }>
+  onReleaseUpdateState(listener: (value: { manager: import('./server-update-contract.js').ReleaseUpdateState; server: import('./server-update-contract.js').ServerReleaseState }) => void): () => void
   recoveryStatus(): Promise<import('./recovery-contract.js').RecoveryStatus>
   recoverOperation(kind: import('./recovery-contract.js').RecoveryKind, confirmed: true): Promise<{ success: boolean; message: string }>
   onRecoveryProgress(listener: (value: { message: string }) => void): () => void

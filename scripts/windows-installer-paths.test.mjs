@@ -405,8 +405,8 @@ test('package manifest records measured payload and support sizes for pre-copy d
 
 test('PowerShell path validator skips server data paths for client-only installation', async () => {
   const validator = await readFile(new URL('../packaging/windows-installer-paths.ps1', import.meta.url), 'utf8')
-  assert.match(validator, /ValidateSet\('client', 'server', 'server-client'\)/)
-  assert.match(validator, /if \(\$Mode -ne 'client'\)/)
+  assert.match(validator, /ValidateSet\('client', 'server', 'server-client', 'manager'\)/)
+  assert.match(validator, /if \(\$Mode -in @\('server', 'server-client'\)\)/)
   assert.match(validator, /\$paths = @\{ 'програми' = \$ProgramDirectory \}/)
   assert.match(validator, /Add-VolumeRequirement/)
   assert.match(validator, /SupportBytes \+ 8MB/)

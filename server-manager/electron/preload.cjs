@@ -1,6 +1,16 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('hromadaManager', Object.freeze({
+  releaseUpdateState: () => ipcRenderer.invoke('manager:release-update-state'),
+  checkReleaseUpdates: () => ipcRenderer.invoke('manager:check-release-updates'),
+  downloadManagerUpdate: () => ipcRenderer.invoke('manager:download-manager-update'),
+  installManagerUpdate: () => ipcRenderer.invoke('manager:install-manager-update'),
+  downloadServerRelease: () => ipcRenderer.invoke('manager:download-server-release'),
+  onReleaseUpdateState: listener => {
+    const handler = (_event, value) => listener(value)
+    ipcRenderer.on('manager:release-update-state', handler)
+    return () => ipcRenderer.removeListener('manager:release-update-state', handler)
+  },
   recoveryStatus: () => ipcRenderer.invoke('manager:recovery-status'),
   recoverOperation: (kind, confirmed) => ipcRenderer.invoke('manager:recover-operation', { kind, confirmed }),
   onRecoveryProgress: listener => {

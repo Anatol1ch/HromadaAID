@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto'
 import { compareVersions, checkLatestRelease, downloadVerifiedArtifact, parseStableVersion, validateReleaseManifest } from './release-updates.mjs'
 
 const digest = value => createHash('sha256').update(value).digest('hex')
-const manifest = (version = '1.2.0') => ({ formatVersion: 1, version, platform: 'win32', architecture: 'x64', compatibility: { installer: 'hromadaaid-universal-nsis-v1', installModes: ['Client-only', 'Server-only', 'Combined'], api: { contract: 'hromadaaid-rest', version: 1 } }, artifacts: [
+const manifest = (version = '1.2.0') => ({ formatVersion: 1, version, platform: 'win32', architecture: 'x64', compatibility: { installer: 'hromadaaid-universal-nsis-v1', installModes: ['Client-only', 'Server-only', 'Combined'], api: { contract: 'hromadaaid-rest', version: 1 }, manager: { versionPolicy: 'same-release-version', apiContract: 'hromadaaid-rest', apiContractVersion: 1 } }, artifacts: [
   { component: 'installer', name: `HromadaAID-Setup-${version}.exe`, sha256: 'a'.repeat(64), sizeBytes: 100 },
   { component: 'server', name: `HromadaAID-Server-v${version}-win-x64.zip`, sha256: 'b'.repeat(64), sizeBytes: 200, packageIntegrity: 'embedded-package-integrity-v1' },
 ] })
@@ -33,6 +33,7 @@ test('GitHub latest stable contract downloads manifest and resolves only its nam
   const release = { tag_name: 'v1.2.0', prerelease: false, draft: false, body: 'Оновлення', assets: [
     { name: 'release-manifest.json', browser_download_url: 'https://github.com/example/app/releases/download/v1.2.0/release-manifest.json' },
     { name: 'HromadaAID-Setup-1.2.0.exe', browser_download_url: 'https://github.com/example/app/releases/download/v1.2.0/HromadaAID-Setup-1.2.0.exe' },
+    { name: 'HromadaAID-Server-v1.2.0-win-x64.zip', browser_download_url: 'https://github.com/example/app/releases/download/v1.2.0/HromadaAID-Server-v1.2.0-win-x64.zip' },
   ] }
   const fetchImpl = async url => { const value = String(url).endsWith('releases/latest') ? release : manifest('1.2.0'); return { ok: true, status: 200, url: String(url), text: async () => JSON.stringify(value) } }
   const result = await checkLatestRelease({ repository: 'example/app', currentVersion: '1.1.9', fetchImpl })

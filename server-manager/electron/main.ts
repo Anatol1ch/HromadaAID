@@ -26,6 +26,7 @@ import { isServerBackupList, type ServerBackupList } from './backup-contract.js'
 import type { RecoveryKind, RecoveryStatus } from './recovery-contract.js'
 import { parseInstallerDiagnostic } from './server-install-diagnostic.js'
 import { assertRecoveryApiPermission, assertWindowsRecoveryAdministrator } from './recovery-authorization.js'
+import { createReleaseUpdater, setReleaseUpdaterQuit } from './release-updater.js'
 
 // An independent process and profile; only a narrow read-only inspection bridge is exposed.
 app.setName('HromadaAID Server Manager')
@@ -43,6 +44,7 @@ let preparedServerUpdate: PreparedServerUpdate | null = null
 let recoveryPrompt: { operationId: string; key: string; savedPath: string | null; resolve: (saved: boolean) => void } | null = null
 let backupOperationInProgress = false
 let recoveryInspectionInProgress = false
+let releaseUpdater: ReturnType<typeof createReleaseUpdater> | null = null
 let backupSession: { origin: string; token: string; user: { username: string; displayName: string | null } } | null = null
 const importedArchives = new Map<string, string>()
 const runBackupOperation = createExclusiveOperation(
@@ -188,6 +190,9 @@ function isTrustedRenderer(event: Electron.IpcMainInvokeEvent): boolean {
     return parsed.origin === devOrigin && parsed.pathname === '/'
   } catch { return false }
 }
+function requireManagerUpdateCleared(): void {
+  if (releaseUpdater?.getState().manager.confirmed) throw new Error('Звичайні функції Manager заблоковані до встановлення обов’язкового оновлення. Аварійне відновлення залишається доступним.')
+}
 function failedInspection(): InspectionSnapshot {
   const checkedAt = new Date().toISOString()
   const message = 'Перевірка середовища завершилася неочікуваною помилкою.'
@@ -268,6 +273,36 @@ if (!app.requestSingleInstanceLock()) app.quit()
 else {
   const inspectRequest = createInspectionRequestHandler(inspectWithUpdateReadiness, isTrustedRenderer, failedInspection)
   ipcMain.handle('manager:inspect-environment', event => inspectRequest(event))
+  ipcMain.handle('manager:release-update-state', event => { if (!isTrustedRenderer(event) || !releaseUpdater) throw new Error('UNTRUSTED_RENDERER'); return releaseUpdater.getState() })
+  ipcMain.handle('manager:check-release-updates', async event => {
+    if (!isTrustedRenderer(event) || !releaseUpdater) throw new Error('UNTRUSTED_RENDERER')
+    const snapshot = await inspectEnvironment(createWindowsInspectionAdapters())
+    releaseUpdater.setServerVersion(snapshot.configuration.serverVersion)
+    return releaseUpdater.check(snapshot.configuration.serverVersion)
+  })
+  ipcMain.handle('manager:download-manager-update', async event => {
+    if (!isTrustedRenderer(event) || !releaseUpdater) throw new Error('UNTRUSTED_RENDERER')
+    if (activeInstallId || activeUpdateId || backupOperationInProgress || serviceOperationInProgress || updatePreparationInProgress) throw new Error('Зачекайте завершення критичної операції.')
+    return releaseUpdater.download('installer')
+  })
+  ipcMain.handle('manager:install-manager-update', async event => {
+    if (!isTrustedRenderer(event) || !releaseUpdater) throw new Error('UNTRUSTED_RENDERER')
+    if (activeInstallId || activeUpdateId || backupOperationInProgress || serviceOperationInProgress || updatePreparationInProgress || preparedServerUpdate) throw new Error('Зачекайте завершення критичної операції або recovery.')
+    return releaseUpdater.installManager()
+  })
+  ipcMain.handle('manager:download-server-release', async event => {
+    if (!isTrustedRenderer(event) || !releaseUpdater) throw new Error('UNTRUSTED_RENDERER')
+    if (releaseUpdater.getState().manager.confirmed) throw new Error('Спочатку завершіть обов’язкове оновлення Server Manager; після перезапуску буде доступне оновлення API Server.')
+    if (recoveryInspectionInProgress || activeInstallId || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId || backupOperationInProgress || preparedServerUpdate) throw new Error('Зараз виконується інша системна операція.')
+    updatePreparationInProgress = true
+    try {
+      const downloaded = await releaseUpdater.download('server')
+      const prepared = await prepareServerUpdate(downloaded.packagePath, updateAdapters())
+      preparedServerUpdate = prepared
+      return { preview: prepared.preview }
+    } catch (error) { releaseUpdater.setServerError(error instanceof Error ? error.message : 'Не вдалося перевірити пакет API Server.'); throw error }
+    finally { updatePreparationInProgress = false }
+  })
   ipcMain.handle('manager:recovery-status', async event => {
     if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
     if (recoveryInspectionInProgress || backupOperationInProgress || activeInstallId || activeUpdateId || serviceOperationInProgress || updatePreparationInProgress) throw new Error('Зачекайте завершення поточної операції.')
@@ -315,6 +350,7 @@ else {
   })
   ipcMain.handle('manager:backup-login', async (event, input: unknown) => {
     if (!isTrustedRenderer(event) || !input || typeof input !== 'object') throw new Error('UNTRUSTED_RENDERER')
+    requireManagerUpdateCleared()
     const { username, password } = input as Record<string, unknown>
     if (typeof username !== 'string' || typeof password !== 'string' || !username.trim() || !password || password.length > 256) throw new Error('Вкажіть логін і пароль адміністратора.')
     const snapshot = await inspectEnvironment(createWindowsInspectionAdapters())
@@ -327,15 +363,17 @@ else {
     backupSession = { origin, token: result.token, user: { username: result.user.username, displayName: result.user.displayName } }
     return backupSession.user
   })
-  ipcMain.handle('manager:backup-logout', async event => { if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER'); try { if (backupSession) await backupRequest('/auth/logout', 'POST', {}) } finally { backupSession = null }; return true })
-  ipcMain.handle('manager:backup-session', event => { if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER'); return backupSession?.user ?? null })
-  ipcMain.handle('manager:backup-list', async event => { if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER'); requireBackupSession(); return getBackupList() })
+  ipcMain.handle('manager:backup-logout', async event => { if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER'); requireManagerUpdateCleared(); try { if (backupSession) await backupRequest('/auth/logout', 'POST', {}) } finally { backupSession = null }; return true })
+  ipcMain.handle('manager:backup-session', event => { if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER'); requireManagerUpdateCleared(); return backupSession?.user ?? null })
+  ipcMain.handle('manager:backup-list', async event => { if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER'); requireManagerUpdateCleared(); requireBackupSession(); return getBackupList() })
   ipcMain.handle('manager:backup-create', async event => {
     if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
+    requireManagerUpdateCleared()
     return runBackupOperation(async () => { await backupRequest('/api/backups/server', 'POST', {}); return await getBackupList() })
   })
   ipcMain.handle('manager:backup-export', async (event, id: unknown) => {
     if (!isTrustedRenderer(event) || typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) throw new Error('UNTRUSTED_RENDERER')
+    requireManagerUpdateCleared()
     const item = (await getBackupList()).archives.find(archive => archive.id === id)
     if (!item) throw new Error('Архів більше недоступний. Оновіть перелік.')
     const selected = await dialog.showSaveDialog(window!, { title: 'Експортувати резервний архів', defaultPath: item.fileName, filters: [{ name: 'Резервний архів HromadaAID', extensions: ['hraid'] }] })
@@ -353,6 +391,7 @@ else {
   })
   ipcMain.handle('manager:backup-import', async (event, recoveryKey: unknown) => {
     if (!isTrustedRenderer(event) || (recoveryKey !== undefined && (typeof recoveryKey !== 'string' || recoveryKey.length > 512))) throw new Error('UNTRUSTED_RENDERER')
+    requireManagerUpdateCleared()
     return runBackupOperation(async () => {
     const picked = await dialog.showOpenDialog(window!, { title: 'Імпортувати архів .hraid', properties: ['openFile'], filters: [{ name: 'Резервний архів HromadaAID', extensions: ['hraid'] }] })
     if (picked.canceled || !picked.filePaths[0]) return null
@@ -364,6 +403,7 @@ else {
   })
   ipcMain.handle('manager:backup-verify', async (event, id: unknown, recoveryKey: unknown) => {
     if (!isTrustedRenderer(event) || typeof id !== 'string' || (recoveryKey !== undefined && typeof recoveryKey !== 'string')) throw new Error('UNTRUSTED_RENDERER')
+    requireManagerUpdateCleared()
     return runBackupOperation(async () => {
     const snapshot = await inspectEnvironment(createWindowsInspectionAdapters())
     const imported = importedArchives.get(id)
@@ -380,6 +420,7 @@ else {
   })
   ipcMain.handle('manager:backup-open-folder', async event => {
     if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
+    requireManagerUpdateCleared()
     const snapshot = await inspectEnvironment(createWindowsInspectionAdapters()), path = snapshot.configuration.backupDirectory
     if (!path) throw new Error('Каталог резервних копій не визначено.')
     const { shell } = await import('electron')
@@ -389,6 +430,7 @@ else {
   })
   ipcMain.handle('manager:backup-restore', async (event, request: unknown) => {
     if (!isTrustedRenderer(event) || !request || typeof request !== 'object') throw new Error('UNTRUSTED_RENDERER')
+    requireManagerUpdateCleared()
     const value = request as Record<string, unknown>
     if (value.confirmed !== true || typeof value.id !== 'string' || (value.recoveryKey !== undefined && typeof value.recoveryKey !== 'string')) throw new Error('Потрібне явне підтвердження відновлення.')
     const archiveId = value.id
@@ -439,9 +481,10 @@ else {
     randomUUID,
     failedInspection,
   )
-  ipcMain.handle('manager:control-service', (event, operation: unknown) => serviceControlRequest(event, operation))
+  ipcMain.handle('manager:control-service', (event, operation: unknown) => { if (isTrustedRenderer(event)) requireManagerUpdateCleared(); return serviceControlRequest(event, operation) })
   ipcMain.handle('manager:select-server-update-package', async event => {
     if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
+    requireManagerUpdateCleared()
     if (recoveryInspectionInProgress || activeInstallId || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId || backupOperationInProgress) return { preview: null, code: 'OPERATION_BUSY', error: 'Зараз виконується інша системна операція.' }
     const selection = await dialog.showOpenDialog(window!, { title: 'Виберіть ZIP-пакет HromadaAID Server', properties: ['openFile'], filters: [{ name: 'ZIP-пакет сервера', extensions: ['zip'] }] })
     if (selection.canceled || !selection.filePaths[0]) return { preview: null }
@@ -470,6 +513,7 @@ else {
   })
   ipcMain.handle('manager:apply-server-update', async (event, previewId: unknown) => {
     if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
+    requireManagerUpdateCleared()
     if (typeof previewId !== 'string' || !preparedServerUpdate || preparedServerUpdate.preview.id !== previewId) return { operationId: randomUUID(), success: false, rolledBack: false, manualRecoveryRequired: false, message: 'Перевірений пакет уже недоступний. Виберіть ZIP повторно.' }
     if (recoveryInspectionInProgress || activeInstallId || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId || backupOperationInProgress) return { operationId: randomUUID(), success: false, rolledBack: false, manualRecoveryRequired: false, message: 'Зараз виконується інша системна операція.' }
     const prepared = preparedServerUpdate
@@ -477,7 +521,10 @@ else {
     activeUpdateId = operationId
     const send = (update: import('./server-update.js').ServerUpdateProgress) => { if (window && !window.isDestroyed() && isTrustedRenderer(event)) window.webContents.send('manager:server-update-progress', update) }
     try {
-      return await applyServerUpdate(prepared, updateAdapters(), operationId, send)
+      const result = await applyServerUpdate(prepared, updateAdapters(), operationId, send)
+      if (result.success) releaseUpdater?.markServerUpdated(prepared.preview.newVersion)
+      else releaseUpdater?.setServerError(result.message)
+      return result
     } finally {
       preparedServerUpdate = null
       activeUpdateId = null
@@ -501,6 +548,7 @@ else {
   })
   ipcMain.handle('manager:install-server', async (event, input: unknown) => {
     if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
+    requireManagerUpdateCleared()
     if (recoveryInspectionInProgress || activeInstallId || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId || preparedServerUpdate || backupOperationInProgress) throw new Error('INSTALLATION_ALREADY_RUNNING')
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('INSTALL_OPTIONS_INVALID')
     const request = input as ServerInstallRequest
@@ -558,6 +606,9 @@ else {
   })
   app.on('second-instance', () => { window?.restore(); window?.focus() })
   app.whenReady().then(async () => {
+    releaseUpdater = createReleaseUpdater({ currentVersion: app.getVersion(), resourcesPath: app.isPackaged ? process.resourcesPath : join(dirname(fileURLToPath(import.meta.url)), '../../assets'), sharedModulePath: app.isPackaged ? undefined : join(dirname(fileURLToPath(import.meta.url)), '../../shared/release-updates.mjs'), userDataPath: app.getPath('userData'), executablePath: app.getPath('exe'), processId: process.pid, publish: state => { if (window && !window.isDestroyed()) window.webContents.send('manager:release-update-state', state) } })
+    setReleaseUpdaterQuit(() => app.quit())
+    await releaseUpdater.restore()
     const isolatedSession = session.fromPartition('persist:server-manager')
     isolatedSession.setPermissionCheckHandler(() => false)
     isolatedSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
@@ -571,6 +622,11 @@ else {
       callback({ cancel: !allowed })
     })
     await openWindow()
+    const checkUpdates = async () => {
+      try { const snapshot = await inspectEnvironment(createWindowsInspectionAdapters()); releaseUpdater?.setServerVersion(snapshot.configuration.serverVersion); await releaseUpdater?.check(snapshot.configuration.serverVersion) } catch { /* updater reports its own recoverable failure */ }
+    }
+    setTimeout(() => { void checkUpdates() }, 0)
+    setInterval(() => { void checkUpdates() }, 3 * 60 * 60 * 1000)
   }).catch(() => {
     dialog.showErrorBox('HromadaAID Server Manager', 'Не вдалося відкрити інтерфейс. Перевірте збірку Server Manager та повторіть запуск.')
     app.exit(1)

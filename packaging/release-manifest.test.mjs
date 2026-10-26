@@ -14,6 +14,7 @@ test('release manifest records only the universal setup and existing server ZIP 
     assert.deepEqual(value.artifacts.map(item => item.component), ['installer', 'server'])
     assert.equal(value.artifacts[1].packageIntegrity, 'embedded-package-integrity-v1')
     assert.equal(await verifyReleaseManifest(directory, value), true)
+    await assert.rejects(verifyReleaseManifest(directory, { ...value, compatibility: { ...value.compatibility, manager: { ...value.compatibility.manager, apiContractVersion: 2 } } }), /сумісності/)
     await writeReleaseManifest(directory, '1.2.3')
     await assert.rejects(writeReleaseManifest(directory, '1.2.3'), /EEXIST/)
     await writeFile(join(directory, 'HromadaAID-Server-v1.2.3-win-x64.zip'), 'modified')

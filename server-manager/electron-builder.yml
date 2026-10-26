@@ -11,6 +11,10 @@ files:
 asar: true
 npmRebuild: false
 extraResources:
+  - from: assets/release-channel.json
+    to: release-channel.json
+  - from: packaging/client-update-launcher.ps1
+    to: component-update-launcher.ps1
   - from: release/installer-payload/Server
     to: server-payload
   - from: assets
