@@ -45,6 +45,29 @@ Stage 9.1.3 та Stage 9.1 не завершені; production readiness не з
 
 ## Версії та наступні кроки
 
+### 0.1.5 — launcher CWD hotfix та оформлення Setup
+
+**IMPLEMENTED; VM PENDING.** Bootstrap і незалежний launcher працюють із user-data
+updates directory; NSIS має явний CWD поза компонентом. Recovery/swap, UAC,
+handoff, marker/version verification і restart збережені. Setup отримав
+узгоджений Segoe UI, правий логотип і компактніший welcome без зміни порядку
+сторінок чи штатного розміру MUI2. Source версії всіх компонентів — `0.1.5`.
+Цільові launcher/Client/Manager/NSIS/packaging, payload/integrity/provider і
+production ZIP tests: **57 PASS, 0 FAIL, 0 SKIP**. Production builds, фінальна
+NSIS compilation, archive/integrity, точні templates та release manifest — PASS.
+
+Власник повідомив VM PASS Client 0.1.3 → 0.1.4 та VM FAIL Manager 0.1.3 → 0.1.4.
+Launcher старого Manager утримував CWD у ServerManager; конкретна помилка Rename
+не журналювалася. Нове виправлення ще потребує VM-підтвердження. Для встановлення
+0.1.5 поверх старого Manager рекомендовано ручний Setup поза його каталогом:
+старий auto-updater запускає старий launcher і може повторити проблему.
+
+Production packaging та artifact verification завершено: у `release/0.1.5/`
+є Setup, Server ZIP, manifest і release notes. Git-етап передбачає один
+release commit, звичайний push і annotated tag 0.1.5. GitHub Release публікує
+власник вручну. Після публікації — Windows VM acceptance; історичні checkpoints
+0.1.4 нижче не означають поточний статус релізу 0.1.5.
+
 `0.1.2` — попередній Stable Release. `0.1.3` — останній опублікований Stable
 hotfix. Source version піднято до `0.1.4`; production Setup, Server ZIP, manifest і
 release notes локально підготовлено в `release/0.1.4/`. Tag і GitHub Release `0.1.4`

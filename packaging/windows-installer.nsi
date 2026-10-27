@@ -8,6 +8,7 @@ InstallDir "$PROGRAMFILES64\HromadaAID"
 InstallDirRegKey HKLM "Software\HromadaAID\Installer" "ProgramDirectory"
 ShowInstDetails hide
 ShowUnInstDetails hide
+BrandingText " "
 
 !include "MUI2.nsh"
 !include "nsDialogs.nsh"
@@ -71,14 +72,15 @@ Var WelcomeDescription
 !define MUI_ICON "${PROJECT_DIR}\assets\hromadaaid.ico"
 !define MUI_UNICON "${PROJECT_DIR}\assets\hromadaaid.ico"
 !define MUI_HEADERIMAGE
+!define MUI_HEADERIMAGE_RIGHT
 !define MUI_HEADERIMAGE_BITMAP "${PROJECT_DIR}\assets\hromadaaid-installer-header.bmp"
 !define MUI_HEADERIMAGE_UNBITMAP "${PROJECT_DIR}\assets\hromadaaid-installer-header.bmp"
 !define MUI_HEADERIMAGE_BITMAP_STRETCH AspectFitHeight
 !define MUI_HEADERIMAGE_UNBITMAP_STRETCH AspectFitHeight
 !define MUI_BGCOLOR "FFFFFF"
-!define MUI_TEXTCOLOR "286343"
-!define MUI_FINISHPAGE_TITLE "Операцію з HromadaAID завершено"
-!define MUI_FINISHPAGE_TEXT "Зміни до складу HromadaAID застосовано. Доступні компоненти можна відкрити через меню «Пуск»."
+!define MUI_TEXTCOLOR "24352C"
+!define MUI_FINISHPAGE_TITLE "Готово"
+!define MUI_FINISHPAGE_TEXT "Вибрану операцію завершено. Застосунки доступні в меню «Пуск». Після автоматичного оновлення застосунок відкриється самостійно."
 !define MUI_FINISHPAGE_BUTTON "Готово"
 !define MUI_INSTFILESPAGE_FINISHHEADER_TEXT "Операцію завершено"
 !define MUI_INSTFILESPAGE_FINISHHEADER_SUBTEXT "Перейдіть далі, щоб закрити майстер."
@@ -124,6 +126,8 @@ Page custom ModePageCreate ModePageLeave "Вибір компонентів"
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_UNPAGE_FINISH
 !insertmacro MUI_LANGUAGE "Ukrainian"
+LangString ^Font ${LANG_UKRAINIAN} "Segoe UI"
+LangString ^FontSize ${LANG_UKRAINIAN} "9"
 
 Section -CloseApplications
   ${If} $ClientUpdateMode != "1"
@@ -569,8 +573,19 @@ Function WelcomePageCreate
     Abort
   ${EndIf}
   !insertmacro MUI_HEADER_TEXT "$WelcomeHeader" ""
-  ${NSD_CreateLabel} 0u 24u 100% 72u "$WelcomeDescription"
+  SetCtlColors $WelcomeDialog 24352C FFFFFF
+  ${NSD_CreateLabel} 0u 4u 100% 2u ""
   Pop $0
+  SetCtlColors $0 286343 286343
+  ${NSD_CreateLabel} 0u 16u 100% 14u "Версія ${APP_VERSION}"
+  Pop $0
+  SetCtlColors $0 286343 FFFFFF
+  ${NSD_CreateLabel} 0u 38u 100% 48u "$WelcomeDescription"
+  Pop $0
+  SetCtlColors $0 24352C FFFFFF
+  ${NSD_CreateLabel} 0u 100u 100% 26u "Натисніть «Далі», щоб продовжити."
+  Pop $0
+  SetCtlColors $0 59675F FFFFFF
   nsDialogs::Show
 FunctionEnd
 

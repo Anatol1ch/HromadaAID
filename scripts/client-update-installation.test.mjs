@@ -54,7 +54,7 @@ function Remove-Item {
   Microsoft.PowerShell.Management\\Remove-Item -LiteralPath $LiteralPath -Force:$Force -ErrorAction Stop
 }
 function Start-Process {
-  param([string]$FilePath, [string[]]$ArgumentList, [string]$Verb, [switch]$PassThru)
+  param([string]$FilePath, [string[]]$ArgumentList, [string]$Verb, [switch]$PassThru, [string]$WorkingDirectory)
   if ($FilePath -eq $setup) {
     if ($Verb -ne 'RunAs' -or $ArgumentList.Count -ne 1 -or $ArgumentList[0] -ne '${component === 'Client' ? '/CLIENTUPDATE=1' : '/MANAGERUPDATE=1'}') { throw 'Incorrect selective UAC invocation' }
     Add-Content -LiteralPath ${literal(installs)} -Value 'attempt'

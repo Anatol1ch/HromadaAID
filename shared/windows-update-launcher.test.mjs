@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchUpdatePowerShell, windowsPowerShellPath, quoteWindowsArgument } from './windows-update-launcher.mjs'
@@ -17,9 +17,14 @@ test('PowerShell uses a fixed system path and Windows argv quoting', () => {
 const harmlessScript = `param([string]$ReadyPath, [string]$HandoffPath)
 [Console]::Out.WriteLine('stdout-before-ready')
 [Console]::Error.WriteLine('stderr-before-ready')
+[IO.File]::WriteAllText(($ReadyPath + '.cwd'), (Get-Location).Path)
 [IO.File]::WriteAllText($ReadyPath, (@{launcherProcessId=$PID} | ConvertTo-Json -Compress))
 while (!(Test-Path -LiteralPath $HandoffPath)) { Start-Sleep -Milliseconds 50 }
-Start-Sleep -Milliseconds 1200
+$deadline = [DateTime]::UtcNow.AddSeconds(15)
+while (!(Test-Path -LiteralPath ($ReadyPath + '.continue'))) {
+  if ([DateTime]::UtcNow -gt $deadline) { exit 1 }
+  Start-Sleep -Milliseconds 50
+}
 [Console]::Out.WriteLine('stdout-after-parent-exit')
 [Console]::Error.WriteLine('stderr-after-parent-exit')
 [IO.File]::WriteAllText(($ReadyPath + '.completed'), 'completed')
@@ -44,26 +49,35 @@ const waitForProcessExit = async pid => {
   assert.fail(`Synthetic launcher ${pid} has not exited; timeout is not completion`)
 }
 
-for (const runtime of ['Node', 'Electron']) test(`independent PowerShell and redirected files survive ${runtime} parent exit`, { skip: process.platform !== 'win32' }, async () => {
+for (const runtime of ['Node', 'Electron']) test(`independent PowerShell survives ${runtime} exit and allows Manager directory swap`, { skip: process.platform !== 'win32' }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'hromada-handoff-І-'))
   try {
+    const active = join(root, 'ServerManager'), updates = join(root, 'updates')
+    await mkdir(active); await mkdir(active + '.next')
     const source = join(root, 'synthetic & (script).ps1')
     await writeFile(source, harmlessScript)
     const parentPath = join(root, 'parent.mjs')
     await writeFile(parentPath, `import {launchUpdatePowerShell} from ${JSON.stringify(new URL('./windows-update-launcher.mjs', import.meta.url).href)};
-await launchUpdatePowerShell({updateDirectory:${JSON.stringify(root)},launcherPath:${JSON.stringify(source)},launcherArguments:[],logEvent:async()=>{}}); process.exit(0);`)
+await launchUpdatePowerShell({updateDirectory:${JSON.stringify(updates)},launcherPath:${JSON.stringify(source)},launcherArguments:[],logEvent:async(stage, details)=>{ if(stage==='powershell-launch-requested') { const {writeFile}=await import('node:fs/promises'); await writeFile(${JSON.stringify(join(root, 'request.json'))},JSON.stringify(details)); } }}); process.exit(0);`)
     const result = await new Promise((resolve, reject) => {
-      const child = spawn(runtime === 'Electron' ? createRequire(import.meta.url)('electron') : process.execPath, [parentPath], { env: runtime === 'Electron' ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' } : process.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      const child = spawn(runtime === 'Electron' ? createRequire(import.meta.url)('electron') : process.execPath, [parentPath], { cwd: active, env: runtime === 'Electron' ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' } : process.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
       let stderr = ''; child.stderr.on('data', bytes => { stderr += bytes })
       child.once('error', reject); child.once('exit', code => resolve({ code, stderr }))
     })
     assert.equal(result.code, 0, result.stderr)
-    const directory = join(root, (await readdir(root)).find(name => name.startsWith('launcher-')))
+    const directory = join(updates, (await readdir(updates)).find(name => name.startsWith('launcher-')))
+    assert.equal(JSON.parse(await readFile(join(directory, 'config.json'), 'utf8')).cwd, updates)
+    assert.equal(JSON.parse(await readFile(join(root, 'request.json'), 'utf8')).cwd, updates)
+    assert.equal(await readFile(join(directory, 'ready.json.cwd'), 'utf8'), updates)
+    const metadata = JSON.parse(await readFile(join(directory, 'result.json'), 'utf8'))
+    assert.equal(metadata.status, 'ready'); assert.ok(metadata.launcherProcessId > 0)
+    process.kill(metadata.launcherProcessId, 0)
+    await rename(active, active + '.previous')
+    await rename(active + '.next', active)
+    await writeFile(join(directory, 'ready.json.continue'), 'continue')
     await waitForFile(join(directory, 'ready.json.completed'))
     assert.match(await readFile(join(directory, 'stdout.log'), 'utf8'), /stdout-after-parent-exit/)
     assert.match(await readFile(join(directory, 'stderr.log'), 'utf8'), /stderr-after-parent-exit/)
-    const metadata = JSON.parse(await readFile(join(directory, 'result.json'), 'utf8'))
-    assert.equal(metadata.status, 'ready'); assert.ok(metadata.launcherProcessId > 0)
     await waitForProcessExit(metadata.launcherProcessId)
   } finally { await rm(root, { recursive: true, force: true }) }
 })

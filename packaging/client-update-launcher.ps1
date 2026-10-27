@@ -80,7 +80,7 @@ try {
   $attemptStartedUtc = [DateTime]::UtcNow
   $mode = if ($Component -eq 'Client') { '/CLIENTUPDATE=1' } else { '/MANAGERUPDATE=1' }
   Write-UpdateLog 'elevation-requested' @{ arguments = @($mode); installerExists = (Test-Path -LiteralPath $InstallerPath -PathType Leaf); installerLength = (Get-Item -LiteralPath $InstallerPath).Length; attemptStartedUtc = $attemptStartedUtc.ToString('o') }
-  $process = Start-Process -FilePath $InstallerPath -ArgumentList @($mode) -Verb RunAs -PassThru
+  $process = Start-Process -FilePath $InstallerPath -ArgumentList @($mode) -Verb RunAs -PassThru -WorkingDirectory (Split-Path -Parent $InstallerPath)
   if (-not $process) { $failureMessage = 'Windows не підтвердив створення процесу Setup.'; throw $failureMessage }
   $null = $process.Handle
   Write-UpdateLog 'installer-process-created' @{ childProcessId = $process.Id; arguments = @($mode) }

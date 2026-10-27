@@ -148,8 +148,9 @@ function New-FakeProcess([int]$id, [int]$exitCode) {
   return $p
 }
 function Start-Process {
-  param([string]$FilePath, [string[]]$ArgumentList, [string]$Verb, [switch]$PassThru)
+  param([string]$FilePath, [string[]]$ArgumentList, [string]$Verb, [switch]$PassThru, [string]$WorkingDirectory)
   if ($FilePath -eq $installer) {
+    if ($WorkingDirectory -ne (Split-Path -Parent $installer)) { throw 'Installer working directory is unsafe.' }
     if ($Verb -ne 'RunAs' -or $ArgumentList -notcontains '/CLIENTUPDATE=1') { throw 'Incorrect elevated installer invocation.' }
     ${cancel ? "throw [System.ComponentModel.Win32Exception]::new(1223)" : "Set-Content -LiteralPath (Join-Path (Split-Path -Parent $executable) 'client-update-success.txt') -Value '1.2.0'\n    return New-FakeProcess 4321 0"}
   }

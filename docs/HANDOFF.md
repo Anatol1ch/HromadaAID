@@ -1,11 +1,59 @@
 # Контекст для наступного чату
 
-Оновлено 2026-10-27 після локального production packaging 0.1.4.
+Оновлено 2026-10-27 під час підготовки hotfix 0.1.5.
 Це поточний checkpoint; технічна реалізація — у [ARCHITECTURE.md](ARCHITECTURE.md),
 домовленості — у [DECISIONS.md](DECISIONS.md), план — у [ROADMAP.md](ROADMAP.md),
 сценарії та історія VM — у [manual testing](stage-9.1.3-manual-testing.md).
 
 ## Git і версії
+
+Поточний релізний етап — **0.1.5**: виправлення CWD незалежного launcher-а й
+компактніше оформлення Universal Setup. Початковий HEAD — `d52b456d`, гілка
+`feature/client-server`, робоче дерево було чисте та синхронізоване з origin.
+Production source усіх компонентів узгоджено на `0.1.5`; same-release-version
+збережено. Нижче описи підготовки 0.1.4 залишено як історичні checkpoints.
+
+### 0.1.5 — реалізація та перевірки
+
+- Bootstrap й незалежний PowerShell використовують наявний user-data updates
+  directory, створений до запуску. NSIS явно запускається з каталогу Setup.
+  Launcher більше не утримує CWD у Client/ServerManager під час заміни файлів.
+  Handoff, UAC, свіжий marker, EXE version verification, restart і NSIS recovery
+  збережено. Regression test із Node та Electron-as-Node перевіряє swap Manager,
+  поки незалежний PowerShell живий після виходу батьківського процесу.
+- NSIS використовує Segoe UI, логотип праворуч, зелену акцентну лінію, компактний
+  блок версії/опису та коротке завершення. Штатні розмір MUI2 і порядок сторінок
+  збережено; власний UI engine не додавався.
+- Власник підтвердив Client auto-update **0.1.3 → 0.1.4 VM PASS**, restart і
+  збереження даних. Manager **0.1.3 → 0.1.4 VM FAIL**: launcher PID 5076 мав CWD
+  у ServerManager; NSIS exit 2, marker відсутній, стара 0.1.3 перезапущена.
+  Утримання CWD доведено кодом і журналом; конкретний native Rename error не
+  записувався, тому причинність цього окремого збою лишається найімовірнішою.
+- Для доставки 0.1.5 зі старих Manager може знадобитися ручний запуск Setup
+  ззовні ServerManager: завантажений новий Setup не змінює старий launcher,
+  який уже запущений. Подальше оновлення з установленої 0.1.5 перевіряється окремо.
+- Цільові launcher/Client/Manager/NSIS/marker/shortcut/packaging/manifest,
+  payload-resolver/integrity/provider та production ZIP tests:
+  **57 PASS / 0 FAIL / 0 SKIP**. Production Client/API/Manager build і фінальна
+  NSIS compilation — PASS. Початкову непідтримувану директиву Font замінено
+  штатними LangString ^Font/^FontSize; повторно компілювався лише Setup.
+  Windows 10/11 GUI, UAC, реальний Manager
+  swap і restart з новим CWD — **VM PENDING**.
+
+У `release/0.1.5/` підготовлено Setup, Server ZIP, release manifest і українські
+release notes. Manifest штатно створений і перевірений за SHA-256/size;
+Server ZIP пройшов archive/integrity/runtime checks і справжню підготовку
+Server.next на синтетичних даних (без SCM). Файли, витягнуті з фінального Setup,
+побайтно збігаються з перевіреними ASAR/PowerShell/Server integrity payloads.
+Три Client templates збігаються з tracked originals, Реєстр.xlsx відсутній;
+Manager містить тільки installer helpers без дубльованого Server runtime.
+Усі секції NSIS install/swap/recovery/registry/shortcuts/uninstall незмінні;
+`git diff --check` — PASS. Production payloads і артефакти залишаються поза Git.
+
+Наступний крок — ручна публікація GitHub Release 0.1.5 власником із перевіреної
+гілки та annotated tag, потім Windows VM acceptance. У цьому етапі дозволені
+один release commit, звичайний push і tag; GitHub Release не створюється.
+Stage 9.1.3/9.1 не позначати завершеними.
 
 - Робоча гілка: `feature/client-server`; Git remote: `origin` — публічний
   `Anatol1ch/HromadaAID`.

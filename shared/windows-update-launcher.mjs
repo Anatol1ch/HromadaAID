@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { closeSync, openSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { join, win32 } from 'node:path'
+import { join, resolve, win32 } from 'node:path'
 
 export function windowsPowerShellPath(systemRoot = process.env.SystemRoot) {
   if (!systemRoot || !win32.isAbsolute(systemRoot)) throw new Error('Не визначено системний каталог Windows PowerShell.')
@@ -51,13 +51,15 @@ if ($result.status -ne 'ready') { exit 1 }
 export async function launchUpdatePowerShell(options) {
   const { updateDirectory, launcherPath, launcherArguments, logEvent, spawnProcess = spawn, readyTimeoutMs = 15000 } = options
   const executable = windowsPowerShellPath()
+  // Never retain a working-directory handle inside a component being replaced.
+  const workingDirectory = resolve(updateDirectory)
   const directory = join(updateDirectory, `launcher-${randomUUID()}`)
   await mkdir(directory, { recursive: true })
   const paths = Object.fromEntries(['stdout', 'stderr', 'bootstrap.stdout', 'bootstrap.stderr'].map(name => [name, join(directory, `${name}.log`)]))
   const readyPath = join(directory, 'ready.json'), resultPath = join(directory, 'result.json'), handoffPath = join(directory, 'handoff.confirmed')
   const scriptPath = join(directory, 'bootstrap.ps1'), configPath = join(directory, 'config.json')
   const args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', launcherPath, ...launcherArguments, '-ReadyPath', readyPath, '-HandoffPath', handoffPath]
-  const config = { executable, argumentLine: args.map(quoteWindowsArgument).join(' '), cwd: process.cwd(), stdoutPath: paths.stdout, stderrPath: paths.stderr, readyPath, resultPath, readyTimeoutMs }
+  const config = { executable, argumentLine: args.map(quoteWindowsArgument).join(' '), cwd: workingDirectory, stdoutPath: paths.stdout, stderrPath: paths.stderr, readyPath, resultPath, readyTimeoutMs }
   await writeFile(scriptPath, '\uFEFF' + bootstrapScript, { flag: 'wx' })
   await writeFile(configPath, JSON.stringify(config), { flag: 'wx' })
   // Pre-create all files. Only ordinary file handles are inherited, never Electron pipes.
@@ -73,7 +75,7 @@ export async function launchUpdatePowerShell(options) {
       try {
         // detached:true gives Windows PowerShell 5.1 no console and can exit 0 before -File.
         // This short bootstrap stays with Electron; Start-Process creates the independent launcher.
-        bootstrap = spawnProcess(executable, bootstrapArgs, { detached: false, windowsHide: true, stdio: ['ignore', descriptors[2], descriptors[3]] })
+        bootstrap = spawnProcess(executable, bootstrapArgs, { cwd: workingDirectory, detached: false, windowsHide: true, stdio: ['ignore', descriptors[2], descriptors[3]] })
         bootstrap.once('spawn', () => { void logEvent('powershell-process-created', { processId: bootstrap.pid ?? null, role: 'bootstrap' }).catch(() => {}) })
         bootstrap.once('error', fail)
         bootstrap.once('exit', (code, signal) => { clearTimeout(timeout); resolve({ code, signal }) })
