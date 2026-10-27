@@ -176,6 +176,22 @@ ClientSelected. Звичайний режим використовує вибр�
 користувацькі ярлики зберігаються. API ZIP updater ярликами не керує. Єдиний
 Installed Apps запис і склад компонентів зберігає NSIS metadata section.
 
+### Welcome та UI оновлень у 0.1.4
+
+Звичайний запуск Universal Setup проходить Welcome → Components; welcome
+класифікує лише достовірний стан інсталяції, не визначаючи наперед намір змінити
+склад компонентів. `/CLIENTUPDATE=1` і `/MANAGERUPDATE=1` показують власний update
+welcome та штатно пропускають Components. Обидва режими залишаються незалежними; API
+Server оновлюється окремо через Server Manager.
+
+На сторінці Manager «Оновлення» три наявні картки розміщують головні дії у правій
+колонці. Client і Manager використовують спільні `ReleaseUpdateDetails`, `ReleaseNotes`
+та `ReleaseUpdateProgress`; ZIP download показує фактичні байти/розмір або
+невизначений прогрес, а стадії серверної транзакції відображаються окремо після
+завантаження. Довгі release notes розгортаються через `details`; оновлення цього UI
+не змінює IPC, updater чи серверну транзакцію. Ручна Windows VM-перевірка цих UX
+змін залишається окремим acceptance кроком.
+
 TypeScript/React/Vite, Electron, pnpm; конфігурації й команди в `package.json`,
 `server/package.json`, `server-manager/electron-builder.yml`. NSIS Unicode + MUI2
 і nsDialogs дають єдиний Setup з одним Installed Apps записом; програмні файли

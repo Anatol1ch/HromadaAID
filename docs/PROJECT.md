@@ -30,15 +30,16 @@ Client не має автономної робочої SQLite або адмін�
 
 ## Межі поточної версії
 
-Поточна версія вихідного коду й локально підготовлених артефактів — `0.1.2`;
-опубліковані Stable `0.1.0` і `0.1.1` у публічному `Anatol1ch/HromadaAID` не
-змінювалися. Stable `0.1.2` ще не опублікований і не пройшов Windows VM-перевірку.
-Stage 9.1.3 триває: реалізація оновлень є, але обсяг VM-підтверджень різний для
-компонентів. Поточна матриця перевірок —
-у [HANDOFF.md](HANDOFF.md), практичні сценарії — у
-[manual testing](stage-9.1.3-manual-testing.md). Production readiness не заявляється.
-Локальний комплект `0.1.2` підготовлено для окремого review та майбутнього VM-тесту.
-Tailscale залишається окремим майбутнім етапом.
+Останній опублікований Stable Release — `0.1.3`; `0.1.2` є попереднім Stable.
+Поточні package metadata та source version — `0.1.3`; розробка ведеться для
+майбутнього `0.1.4`. GitHub Release `0.1.3` опубліковано, але чисте встановлення
+Server-only/Combined після hotfix і API health у Windows VM ще очікують приймального
+тесту. У `0.1.4` реалізовано UX-зміни Universal Setup та сторінки оновлень Manager;
+їхня візуальна перевірка у Windows VM і production packaging залишаються pending.
+Stage 9.1.3 і 9.1 не завершені; production readiness не заявляється. Поточна матриця
+перевірок — у [HANDOFF.md](HANDOFF.md), практичні сценарії Stage 9.1.3 — у
+[manual testing](stage-9.1.3-manual-testing.md). Tailscale залишається окремим
+майбутнім етапом.
 
 Технічні межі: [ARCHITECTURE.md](ARCHITECTURE.md). Подальша робота:
 [ROADMAP.md](ROADMAP.md). Актуальний checkpoint і перевірки: [HANDOFF.md](HANDOFF.md).

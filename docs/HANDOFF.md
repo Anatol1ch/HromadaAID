@@ -1,27 +1,23 @@
 # Контекст для наступного чату
 
-Оновлено 2026-10-27 під час підготовки Stable 0.1.3 hotfix.
+Оновлено 2026-10-27 під час синхронізації документації перед підготовкою 0.1.4.
 Це поточний checkpoint; технічна реалізація — у [ARCHITECTURE.md](ARCHITECTURE.md),
 домовленості — у [DECISIONS.md](DECISIONS.md), план — у [ROADMAP.md](ROADMAP.md),
 сценарії та історія VM — у [manual testing](stage-9.1.3-manual-testing.md).
 
-## Git і версія
+## Git і версії
 
-- Робоча гілка: `feature/client-server`. Перед консолідацією HEAD і remote branch:
-  `b1fae6ff21111e26dad6242786106213dd54659d` (Stable 0.1.1 preparation).
-  Поточні commit hashes перевіряти через `git log`; HANDOFF не дублює власний SHA.
-- На початку: 22 змінені tracked файли й 7 untracked source/test файлів. Випадкових
-  EXE/ZIP/logs/databases серед них не було. Staged changes та незавершені Git
-  merge/rebase/cherry-pick/revert/sequencer операції були відсутні.
-- `git ls-remote` підтвердив origin/default `feature/client-server`, гілки
-  `main` і `feature/client-server`, теги `0.1.0` і `0.1.1`. `origin/main` є предком
-  feature HEAD. Push/merge/rebase/tags у консолідації не виконуються.
-- Stable **0.1.2 опубліковано**. Після чистого встановлення у Windows 10 x64 VM
-  виявлено блокер первинного налаштування: Manager обирає helper-only
-  `resources/server-payload` замість повного `Server.next`.
-- Поточна робота готує виправний Stable **0.1.3** без нових можливостей. Код і
-  production build підготовлені локально; чисте встановлення у Windows VM та
-  публікація залишаються pending.
+- Робоча гілка: `feature/client-server`; Git remote: `origin` — публічний
+  `Anatol1ch/HromadaAID`.
+- Перед цією документаційною консолідацією локальний HEAD був
+  `9040574982efbbb3428f4b438c56d4caeaf0a6d5`, робоче дерево чисте, а origin
+  відставав на три коміти: `1d06286`, `b260045` і `90405749`. Після документаційного
+  коміту та звичайного push гілка чиста й синхронізована з origin. Незавершених
+  merge/rebase/cherry-pick/revert операцій немає.
+- Stable `0.1.3` опубліковано на GitHub; tag `0.1.3` вказує на hotfix commit
+  `ada0c8bed6989cedbb25b83efe1cd451642bdaae`. Tag `0.1.4` не створювався.
+- Остання опублікована версія — **0.1.3**; package/source version лишається `0.1.3`.
+  Розробка `0.1.4` триває. Stage 9.1.3 і Stage 9.1 не завершені.
 
 ## Stage 9.1.3: фактичний стан
 
@@ -141,7 +137,7 @@ Stable 0.1.2 опубліковано з цими перевіреними ар�
 installer/recovery helpers. Отже, відсутність Service та `server.json` є наслідком
 блокування до запуску первинного майстра, а не самостійно підтвердженими дефектами.
 
-## Stable 0.1.3 hotfix — локально підготовлено
+## Stable 0.1.3 hotfix — опубліковано; VM acceptance pending
 
 Source-виправлення обирає bundled Server лише за наявності його integrity manifest;
 helper-only payload переходить до повного `Server.next`, а відсутність повного пакета
@@ -156,10 +152,11 @@ Server Manager TypeScript no-emit checks пройшли. Setup та Server ZIP �
 архівну/ціліснісну перевірку, release manifest створено штатним генератором і
 перевірено. Client ASAR містить три tracked Excel templates; `Реєстр.xlsx` відсутній.
 Setup містить повний `Server.next/package-integrity.json`, helper-only Manager
-payload та не дублює Server runtime у Manager resources. Code signing не
-налаштований; реальні Windows UAC, NSIS, первинне Server-only/Combined налаштування та
-API health після hotfix не перевірялися. Отже, це локально підготовлений комплект, а
-не VM-verified реліз. Stage 9.1.3 і Stage 9.1 не завершені.
+payload та не дублює Server runtime у Manager resources. GitHub Stable Release
+`0.1.3` опубліковано; code signing не налаштований. Реальні Windows UAC, NSIS,
+первинне Server-only/Combined налаштування та API health після hotfix не перевірялися.
+Публікація не є підтвердженням Windows VM acceptance. Stage 9.1.3 і Stage 9.1 не
+завершені.
 
 Артефакти: `release/stage-9.1.3/stable-0.1.3/`. SHA-256: Setup
 `764b033bb5eebe53081b73cd8b6e201f6c431049341c5922987ef3e631fb7811`, Server ZIP
@@ -175,9 +172,9 @@ history і не повторювати оцінку XLSX. Реєстр.xlsx ві
 артефакти ігноруються. Зміни source не додали виявлених production credentials чи
 даних; це цільова перевірка diff, а не повторний аудит усієї історії.
 
-Наступний крок — окремий чистий Server-only/Combined Windows 10 x64 VM-тест
-підготовленого 0.1.3; після цього потрібне окреме погодження публікації. Заплановані
-зміни інтерфейсу Server Manager та інсталятора перенесені на 0.1.4.
+Наступні окремі етапи для `0.1.4`: production packaging із version bump і трьома
+релізними артефактами, ручна публікація власником, а потім Windows VM acceptance.
+Жоден із цих кроків не вважати виконаним до відповідного підтвердження.
 
 ## 0.1.4 — спрощення NSIS welcome та selective update UX
 
@@ -222,3 +219,4 @@ transaction, Service, recovery та restart не змінювалися.
 відсотка без розміру та події байтів/перехід verifying → ready). Два Manager/Client
 UI TypeScript no-emit checks пройшли. Windows VM-візуальна перевірка кнопок, довгих
 release notes, невідомого download size і вузького вікна залишається PENDING.
+Production packaging `0.1.4`, version bump і GitHub publication ще не виконувалися.

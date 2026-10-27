@@ -16,11 +16,10 @@ readiness. Обмеження перевірок — у [HANDOFF.md](HANDOFF.md)
 
 ## Stage 9.1.3 — триває
 
-Stable 0.1.0, 0.1.1 і 0.1.2 опубліковані. Чисте встановлення 0.1.2 на Windows 10
-x64 VM виявило блокер: Manager вибирає helper-only resources замість повного
-`Server.next`, після чого перевірка integrity зупиняє первинний wizard до створення
-`server.json` і Service. Готується мінімальний Stable 0.1.3 hotfix; функціональні
-зміни інсталятора та Server Manager перенесено на 0.1.4.
+Stable `0.1.2` — попередній опублікований реліз. Stable `0.1.3` hotfix також
+опубліковано; після виправлення clean Server-only/Combined setup та API health у
+Windows 10 x64 VM ще потребують підтвердження. Функціональні зміни інсталятора й
+Server Manager ведуться окремо для `0.1.4`.
 
 | Напрям | Поточний статус | Межі доказів |
 | --- | --- | --- |
@@ -31,7 +30,7 @@ x64 VM виявило блокер: Manager вибирає helper-only resources
 | Windows shortcuts | IMPLEMENTED / AUTOMATED PASS; VM PENDING | Дефект видалення Client-ярликів підтверджено; виправлення й цільові тести 14/14 PASS, повторний VM-тест pending |
 | Відмови / recovery / UAC retry | PENDING у VM | Автоматичні synthetic/mock перевірки не замінюють реальні Windows сценарії |
 | Stable 0.1.2 clean server setup | VM FAIL | `package.verify / ENOENT` на helper-only Manager payload; Service і server.json не створилися, бо setup зупинився раніше |
-| Stable 0.1.3 hotfix | LOCAL BUILD / AUTOMATED PASS; VM PENDING | Payload resolver використовує повний `Server.next`, не послаблює integrity checks; build і manifest перевірені. Чистий Server-only/Combined VM test та публікація pending |
+| Stable 0.1.3 hotfix | PUBLISHED; VM ACCEPTANCE PENDING | Payload resolver використовує повний `Server.next`, не послаблює integrity checks; production build і manifest були перевірені до публікації. Чистий Server-only/Combined VM test та API health після hotfix ще не підтверджені |
 
 Під час консолідації 2026-10-27: updater/launcher/manifest/NSIS/packaging —
 **40/40 AUTOMATED PASS**; чотири релевантні TypeScript no-emit checks пройшли.
@@ -44,41 +43,44 @@ fixture), два Manager TypeScript no-emit checks пройшли. Усі рез
 Матриця сценаріїв і попередні FAIL: [manual testing](stage-9.1.3-manual-testing.md).
 Stage 9.1.3 та Stage 9.1 не завершені; production readiness не заявляється.
 
-## Погоджена послідовність 0.1.2 → 0.1.3 → 0.1.4
+## Версії та наступні кроки
 
-Stable 0.1.2 уже опубліковано. 0.1.3 — виправний реліз без функціональних змін;
-майбутні зміни інтерфейсу Manager та інсталятора відкладені до 0.1.4.
+`0.1.2` — попередній Stable Release. `0.1.3` — опублікований Stable hotfix.
+Поточний вихідний код зберігає версію `0.1.3`; `0.1.4` ще не має version bump,
+production build, Git tag або GitHub Release.
 
-1. Підготувати й перевірити код, production assets та manifest Stable 0.1.3.
-2. Окремо погодити push, tag і публікацію Stable 0.1.3.
-3. Виконати чисте Server-only та Combined встановлення 0.1.3 у Windows 10 x64 VM; перевірити wizard, config, service та API health.
-4. Після успішного baseline створити контрольний snapshot.
-5. Реалізувати майбутні зміни інсталятора та Server Manager для Stable 0.1.4.
-6. Окремо погодити публікацію Stable 0.1.4.
-7. Послідовно перевірити Client, Manager і API Server update 0.1.3 → 0.1.4 у VM.
+Для `0.1.4` вже реалізовано два UX-завдання: спрощений потік Universal Setup та
+покращення сторінки оновлень Server Manager. Їхні цільові автоматизовані перевірки
+пройшли; ручна Windows VM-перевірка залишається pending. Порядок наступних етапів:
+
+1. Окреме завдання production packaging `0.1.4`: узгодження версій і підготовка
+   Setup, Server ZIP та release manifest у `release/0.1.4/`.
+2. Ручна публікація GitHub Stable Release власником після перевірки артефактів.
+3. Windows 10 x64 VM acceptance після публікації; не заявляти VM PASS раніше.
 
 ## 0.1.4 — Task 1: Installation / Update UX
 
-IMPLEMENTED у `packaging/windows-installer.nsi`: звичайний Universal Setup показує
+**Статус: IMPLEMENTED / AUTOMATED PASS.** У `packaging/windows-installer.nsi` звичайний Universal Setup показує
 Welcome → Components, а Client/Manager selective update — відповідний Update Welcome
 і пропускає Components. Clean/installed/unknown визначається тільки з
 `InstalledComponents` разом із перевіркою потрібних EXE; стан не виводить версію, а
 selective update показує цільову версію зі Setup. API Server і далі оновлюється
 окремо через Server Manager. Цільові automated NSIS/selective-update tests пройшли;
 ручна Windows 10/11 VM-перевірка сторінок, completion і restart залишається PENDING.
-Full production build 0.1.4 не виконувався.
+Production packaging та GitHub publication `0.1.4` — PENDING; version bump не
+виконувався.
 
 ## 0.1.4 — Task 2: Server Manager Updates UI
 
-IMPLEMENTED у `server-manager/src/UpdateManagement.tsx`: API Server ZIP download
+**Статус: IMPLEMENTED / AUTOMATED PASS.** У `server-manager/src/UpdateManagement.tsx` API Server ZIP download
 показує спільний Client/Manager progress із фактичними байтами, приховує
 transaction stages до завершення завантаження та перевірки, а потім повертається до
 наявного семиетапного встановлення. Картки зберігають структуру й розміщують дії у
 правій колонці; довгі release notes можна розгорнути. Стани перевірки Manager
 узгоджені з Client, з окремими доступним, актуальним, активним і помилковим станами.
-Цільові автоматичні результати наведені у HANDOFF; перевірка UI, адаптивності й
-реального завантаження у Windows VM залишається PENDING. Механізми оновлення та
-серверної транзакції не змінювалися.
+Цільові результати наведені у HANDOFF; перевірка UI, адаптивності й реального
+завантаження у Windows VM — PENDING. Production packaging та GitHub publication
+`0.1.4` — PENDING. Механізми оновлення та серверної транзакції не змінювалися.
 
 ## Подальші напрями
 

@@ -8,7 +8,7 @@
 | Робоча SQLite лише на Server | Client працює через API; жодного автоматичного повернення legacy local mode |
 | Зберегти серверні SQL/domain modules у `electron/` до окремого обґрунтованого перенесення | Їх імпортує Server; історичний шлях не означає невикористаний код |
 | Окремі Client, API Server і Manager | Робочі функції, зберігання даних і адміністрування мають різні межі та життєві цикли |
-| Server-only завжди API + Manager; один універсальний NSIS продукт | Три режими встановлення, один запис Installed Apps, окремі стабільні AppUserModelID й іконки Client/Manager |
+| Server-only завжди API + Manager; один універсальний NSIS продукт | Три режими встановлення, один запис Installed Apps, окремі стабільні AppUserModelID й іконки Client/Manager; звичайний Setup показує Welcome перед Components, selective update показує власний Welcome без вибору компонентів |
 | Дані, конфігурація, ключі та копії поза програмним пакетом | Modify/Upgrade/Uninstall не повинні знищувати серверний стан |
 | Service SID і обмежені ACL замість загального доступу | Політика серверних ACL належить штатному встановленню служби; restore не скидає Backups ACL |
 | Backup administration лише в Manager | Client replication/backup UI/IPC вилучені; старі локальні архіви та identity-файли не видаляються |
