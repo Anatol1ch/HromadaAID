@@ -58,26 +58,26 @@ export function validateReleaseManifest(value, release, currentVersion) {
 
 export function safeReleaseNotes(value) {
   if (typeof value !== 'string') return 'Опис змін для цього випуску не надано.'
-  const text = value.replace(/<[^>]*>/g, ' ').replace(/https?:\/\/\S+/g, '').replace(/[`*_>#]/g, '').replace(/\s+/g, ' ').trim().slice(0, 500)
-  return text || 'Опис змін для цього випуску не надано.'
+  // Markdown is rendered as React text nodes. Remove embedded HTML while preserving
+  // the Markdown structure; the renderer never creates links or raw HTML elements.
+  const text = value.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, '')
+  return text.trim() || 'Опис змін для цього випуску не надано.'
 }
 
-async function request(url, fetchImpl, timeoutMs, headers = {}, keepTimeout = false) {
+async function request(url, fetchImpl, connectTimeoutMs, headers = {}) {
   const parsed = new URL(url)
   if (parsed.protocol !== 'https:') throw new Error('Канал оновлень має використовувати HTTPS.')
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  let keep = false
+  const timer = setTimeout(() => controller.abort(), connectTimeoutMs)
   try {
     const response = await fetchImpl(url, { headers, signal: controller.signal, redirect: 'follow' })
     if (response.url && (new URL(response.url).protocol !== 'https:' || !allowedAssetHosts.has(new URL(response.url).hostname))) throw new Error('Відповідь сервера оновлень вийшла за межі GitHub HTTPS.')
     if (!response.ok) throw new Error(`GitHub відповів HTTP ${response.status}.`)
-    if (keepTimeout) { keep = true; return { response, close: () => clearTimeout(timer) } }
-    return response
+    return { response, controller }
   } catch (error) {
-    if (error?.name === 'AbortError') throw new Error('Перевищено час очікування відповіді GitHub.')
+    if (error?.name === 'AbortError') throw new Error('Не вдалося встановити з’єднання з GitHub у відведений час.')
     throw error
-  } finally { if (!keep) clearTimeout(timer) }
+  } finally { clearTimeout(timer) }
 }
 
 async function requestJson(url, fetchImpl, timeoutMs, headers) {
@@ -122,7 +122,7 @@ export async function checkLatestRelease({ repository, currentVersion, fetchImpl
   return { available: true, checkedAt: new Date().toISOString(), version: manifest.version, notes: manifest.notes, artifact: manifest.artifact, url: artifactUrl.href, serverArtifact: manifest.serverArtifact, serverUrl: serverUrl.href }
 }
 
-export async function downloadVerifiedArtifact({ url, artifact, directory, fetchImpl = fetch, timeoutMs = 60_000, onProgress = () => {} }) {
+export async function downloadVerifiedArtifact({ url, artifact, directory, fetchImpl = fetch, connectTimeoutMs = 20_000, idleTimeoutMs = 45_000, onProgress = () => {} }) {
   const origin = new URL(url)
   if (origin.protocol !== 'https:' || origin.hostname !== 'github.com') throw new Error('Посилання на пакет не належить GitHub Releases.')
   await mkdir(directory, { recursive: true })
@@ -132,16 +132,24 @@ export async function downloadVerifiedArtifact({ url, artifact, directory, fetch
   const extension = artifact.component === 'installer' ? 'exe' : 'zip'
   const id = randomUUID(), temporary = join(directory, `${prefix}-${id}.part`), destination = join(directory, `${prefix}-${artifact.sha256}.${extension}`)
   let file
-  let closeRequestTimeout = () => {}
+  let controller
+  let idleTimer
+  let idleTimedOut = false
+  const armIdleTimeout = () => {
+    clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => { idleTimedOut = true; controller?.abort() }, idleTimeoutMs)
+  }
   try {
-    const requested = await request(url, fetchImpl, timeoutMs, { Accept: 'application/octet-stream', 'User-Agent': 'HromadaAID' }, true)
-    closeRequestTimeout = requested.close
+    const requested = await request(url, fetchImpl, connectTimeoutMs, { Accept: 'application/octet-stream', 'User-Agent': 'HromadaAID' })
+    controller = requested.controller
     const response = requested.response
     if (!response.body) throw new Error('GitHub повернув порожнє завантаження.')
+    armIdleTimeout()
     file = await open(temporary, 'wx', 0o600)
     const hash = createHash('sha256')
     let received = 0
     for await (const chunk of response.body) {
+      armIdleTimeout()
       const bytes = Buffer.from(chunk)
       received += bytes.length
       if (received > artifact.sizeBytes) throw new Error('Завантажений файл більший за розмір у маніфесті.')
@@ -168,7 +176,8 @@ export async function downloadVerifiedArtifact({ url, artifact, directory, fetch
   } catch (error) {
     if (file) await file.close().catch(() => {})
     await rm(temporary, { force: true }).catch(() => {})
-    if (error?.name === 'AbortError') throw new Error('Час очікування завантаження вичерпано; частковий файл видалено.')
+    if (idleTimedOut) throw new Error(`Завантаження зупинено: протягом ${Math.ceil(idleTimeoutMs / 1000)} с не надходили дані; частковий файл видалено.`)
+    if (error?.name === 'AbortError') throw new Error('Завантаження перервано мережею; частковий файл видалено.')
     throw error
-  } finally { closeRequestTimeout() }
+  } finally { clearTimeout(idleTimer) }
 }

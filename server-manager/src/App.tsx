@@ -11,6 +11,7 @@ import { apiDisplay, diagnosticLevel, initialSetupAction, inspectionFeedback, in
 import managerIcon from '../../assets/hromadaaid-server-manager.svg'
 import BackupManagement from './BackupManagement'
 import UpdateManagement from './UpdateManagement'
+import { ReleaseUpdateDetails, ReleaseUpdateProgress } from '../../src/components/ReleaseUpdateDetails'
 import RecoveryManagement from './RecoveryManagement'
 import { IconButton, Modal, StatusBadge as Status, Toast } from './ManagerUI'
 
@@ -388,15 +389,15 @@ export default function App() {
           <Panel title="Як працюватиме оновлення" icon={<ShieldCheck size={21} aria-hidden="true"/>}><ol className="sm-update-steps"><li><span>1</span><div><strong>Перевірка пакета та сумісності</strong><p>Перевірка підпису й підтримуваної схеми SQLite.</p></div></li><li><span>2</span><div><strong>Підтвердження адміністратора</strong><p>Застосування після явного підтвердження.</p></div></li><li><span>3</span><div><strong>Контрольоване оновлення файлів</strong><p>Зупинення служби та заміна серверного пакета.</p></div></li><li><span>4</span><div><strong>Перевірка працездатності</strong><p>Запуск служби та перевірка доступності API.</p></div></li></ol><p className="sm-muted">Дані, ключі й резервні копії зберігаються незалежно від виконуваних файлів. Суми SHA-256 самі по собі не підтверджують походження пакета. Оновлення клієнта керується в самому клієнті.</p></Panel>
         </>}
         </>}
-        {mode === 'real' && managerRelease?.confirmed && !emergencyMode && <Modal title={managerConfirm ? 'Закрити Server Manager?' : 'Обов’язкове оновлення Server Manager'} icon={managerConfirm ? <CircleAlert size={21}/> : <Download size={21}/>} dismissible={false} onClose={() => {}} busy={managerRelease.status === 'downloading' || managerRelease.status === 'installing' || managerRelease.status === 'restarting'} footer={<>
+        {mode === 'real' && managerRelease?.confirmed && !emergencyMode && <Modal title={managerConfirm ? 'Закрити Server Manager?' : 'Обов’язкове оновлення Server Manager'} icon={managerConfirm ? <CircleAlert size={21}/> : <Download size={21}/>} dismissible={false} onClose={() => {}} className="sm-release-update-modal" busy={managerRelease.status === 'downloading' || managerRelease.status === 'verifying' || managerRelease.status === 'installing' || managerRelease.status === 'restarting'} footer={<>
           <button className="secondary-button" type="button" onClick={() => { setEmergencyMode(true); setSection('diagnostics') }}>Аварійне відновлення</button>
           {(managerRelease.status === 'available' || managerRelease.status === 'error') && <button className="primary-button" type="button" onClick={() => void downloadManager()}>Оновити зараз</button>}
           {managerRelease.status === 'ready' && !managerConfirm && <button className="primary-button" type="button" onClick={() => setManagerConfirm(true)}>Оновити зараз</button>}
           {managerRelease.status === 'ready' && managerConfirm && <><button className="secondary-button" type="button" onClick={() => setManagerConfirm(false)}>Повернутися</button><button className="primary-button" type="button" onClick={() => { setManagerConfirm(false); void installManager() }}>Закрити й оновити</button></>}
         </>}>
-          {managerConfirm ? <p>Перед продовженням збережіть незавершені зміни. Server Manager закриється, універсальний Setup оновить лише Manager, а потім повторно запустить програму.</p> : <><p>Встановлена версія: <strong>{managerRelease.installedVersion}</strong></p><p>Нова стабільна версія: <strong>{managerRelease.availableVersion}</strong></p><p>{managerRelease.notes ?? 'Опис змін для цього випуску не надано.'}</p></>}
-          {managerRelease.status === 'downloading' && <><p role="status">Завантаження та перевірка SHA-256…</p><progress aria-label="Завантаження Setup Server Manager" max={managerRelease.totalBytes || 1} value={managerRelease.receivedBytes || 0}/></>}
-          {(managerRelease.status === 'installing' || managerRelease.status === 'restarting') && <p role="status">{managerRelease.status === 'installing' ? 'Підготовка NSIS Setup…' : 'Закриття Server Manager і запуск Setup…'}</p>}
+          {managerConfirm ? <p>Перед продовженням збережіть незавершені зміни. Server Manager закриється, універсальний Setup оновить лише Manager, а потім повторно запустить програму.</p> : <ReleaseUpdateDetails currentVersion={managerRelease.installedVersion} targetVersion={managerRelease.availableVersion ?? '—'} notes={managerRelease.notes}/>}
+          {(managerRelease.status === 'downloading' || managerRelease.status === 'verifying') && <ReleaseUpdateProgress label={managerRelease.status === 'verifying' ? 'Перевірка завантаженого файла' : 'Завантаження Setup'} receivedBytes={managerRelease.receivedBytes} totalBytes={managerRelease.totalBytes} indeterminate={managerRelease.status === 'verifying'}/>}
+          {(managerRelease.status === 'installing' || managerRelease.status === 'restarting') && <ReleaseUpdateProgress label={managerRelease.status === 'installing' ? 'Підготовка до запуску Setup' : 'Закриття Manager і запуск Windows Setup'} indeterminate/>}
           {managerRelease.error && <Alert variant="warning">{managerRelease.error} Повторіть спробу.</Alert>}
         </Modal>}
       </main>

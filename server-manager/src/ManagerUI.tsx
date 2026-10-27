@@ -10,7 +10,7 @@ export function StatusBadge({ tone, children, plain = false }: { tone: string; c
   return <span className={`sm-status sm-status-${tone}${plain ? ' sm-status-plain' : ''}`}><span aria-hidden="true"/>{children}</span>
 }
 
-export function Modal({ title, icon, children, footer, onClose, busy = false, wide = false, dismissible = true }: { title: string; icon?: ReactNode; children: ReactNode; footer?: ReactNode; onClose: () => void; busy?: boolean; wide?: boolean; dismissible?: boolean }) {
+export function Modal({ title, icon, children, footer, onClose, busy = false, wide = false, dismissible = true, className = '' }: { title: string; icon?: ReactNode; children: ReactNode; footer?: ReactNode; onClose: () => void; busy?: boolean; wide?: boolean; dismissible?: boolean; className?: string }) {
   const ref = useRef<HTMLDialogElement>(null)
   const titleId = useId()
   useEffect(() => {
@@ -19,7 +19,7 @@ export function Modal({ title, icon, children, footer, onClose, busy = false, wi
     dialog?.showModal()
     return () => { dialog?.close(); if (previous?.isConnected && previous.getClientRects().length && !previous.matches(':disabled')) previous.focus(); else document.querySelector<HTMLHeadingElement>('h1')?.focus() }
   }, [])
-  return createPortal(<dialog ref={ref} className={`sm-modal${wide ? ' sm-modal-wide' : ''}`} aria-labelledby={titleId} aria-busy={busy} onCancel={event => { event.preventDefault(); if (dismissible && !busy) onClose() }} onClick={event => { if (dismissible && event.target === event.currentTarget && !busy) onClose() }}>
+  return createPortal(<dialog ref={ref} className={`sm-modal${wide ? ' sm-modal-wide' : ''}${className ? ` ${className}` : ''}`} aria-labelledby={titleId} aria-busy={busy} onCancel={event => { event.preventDefault(); if (dismissible && !busy) onClose() }} onClick={event => { if (dismissible && event.target === event.currentTarget && !busy) onClose() }}>
     <header className="sm-modal-header"><h2 id={titleId}>{icon}<span>{title}</span></h2>{dismissible && <IconButton label={busy ? 'Дочекайтеся завершення операції' : 'Закрити'} disabled={busy} onClick={onClose}><X size={19}/></IconButton>}</header>
     <div className="sm-modal-body">{children}</div>
     {footer && <footer className="sm-modal-footer">{footer}</footer>}

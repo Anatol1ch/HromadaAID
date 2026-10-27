@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { CircleAlert, Download, RefreshCw, ShieldCheck } from 'lucide-react'
 import type { ClientUpdateState } from '../../shared/api-contract'
 import Modal from './Modal'
+import { ReleaseUpdateDetails, ReleaseUpdateProgress } from './ReleaseUpdateDetails'
 
 const phaseLabel: Record<ClientUpdateState['status'], string> = {
   idle: 'Очікування перевірки', checking: 'Перевірка оновлень…', 'up-to-date': 'Використовується актуальна версія.',
@@ -39,14 +40,13 @@ export default function ClientUpdateGate() {
   const downloading = state.status === 'downloading' || state.status === 'verifying'
   const installing = state.status === 'preparing' || state.status === 'installing' || state.status === 'restarting'
   return <Modal title="Потрібно оновити HromadaAID" description="Щоб продовжити роботу, встановіть останню стабільну версію." onClose={() => {}} dismissible={false} busy={busy || downloading || installing} size="compact" className="client-update-modal" headerIcon={<Download size={20} aria-hidden="true" />}>
-    <div className="client-update-summary"><div><span>Поточна версія</span><strong>{state.currentVersion}</strong></div><div><span>Нова версія</span><strong>{state.targetVersion}</strong></div></div>
-    <section className="client-update-notes"><h3>Що змінилося</h3><p>{state.notes || 'Опис змін не надано.'}</p></section>
+    <ReleaseUpdateDetails currentVersion={state.currentVersion} targetVersion={state.targetVersion} notes={state.notes}/>
     <p className={`client-update-status${state.status === 'error' ? ' is-error' : ''}`} role="status" aria-live="polite">
       {state.status === 'error' ? <CircleAlert size={17} aria-hidden="true"/> : state.status === 'ready' ? <ShieldCheck size={17} aria-hidden="true"/> : null}
       {state.error || phaseLabel[state.status]}
     </p>
-    {downloading && <div className="client-update-progress"><progress max={state.totalBytes || 1} value={state.receivedBytes || 0}/><span>{state.totalBytes ? `${Math.floor((state.receivedBytes || 0) / state.totalBytes * 100)}%` : 'Завантаження'}</span></div>}
-    {installing && <div className="client-update-progress"><progress/><span>Інсталятор виконує оновлення</span></div>}
+    {downloading && <ReleaseUpdateProgress label={state.status === 'verifying' ? 'Перевірка завантаженого файла' : 'Завантаження Setup'} receivedBytes={state.receivedBytes} totalBytes={state.totalBytes} indeterminate={state.status === 'verifying'}/>}
+    {installing && <ReleaseUpdateProgress label={state.status === 'preparing' ? 'Підготовка до запуску Setup' : state.status === 'restarting' ? 'Перезапуск HromadaAID' : 'Встановлення через Windows Setup'} indeterminate/>}
     {state.status === 'ready' && <div className="client-update-warning"><strong>Перед закриттям Client збережіть відкриті зміни.</strong><span>Після підтвердження Client закриється. Windows може показати запит UAC для чинного інсталятора HromadaAID.</span></div>}
     <div className="client-update-actions">
       {(state.status === 'available' || state.status === 'error') && <button type="button" className="primary-button" disabled={busy} onClick={() => void runDownload()}><Download size={17}/>{state.status === 'error' ? 'Повторити завантаження' : 'Оновити зараз'}</button>}

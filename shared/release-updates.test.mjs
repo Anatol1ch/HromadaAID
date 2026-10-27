@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { compareVersions, checkLatestRelease, downloadVerifiedArtifact, parseStableVersion, validateReleaseManifest } from './release-updates.mjs'
+import { compareVersions, checkLatestRelease, downloadVerifiedArtifact, parseStableVersion, safeReleaseNotes, validateReleaseManifest } from './release-updates.mjs'
 
 const digest = value => createHash('sha256').update(value).digest('hex')
 const manifest = (version = '1.2.0') => ({ formatVersion: 1, version, platform: 'win32', architecture: 'x64', compatibility: { installer: 'hromadaaid-universal-nsis-v1', installModes: ['Client-only', 'Server-only', 'Combined'], api: { contract: 'hromadaaid-rest', version: 1 }, manager: { versionPolicy: 'same-release-version', apiContract: 'hromadaaid-rest', apiContractVersion: 1 } }, artifacts: [
@@ -27,6 +27,14 @@ test('release metadata rejects prereleases, wrong platform, stale versions, and 
   assert.throws(() => validateReleaseManifest({ ...manifest(), architecture: 'arm64' }, release, '1.1.9'))
   const broken = manifest(); broken.artifacts[1].packageIntegrity = 'duplicate-manifest'
   assert.throws(() => validateReleaseManifest(broken, release, '1.1.9'))
+})
+
+test('release notes keep Markdown structure but discard raw HTML without turning content into executable markup', () => {
+  const notes = safeReleaseNotes('# Fixes\n\n- **Safe** text\n\n<script>alert(1)</script>')
+  assert.match(notes, /^# Fixes/m)
+  assert.match(notes, /\*\*Safe\*\*/)
+  assert.doesNotMatch(notes, /<script/i)
+  assert.match(notes, /alert\(1\)/)
 })
 
 test('GitHub latest stable contract downloads manifest and resolves only its named setup asset', async () => {
@@ -59,5 +67,48 @@ test('download verifies SHA-256 and exact size, removes partial and corrupt file
     await assert.rejects(downloadVerifiedArtifact({ url: 'https://github.com/a/b/releases/download/setup.exe', artifact, directory, fetchImpl: async () => ({ ok: true, status: 200, url: 'https://github.com/a/b/releases/download/setup.exe', body: Readable.from([bytes.subarray(0, 2)]) }) }), /перервано/)
     await assert.rejects(downloadVerifiedArtifact({ url: 'https://evil.example/setup.exe', artifact, directory, fetchImpl }), /GitHub Releases/)
     assert.deepEqual((await readdir(directory)).filter(name => name.endsWith('.part')), [])
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('download timeout is based on network inactivity, permits slow active streams, and removes idle partial files for retry', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'hromada-release-idle-timeout-'))
+  const bytes = Buffer.from('slow-but-active-setup')
+  const artifact = { component: 'installer', name: 'setup.exe', sha256: digest(bytes), sizeBytes: bytes.length }
+  const stream = (signal, delayMs, pieces) => {
+    let index = 0, timer, finishPending
+    const body = new ReadableStream({
+      start(controller) {
+        signal.addEventListener('abort', () => {
+          clearTimeout(timer)
+          controller.error(new DOMException('aborted', 'AbortError'))
+          finishPending?.()
+        }, { once: true })
+      },
+      pull(controller) {
+        if (index >= pieces.length) { controller.close(); return }
+        return new Promise(resolve => {
+          finishPending = resolve
+          timer = setTimeout(() => {
+            if (!signal.aborted) controller.enqueue(pieces[index++])
+            finishPending = undefined
+            resolve()
+          }, delayMs)
+        })
+      },
+      cancel() { clearTimeout(timer); finishPending?.() },
+    })
+    return body
+  }
+  const responseFor = (signal, body) => ({ ok: true, status: 200, url: 'https://github.com/a/b/releases/download/setup.exe', body })
+  try {
+    const pieces = Array.from(bytes, (_, index) => bytes.subarray(index, index + 1))
+    await assert.rejects(downloadVerifiedArtifact({ url: 'https://github.com/a/b/releases/download/setup.exe', artifact, directory, connectTimeoutMs: 20, idleTimeoutMs: 45, fetchImpl: (_url, options) => new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })) }), /з’єднання/)
+    const slow = await downloadVerifiedArtifact({ url: 'https://github.com/a/b/releases/download/setup.exe', artifact, directory, connectTimeoutMs: 500, idleTimeoutMs: 45, fetchImpl: async (_url, options) => responseFor(options.signal, stream(options.signal, 15, pieces)) })
+    assert.deepEqual(await readFile(slow), bytes)
+
+    await assert.rejects(downloadVerifiedArtifact({ url: 'https://github.com/a/b/releases/download/setup.exe', artifact, directory, connectTimeoutMs: 500, idleTimeoutMs: 20, fetchImpl: async (_url, options) => responseFor(options.signal, stream(options.signal, 120, pieces)) }), /не надходили дані/)
+    assert.deepEqual((await readdir(directory)).filter(name => name.endsWith('.part')), [])
+    const retry = await downloadVerifiedArtifact({ url: 'https://github.com/a/b/releases/download/setup.exe', artifact, directory, connectTimeoutMs: 500, idleTimeoutMs: 45, fetchImpl: async (_url, options) => responseFor(options.signal, stream(options.signal, 10, pieces)) })
+    assert.deepEqual(await readFile(retry), bytes)
   } finally { await rm(directory, { recursive: true, force: true }) }
 })

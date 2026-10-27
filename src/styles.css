@@ -2324,19 +2324,32 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
   .workspace-year-summary { flex-basis: 100%; min-height: 28px; padding-left: 0; border-left: 0; white-space: normal; }
   .workspace-year .secondary-button { margin-left: auto; }
 }
-.client-update-modal { width: min(100%, 560px); }
-.client-update-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.client-update-summary > div { display: grid; gap: 4px; padding: 14px 16px; border: 1px solid var(--border-color, #e1e6e3); border-radius: 12px; background: var(--surface-muted, #f7f9f8); }
-.client-update-summary span, .client-update-warning span { color: var(--text-muted, #68746e); font-size: .88rem; }
-.client-update-summary strong { color: var(--text-primary, #24352c); font-size: 1.12rem; }
-.client-update-notes { margin-top: 18px; }
-.client-update-notes h3 { margin: 0 0 6px; font-size: .95rem; }
-.client-update-notes p { margin: 0; line-height: 1.5; }
+.client-update-modal { width: min(100%, 560px); max-height: min(760px, calc(100dvh - 28px)); overflow-y: auto; }
+.release-version-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 10px; }
+.release-version-summary > div { display: grid; min-width: 0; gap: 4px; padding: 12px 14px; border: 1px solid var(--border-color, #e1e6e3); border-radius: 12px; background: var(--surface-muted, #f7f9f8); }
+.release-version-summary span, .client-update-warning span { color: var(--text-muted, #68746e); font-size: .88rem; }
+.release-version-summary strong { color: var(--text-primary, #24352c); font-size: 1.12rem; overflow-wrap: anywhere; }
+.release-version-arrow { color: var(--accent-green, #2d7453) !important; font-size: 1.2rem !important; }
+.release-notes-section { min-width: 0; margin-top: 16px; }
+.release-notes-section > h3 { margin: 0 0 7px; font-size: .95rem; }
+.release-notes { max-height: min(210px, 28dvh); padding: 10px 12px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border-color, #e1e6e3); border-radius: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.release-notes > :first-child { margin-top: 0; }
+.release-notes > :last-child { margin-bottom: 0; }
+.release-notes h3 { margin: 12px 0 5px; font-size: .9rem; }
+.release-notes p { margin: 6px 0; }
+.release-notes ul { padding-left: 20px; margin: 6px 0; }
+.release-notes li + li { margin-top: 3px; }
+.release-notes code { padding: 1px 4px; border-radius: 4px; background: var(--surface-muted, #f7f9f8); overflow-wrap: anywhere; }
+.release-update-progress { display: grid; min-width: 0; gap: 7px; margin: 14px 0; color: var(--text-muted, #68746e); font-size: .88rem; }
+.release-update-progress > div { display: flex; justify-content: space-between; gap: 12px; }
+.release-update-progress > div > span { overflow-wrap: anywhere; }
+.release-update-progress strong { color: var(--text-primary, #24352c); }
+.release-update-progress progress { width: 100%; min-width: 0; height: 12px; accent-color: #2d7453; }
+.release-update-progress small { font-size: .8rem; }
 .client-update-status { display: flex; align-items: center; gap: 8px; min-height: 24px; margin: 18px 0 10px; }
 .client-update-status.is-error { color: #a02e2b; }
-.client-update-progress { display: grid; gap: 6px; margin: 12px 0; color: var(--text-muted, #68746e); font-size: .85rem; }
-.client-update-progress progress { width: 100%; height: 10px; accent-color: #2d7453; }
 .client-update-warning { display: grid; gap: 5px; margin: 16px 0; padding: 13px 15px; border-left: 3px solid #c3912e; border-radius: 8px; background: #fff9e9; line-height: 1.45; }
 .client-update-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 .client-update-retry { display: inline-flex; align-items: center; gap: 8px; color: var(--text-muted, #68746e); }
 .client-update-settings .settings-about-grid { margin-bottom: 16px; }
+@media (max-width: 480px) { .release-version-summary { grid-template-columns: minmax(0, 1fr); } .release-version-arrow { display: none; } .client-update-actions > button { flex: 1 1 100%; } }
