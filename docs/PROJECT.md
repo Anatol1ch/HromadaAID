@@ -28,18 +28,16 @@ HromadaAID — настільна клієнт-серверна система �
 Client не має автономної робочої SQLite або адміністративного резервування.
 Старі клієнтські backup-файли залишаються на диску й автоматично не мігруються.
 
-## Межі поточної версії
+## Поточний стан
 
-Останній опублікований Stable Release — `0.1.3`; `0.1.2` є попереднім Stable.
-Поточні package metadata та source version — `0.1.3`; розробка ведеться для
-майбутнього `0.1.4`. GitHub Release `0.1.3` опубліковано, але чисте встановлення
-Server-only/Combined після hotfix і API health у Windows VM ще очікують приймального
-тесту. У `0.1.4` реалізовано UX-зміни Universal Setup та сторінки оновлень Manager;
-їхня візуальна перевірка у Windows VM і production packaging залишаються pending.
-Stage 9.1.3 і 9.1 не завершені; production readiness не заявляється. Поточна матриця
-перевірок — у [HANDOFF.md](HANDOFF.md), практичні сценарії Stage 9.1.3 — у
-[manual testing](stage-9.1.3-manual-testing.md). Tailscale залишається окремим
-майбутнім етапом.
+Останній опублікований Stable Release — **0.1.6**. Client, Server Manager та API
+Server мають версію 0.1.6. Основні автоматичні оновлення компонентів, робота
+Windows Service та API, Client authorization і збереження наявних даних підтверджені
+власником у Windows 10 x64 VM. **Stage 9.1 — Automatic Updates завершено.**
+
+Наступний етап — **Stage 9.2: Tailscale Connectivity**. Поточний checkpoint і межі
+VM-приймання наведені у [HANDOFF.md](HANDOFF.md), етапи — у [ROADMAP.md](ROADMAP.md),
+а історія тестування — у [Stage 9.1.3 manual testing](stage-9.1.3-manual-testing.md).
 
 Технічні межі: [ARCHITECTURE.md](ARCHITECTURE.md). Подальша робота:
 [ROADMAP.md](ROADMAP.md). Актуальний checkpoint і перевірки: [HANDOFF.md](HANDOFF.md).
