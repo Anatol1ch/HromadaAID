@@ -42,6 +42,22 @@ test('NSIS syncs target-checked links after Modify and removes owned links only 
   assert.match(installerBuild, /nsisDefine\('MANAGER_BRANDING_ID', managerBrandingId\)/)
 })
 
+test('selective NSIS updates keep the other component selected for shortcut synchronization', () => {
+  const source = readFileSync('packaging/windows-installer.nsi', 'utf8')
+  const shortcuts = source.slice(source.indexOf('Section -ApplicationShortcuts'), source.indexOf('Section -UninstallMetadata'))
+  const client = shortcuts.slice(shortcuts.indexOf('${If} $ClientUpdateMode'), shortcuts.indexOf('${If} $ManagerUpdateMode'))
+  const manager = shortcuts.slice(shortcuts.indexOf('${If} $ManagerUpdateMode'), shortcuts.indexOf('shortcutsDone:'))
+  assert.match(client, /ReadRegStr \$1 HKLM "Software\\HromadaAID\\Installer" "InstalledComponents"/)
+  assert.match(client, /\$1 == "Server,ServerManager"[\s\S]*?\$1 == "Client,Server,ServerManager"[\s\S]*?StrCpy \$1 1[\s\S]*?StrCpy \$1 0/)
+  assert.match(client, /!insertmacro SyncApplicationShortcuts 1 \$1/)
+  assert.match(manager, /ReadRegStr \$0 HKLM "Software\\HromadaAID\\Installer" "InstalledComponents"/)
+  assert.match(manager, /\$0 == "Client"[\s\S]*?\$0 == "Client,Server,ServerManager"[\s\S]*?StrCpy \$0 1[\s\S]*?StrCpy \$0 0/)
+  assert.match(manager, /!insertmacro SyncApplicationShortcuts \$0 1/)
+  for (const path of ['server-manager/electron/windows-server-update.ts', 'packaging/install-server-service.ps1', 'packaging/server-package-transaction.mjs']) {
+    assert.doesNotMatch(readFileSync(path, 'utf8'), /windows-shortcuts|SyncApplicationShortcuts|Sync-HromadaAidShortcuts|\.lnk\b/, `${path} must not manipulate application shortcuts`)
+  }
+})
+
 for (const systemDirectory of ['System32', 'SysWOW64']) {
   const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', systemDirectory, 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   test(`shortcut lifecycle, icons and AppUserModelIDs with PowerShell 5.1 (${systemDirectory}), isolated temp folders`, { skip: process.platform !== 'win32' || !existsSync(powershell) }, () => {
@@ -88,6 +104,19 @@ foreach ($dir in @($menu, $desktop)) {
 [Console]::Out.WriteLine('phase: Combined / Modify')
 Sync-HromadaAidShortcuts $program $menu $desktop 1 1
 Assert (@(Get-ChildItem -LiteralPath $menu -Filter '*.lnk').Count -eq 2) 'Combined did not create both links'
+[Console]::Out.WriteLine('phase: Combined selective update isolation')
+# The NSIS caller contract above resolves both selective modes to 1,1 for Combined.
+foreach ($mode in @('Manager-only', 'Client-only')) {
+  Sync-HromadaAidShortcuts $program $menu $desktop 1 1
+  foreach ($dir in @($menu, $desktop)) {
+    $clientLink = Join-Path $dir 'HromadaAID.lnk'
+    $managerLink = Join-Path $dir 'HromadaAID Server Manager.lnk'
+    Assert (Test-Path -LiteralPath $clientLink) "$mode removed Client shortcut"
+    Assert (Test-Path -LiteralPath $managerLink) "$mode removed Manager shortcut"
+    Assert ([HromadaAid.ShortcutIdentity]::Info($clientLink).Target -eq $client) "$mode changed Client target"
+    Assert ([HromadaAid.ShortcutIdentity]::Info($managerLink).Target -eq $manager) "$mode changed Manager target"
+  }
+}
 Sync-HromadaAidShortcuts $program $menu $desktop 1 0
 Assert (-not (Test-Path -LiteralPath (Join-Path $desktop 'HromadaAID Server Manager.lnk'))) 'Modify did not remove Manager desktop link'
 [Console]::Out.WriteLine('phase: legacy identity')

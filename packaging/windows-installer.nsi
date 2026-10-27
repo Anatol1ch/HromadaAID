@@ -296,14 +296,15 @@ Section -ApplicationShortcuts
     Goto shortcutsDone
   ${EndIf}
   ${If} $ManagerUpdateMode == "1"
-    ReadRegStr $1 HKLM "Software\HromadaAID\Installer" "InstalledComponents"
-    ${If} $1 == "Server,ServerManager"
-    ${OrIf} $1 == "Client,Server,ServerManager"
-      StrCpy $1 1
+    ; Preserve Client shortcuts according to the installed component set.
+    ReadRegStr $0 HKLM "Software\HromadaAID\Installer" "InstalledComponents"
+    ${If} $0 == "Client"
+    ${OrIf} $0 == "Client,Server,ServerManager"
+      StrCpy $0 1
     ${Else}
-      StrCpy $1 0
+      StrCpy $0 0
     ${EndIf}
-    !insertmacro SyncApplicationShortcuts 0 $1
+    !insertmacro SyncApplicationShortcuts $0 1
     Goto shortcutsDone
   ${EndIf}
   !insertmacro SyncApplicationShortcuts $0 $1
