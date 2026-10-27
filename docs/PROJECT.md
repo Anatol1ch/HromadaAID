@@ -18,8 +18,9 @@ HromadaAID — настільна клієнт-серверна система �
 - Довідники, річне планування, звітність і формування платіжних відомостей.
 - Формування Excel-документів через Windows Excel COM та наявні шаблони.
 - Облікові записи, ролі й обмеження доступу до операцій.
-- Налаштування адреси сервера в Client; робота через HTTP на loopback або HTTPS
-  у мережі відповідно до чинної політики транспорту.
+- Налаштування адреси сервера в Client; поточна реалізація використовує HTTP на
+  loopback та HTTPS у мережевому режимі. Ціль Stage 9.2 щодо майбутнього внутрішнього
+  HTTP transport для LAN і Tailscale ще не впроваджена.
 - Первинне налаштування сервера, контроль служби/API, резервування,
   ZIP-оновлення та контрольоване recovery через Server Manager.
 - Обов'язкові Stable GitHub оновлення Client/Manager через універсальний Setup
@@ -35,9 +36,12 @@ Server мають версію 0.1.6. Основні автоматичні он
 Windows Service та API, Client authorization і збереження наявних даних підтверджені
 власником у Windows 10 x64 VM. **Stage 9.1 — Automatic Updates завершено.**
 
-Наступний етап — **Stage 9.2: Tailscale Connectivity**. Поточний checkpoint і межі
-VM-приймання наведені у [HANDOFF.md](HANDOFF.md), етапи — у [ROADMAP.md](ROADMAP.md),
-а історія тестування — у [Stage 9.1.3 manual testing](stage-9.1.3-manual-testing.md).
+Наступний етап — **Stage 9.2: Tailscale Connectivity**. Його погоджена ціль —
+одночасне підключення до одного API Server через loopback HTTP, LAN HTTP та HTTP
+через Tailscale; поточна мережна реалізація поки вимагає HTTPS. Деталі майбутньої
+політики й інші етапи наведені у [ROADMAP.md](ROADMAP.md). Поточний checkpoint і
+межі VM-приймання — у [HANDOFF.md](HANDOFF.md); історія тестування — у
+[Stage 9.1.3 manual testing](stage-9.1.3-manual-testing.md).
 
 Технічні межі: [ARCHITECTURE.md](ARCHITECTURE.md). Подальша робота:
 [ROADMAP.md](ROADMAP.md). Актуальний checkpoint і перевірки: [HANDOFF.md](HANDOFF.md).

@@ -4,7 +4,7 @@
 
 - Поточний Stable: **0.1.6**, опублікований у GitHub.
 - **Stage 9.1 — Automatic Updates завершено** після приймання основних сценаріїв у Windows 10 x64 VM.
-- Stage 9.1 інтегровано у `main` fast-forward способом. Актуальний Git checkpoint перед Stage 9.2 — спільний commit `28be5d1b0edc41474368b5f72717009eb72d2053` для `main`, `feature/client-server` та origin.
+- Stage 9.1 інтегровано у `main` fast-forward способом. Актуальний Git checkpoint — `main` і `feature/client-server` на `5eb6c926ec9f8b7bf915402e0283038207cadbb2`, синхронізовані з origin.
 - Релізний commit: `10b0b85b36a9cad84d75259aa6fe2dd90e08b4d4`; annotated tag `0.1.6` лишається на цьому commit. Документаційний checkpoint перед README update був `263c50b74cabf3d1172676bcaa5b738f650559d3`.
 - VM snapshot: `HromadaAID 0.1.6 – Stable Baseline`.
 
@@ -35,4 +35,4 @@ Client та Server Manager — окремі Electron-застосунки; API S
 
 ## Наступний етап
 
-**Stage 9.2 — Tailscale Connectivity** є наступним. Його розробку планується вести в окремій гілці `feature/tailscale-connectivity`, створеній від `main`. Гілку ще не створено. Не змінювати TLS, auth/RBAC чи межі мережевого доступу без окремих вимог. Поточний план — у [ROADMAP.md](ROADMAP.md), призначення продукту — у [PROJECT.md](PROJECT.md).
+**Stage 9.2 — Tailscale Connectivity** є наступним і ще не розпочато. Планована гілка — `feature/tailscale-connectivity`, створена від `main`; її ще не створено. Погоджена ціль для внутрішнього API — HTTP через loopback, LAN і Tailscale до одного Server/бази; чинна мережна реалізація до впровадження Stage 9.2 продовжує вимагати HTTPS/TLS. Tailscale лишається зовнішнім інструментом, а authentication/RBAC зберігаються. Під час Stage 9.2 актуалізувати `server/TRANSPORT.md` після зміни реалізації. Поточний план — у [ROADMAP.md](ROADMAP.md), рішення — у [DECISIONS.md](DECISIONS.md).
