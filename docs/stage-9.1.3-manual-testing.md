@@ -10,11 +10,193 @@ Client, Server Manager й API Server; у цьому сценарії вияви�
 Setup, Server ZIP та `release-manifest.json` описують лише фактично зібрані
 артефакти; Client portable ZIP не входить до release contract.
 
-Локально можна перевірити пакети, інсталятор у Windows VM і виправлене первинне
-налаштування. Для автоматичного отримання оновлень потрібен GitHub Stable Release
-0.1.1 з цими Setup, Server ZIP і manifest. Перед тестом звірте фактичний стан
-Release та assets на GitHub; локальне завантаження або тести не зараховуються як
-GitHub update.
+Stable Release **0.1.1 опубліковано**. Перевірте його актуальний manifest/assets
+перед тестом; лише реальний запуск із GitHub рахується як hosted update.
+
+### Поточна матриця доказів — консолідація 2026-10-27
+
+| Напрям | Статус | Межі підтвердження |
+| --- | --- | --- |
+| Client GitHub Stable 0.1.0 → 0.1.1 та restart | VM PASS | U01; контрольні Server/Manager hashes, InstalledComponents і Service state/PID збережені в межах U02 |
+| Manager-only NSIS swap | VM PASS | Локальний виправлений Setup установив Manager 0.1.1; це не повний hosted auto-update |
+| Manager GitHub auto-update | IMPLEMENTED / AUTOMATED PASS; VM PENDING | Новий bootstrap спільний, але повний Manager hosted цикл ще не підтверджений |
+| API ZIP update 0.1.0 → 0.1.1 | VM PASS | Основний сценарій через Manager після локального встановлення виправленого Manager; D00 нижче |
+| Окремі data/config preservation checks API update | PENDING | Не зараховувати на підставі самого успіху ZIP update |
+| Shortcuts fix | IMPLEMENTED / AUTOMATED PASS (14/14); VM PENDING | Попередній дефект підтверджений; повторний тест виправлення не виконано |
+| UAC cancellation/retry та failure/recovery | PENDING у VM | Synthetic/mock automation не підвищує VM-статус |
+
+IMPLEMENTED — код існує; AUTOMATED PASS — цільова автоматизація пройшла;
+VM PASS — пряме підтвердження власника в зазначеному обсязі; PENDING — доказу
+немає; FAIL — зафіксована невдала спроба. Історичні FAIL нижче зберігаються.
+У консолідації updater/launcher/manifest/NSIS/packaging tests — **40/40 PASS**,
+чотири TypeScript no-emit checks пройшли; нові пакети не створювалися.
+
+Наступний релізний цикл 0.1.2 → 0.1.3 описано в [ROADMAP.md](ROADMAP.md).
+Нижче зберігаються сценарії та історичні fixtures 0.1.0 → 0.1.1. Нову версію,
+збірку й публікацію виконувати лише за окремими завданнями; Stage 9.1.3 триває.
+
+### Регресія ярликів після selective update — VM повторний тест pending
+
+Після локального Manager-only Setup та успішного за повідомленням власника API
+ZIP update у Combined зникли Client-ярлики. Client EXE працює; InstalledComponents
+лишається `Client,Server,ServerManager`. Відсутність ярликів підтверджено лише
+після обох операцій. Кодом виявлено Manager-only виклик synchronizer з
+ClientSelected=0; API ZIP update ярликами не керує. У source прапорець виправлено
+на основі InstalledComponents. Поточні зібрані Setup цього виправлення не містять.
+
+Для повторної перевірки потрібні snapshot Combined 0.1.0 та новий локальний Setup:
+
+1. До update зафіксувати обидва ярлики Client/Manager у Public Desktop і Common
+   Programs, їхні targets, InstalledComponents та єдиний Installed Apps запис.
+2. Виконати `/MANAGERUPDATE=1`; **відразу до API ZIP update** перевірити, що всі
+   чотири ярлики існують, запускають відповідні EXE, metadata збережені.
+3. Виконати API ZIP update та повторити перевірку ярликів; вони мають зберегтися.
+4. На відновленому Combined snapshot окремо виконати `/CLIENTUPDATE=1` і перевірити
+   збереження Manager-ярликів. Звичайний install/Modify має створювати/видаляти
+   лише ярлики відповідно до встановленого набору компонентів.
+
+Критерій успіху — ярлики обох установлених компонентів доступні після кожної
+операції, targets і InstalledComponents коректні, Installed Apps запис один.
+Статус цього виправлення: **Не перевірено у VM**, автоматичні цільові tests 14/14 PASS.
+
+### Історичний VM-тест 0.1.0 → 0.1.1 до виправлення bootstrap
+
+- Client і Server Manager виявили стабільну версію 0.1.1.
+- Client завантаження спершу завершилося timeout приблизно на 80%; повторна спроба
+  завантажила Setup, а SHA-256 перевірка пройшла.
+- Після підтвердження Client закрився, але вікно NSIS не з'явилося. Уточнено, що
+  невідомо, чи був створений процес Setup; успішне встановлення не підтверджено.
+- Manager завантажив Setup і почав перевірку SHA-256; встановлення не завершилося,
+  вікна NSIS не спостерігали. Точний результат SHA-256/створення процесу не
+  підтверджений.
+- API Server ZIP update не тестувався.
+
+Для наступних діагностичних спроб передбачений стійкий журнал
+`updates/installer-launcher.log` у user data каталозі Client/Manager; код також
+пише файлові stdout/stderr. Журнали можуть містити локальні шляхи, тож перевіряйте
+їх перед передаванням. Наявність конкретних записів у логах успішного повного
+Client тесту не аналізувалася: власник свідомо не збирав ці журнали.
+Bootstrap підтверджений попереднім no-NSIS VM-тестом (U00), а повне встановлення
+Client — пізнішим успішним U01 нижче.
+
+### Діагностика передачі керування — 2026-10-26
+
+Історичні підтверджені власником VM-результати до виправлення: discovery Client/Manager — **PASS**;
+Client download — **нестабільно (timeout, retry успішний)**; Client installation —
+**FAIL**; Manager installation — **FAIL**; API Server update — **NOT TESTED**.
+PowerShell PID 7692 (parent 7456) працював ~734 мс та завершився з exit 0.
+`launcher-started` немає; запуск NSIS не підтверджено. Ручний запуск справжнього
+launcher з Notepad підтвердив binding, запис у TEMP, UAC і роботу скрипту.
+Доступ PowerShell до основного APPDATA journal у VM ще не перевірено.
+
+Локальна причина відтворена на Windows PowerShell 5.1.26100.9444 з Node 24.22.1
+та Electron 44.7.1 у режимі Node: `detached:true` дає exit 0 без виконання тіла
+`.ps1`, зокрема з абсолютним шляхом EXE. `windowsHide` / `-WindowStyle Hidden`
+у матриці не визначали результат. Відмова всередині console initialization
+узгоджується з відтворенням, але її внутрішній стек не отримували.
+Недетачений PowerShell виконує скрипт, проте гине з Node-батьком через libuv Job
+Object. Зовнішній Job Object у VM залишається неперевіреною гіпотезою.
+
+Поточний код використовує короткий bootstrap і незалежний launcher через
+Start-Process. Electron чекає readiness і завершення bootstrap; файл
+handoff.confirmed дозволяє launcher продовжити. Просте створення PID більше не
+дозволяє закрити застосунок. SHA-256, RunAs, selective update і success marker
+збережені. Bootstrap виправдовується двома відтвореними відмовами прямого spawn;
+власного installer engine він не містить.
+
+**Попередній no-NSIS сценарій (bootstrap PASS; не повне встановлення):**
+
+1. Snapshot Windows 10 x64 VM з офіційним Combined 0.1.0 і синтетичними даними.
+   Закрийте Client. Візьміть ZIP і README з
+   `release/diagnostics/stage-9.1.3/launcher-handoff-v2/`; старі diagnostic ZIP
+   для цього сценарію не підходять.
+2. За README розгорніть лише Client payload у фактичний NSIS каталог Client,
+   запустіть Client звичайним користувачем. Версія має бути 0.1.0. Дочекайтеся
+   GitHub Stable 0.1.1, завантаження справжнього Setup та штатної SHA-256 перевірки.
+3. Натисніть встановлення один раз. Цей діагностичний launcher навмисно **не має
+   виклику NSIS або перезапуску Client**. UAC не очікується. Client має закритися
+   лише після ready handoff; після виходу має з'явитися `diagnostic-no-installer`.
+4. Збережіть `%APPDATA%\HromadaAID\updates\installer-launcher.log` і всю нову
+   папку `updates\launcher-<uuid>`. Вона містить stdout.log, stderr.log,
+   bootstrap.stdout.log, bootstrap.stderr.log, config.json (точна command line),
+   ready.json, result.json (PID/status/ранній exit code) і handoff.confirmed.
+   За потреби додайте повний короткий ProcMon PML із process/file events.
+5. Критерій цього тесту: result.status=ready, збіг launcher PID із ready.json,
+   у stdout є launcher-started, application-exited, diagnostic-no-installer і
+   launcher-completed після закриття Electron. `main-log-write-failed` у stderr
+   означає окрему помилку основного журналу. exit 0 без ready — відмова, не успіх.
+   При readiness timeout Client має лишитися відкритим; Setup не авторизовано.
+6. Відновіть snapshot після збереження результатів. Цей тест не доводить UAC,
+   NSIS, auto-restart або успіх встановлення. Їх перевіряти окремо після аналізу.
+
+Власник підтвердив виконання цього сценарію у Windows 10 x64 VM:
+`result.status=ready`, launcher PID **7044**, bootstrap PID **9136**,
+`exitCode=null` на момент readiness, `handoff.confirmed` присутній. Отримано
+`launcher-started`, `waiting-for-application-exit`, `application-exited`,
+`diagnostic-no-installer`, `launcher-completed`. **PASS стосується лише bootstrap
+і роботи незалежного launcher після виходу Electron.** Реальні UAC, NSIS,
+selective update, success marker і restart у цьому тесті не виконувалися.
+Попередні 22/22 автоматичних перевірки не підміняють це підтвердження власника.
+
+### Повний Client integration test — PASS (результат зафіксовано 2026-10-27)
+
+Власник успішно використав ZIP
+`release/diagnostics/stage-9.1.3/full-update-test/HromadaAID-Client-FullUpdateTest-0.1.0-win-x64.zip`
+і README поруч із ним. Це свіжа ізольована збірка Client 0.1.0 з повним production
+launcher; обмеження diagnostic-no-installer відсутнє. Main source лишається 0.1.1,
+на момент тесту виправлений updater був у незакоміченому коді; під час подальшої
+консолідації його зафіксовано локальними комітами. Опублікований Stable 0.1.1 не
+змінювався; тест установив саме офіційний Client цього релізу.
+
+Перед пакуванням додано перевірки свіжості marker поточної спроби й ProductVersion
+встановленого EXE. Exit 0, старий marker або правильний marker з EXE 0.1.0 не є
+успіхом. Windows ProductVersion 0.1.1.0 відповідає SemVer 0.1.1. Неможливість
+видалити marker із Program Files журналюється, ACL не змінюються; потрібен його
+новий запис після початку поточної спроби. Помилка автоматичного restart показує
+інструкцію відкрити штатний ярлик; факт успішного встановлення зберігається окремо.
+
+**Підстава PASS — безпосереднє підтвердження власника про Windows 10 x64 VM.**
+Початковий стан — офіційний Combined 0.1.0 із налаштованим API Server.
+Підтверджено розгортання тестового Client 0.1.0, виявлення справжнього GitHub
+Stable 0.1.1, завантаження й перевірку пакета, коректне закриття Client,
+стандартний Windows UAC, запуск справжнього NSIS, завершення встановлення,
+автоматичний restart та встановлену версію Client 0.1.1.
+
+Після встановлення контрольний PowerShell-скрипт із README повернув:
+
+```text
+PASS: Client 0.1.1, success marker, Server/Manager files and API Service preserved.
+```
+
+Скрипт підтвердив ProductVersion, що відповідає 0.1.1, правильну версію success
+marker та його створення/оновлення після початку тесту. InstalledComponents,
+контрольні SHA-256 файлів Server/Manager і стан/PID API Service до/після не
+змінилися. **U02 PASS лише в цьому обсязі**: повна цілісність SQLite, усіх
+серверних даних і безперервність API health протягом оновлення не підтверджені.
+
+**Журнали успішного тесту свідомо не збиралися й не аналізувалися.** Не підтверджено
+окремою перевіркою наявність `elevation-requested`, `installer-process-created`,
+`installed-component-verified`, `update-confirmed`, `application-restarted` або
+`launcher-completed` саме в логах цього повного тесту. PASS установлено за
+фактичним результатом, версією, marker і контрольним скриптом. Не виводити з нього
+неперевірені подробиці внутрішніх подій, візуального прогресу чи негативних тестів.
+
+Наступні перевірки — повний Manager GitHub update, окреме збереження API даних,
+виправлення ярликів та
+окремі UAC cancellation/retry і failure/recovery сценарії. Stage 9.1.3 і Stage 9.1
+не завершені; production readiness не заявляється.
+
+При підготовці пакета пройшли **25/25** автоматичних перевірок, Electron TypeScript
+та ізольована production build. У тих автоматичних тестах UAC/NSIS замокані;
+реальний Setup запускав власник лише у VM. Під час фіксації результату виконано
+лише документаційні перевірки; збірки й тести не повторювалися.
+
+| ID | Сценарій | Статус | Примітка |
+| --- | --- | --- | --- |
+| U00 | Незалежний bootstrap після виходу Electron | VM PASS | Підтвердження власника, PID 7044/9136; без NSIS |
+| U01 | Повний Client 0.1.0 → 0.1.1 через справжній GitHub Stable, UAC/NSIS, marker і restart | VM PASS | Власник підтвердив реальний Windows 10 x64 VM-тест; контрольний скрипт успішний; журнали не збиралися |
+| U02 | InstalledComponents, контрольні файли Server/Manager і стан/PID API Service | VM PASS у межах виконаних перевірок | Незмінність до/після підтверджена скриптом; без повної перевірки SQLite/усіх даних і безперервності API health |
+| U03 | Реальна UAC cancellation і retry | PENDING (NOT TESTED) | Окремо не перевірялися |
 
 Перед початком:
 
@@ -50,8 +232,8 @@ GitHub update.
   GitHub, download прогрес реального asset і його checksum через мережу.
 - Обов'язковий Client/Manager update gate, порядок Manager → API Server,
   повторна спроба після тимчасової відмови та повторний запуск після встановлення.
-- Для перевірки оновлення з 0.1.0 потрібен опублікований сумісний Stable 0.1.1.
-  Реліз має містити Setup, Server ZIP та узгоджений
+- Для повторної перевірки оновлення з 0.1.0 використовується опублікований Stable
+  0.1.1. Реліз має містити Setup, Server ZIP та узгоджений
   `release-manifest.json`; prerelease не підходить.
 
 Не позначайте GitHub update-сценарії успішними на підставі лише локальних тестів
@@ -376,6 +558,20 @@ release має бути опублікований із повним manifest т
 manifest. Якщо Manager старіший за реліз, спочатку виконайте C-сценарії. Для
 кожної VM використовуйте snapshot, synthetic SQLite і backup.
 
+### D00 — Основний Server ZIP update: VM PASS у повідомленому обсязі
+
+- **Початковий стан:** Windows 10 x64 VM, офіційний Combined 0.1.0, Manager
+  установлено локальним виправленим Setup до 0.1.1; API лишався 0.1.0.
+- **Дії та результат:** власник підтвердив успішний Server ZIP update через
+  Manager до 0.1.1 зі справжнього GitHub Stable після додавання installer helpers.
+- **Межі:** окремі контрольні записи SQLite, hashes конфігурації, безперервний
+  health і негативний recovery цим повідомленням не підтверджені. D01–D12 не
+  отримують автоматично PASS на підставі D00.
+- **Історія FAIL:** до fix відсутній Manager-owned installer залишив Server.next
+  без journal; Service Running зі старим PID та API 0.1.0. Test-Path у VM дав
+  False. Після packaging fix основний сценарій успішний; recovery без journal
+  і надалі заборонений, жодного автоматичного очищення staging не додано.
+
 ### D01 — Виявлення API Server версії
 
 - **Початкові умови:** встановлений API старіший за Stable release; Manager
@@ -572,64 +768,67 @@ E01–E10 виконувати на окремих snapshot VM і тільки �
 
 ## Таблиця проходження
 
-Початковий статус кожного сценарію — **Не перевірено**. Змініть його лише після
+Таблиця містить поточний обсяг доказів; **PENDING** означає відсутність окремого
+підтвердження. Змінюйте статус лише після
 фактичного проходження в зазначеному середовищі; в примітці вкажіть VM snapshot,
 версії та короткий результат. Локальні packaging перевірки не зараховуються як
 успіх GitHub update чи Windows VM сценарію.
 
 | ID | Сценарій | Статус | Примітка |
 | --- | --- | --- | --- |
-| A01 | Початкове встановлення Client-only | Не перевірено | |
-| A02 | Початкове встановлення Server-only | Не перевірено | |
-| A03 | Початкове встановлення Combined | Не перевірено | |
-| A04 | Створення Windows Service | Не перевірено | |
-| A05 | Перший запуск Client | Не перевірено | |
-| A06 | Перший запуск Server Manager | Не перевірено | |
-| A07 | Підключення Client до API Server | Не перевірено | |
-| A08 | Combined первинне налаштування з порожніми Data/Backups на різних дисках | PASS | Власник підтвердив на чистій Windows 10 x64 VM: Setup 0.1.1, первинне налаштування API на D:/E: та працездатність системи. Не поширюється на інші режими чи сценарії |
-| B01 | Автоматичне виявлення Client update | Не перевірено | Потрібен Stable Release |
-| B02 | Обов'язкове модальне вікно Client | Не перевірено | Потрібен Stable Release |
-| B03 | Немає пропуску/відкладання Client | Не перевірено | Потрібен Stable Release |
-| B04 | Client download і прогрес | Не перевірено | Потрібен Stable Release |
-| B05 | Перевірка Client Setup | Не перевірено | Потрібен Stable Release |
-| B06 | Client UAC підтвердження | Не перевірено | Потрібен Stable Release |
-| B07 | Client NSIS встановлення | Не перевірено | Потрібен Stable Release |
-| B08 | Автоматичний перезапуск Client | Не перевірено | Потрібен Stable Release |
-| B09 | Збереження Client налаштувань | Не перевірено | Потрібен Stable Release |
-| B10 | Server збережений у Combined | Не перевірено | Потрібен Stable Release |
-| B11 | Відмова UAC Client | Не перевірено | Потрібен Stable Release |
-| B12 | Retry Client update | Не перевірено | Потрібен Stable Release |
-| C01 | Виявлення Manager update | Не перевірено | Потрібен Stable Release |
-| C02 | Обов'язковість Manager update | Не перевірено | Потрібен Stable Release |
-| C03 | Доступність recovery | Не перевірено | Потрібен Stable Release |
-| C04 | Manager download | Не перевірено | Потрібен Stable Release |
-| C05 | Перевірка Manager Setup | Не перевірено | Потрібен Stable Release |
-| C06 | Manager-only NSIS | Не перевірено | Потрібен Stable Release |
-| C07 | UAC Manager update | Не перевірено | Потрібен Stable Release |
-| C08 | Автоматичний перезапуск Manager | Не перевірено | Потрібен Stable Release |
-| C09 | Збереження конфігурації | Не перевірено | Потрібен Stable Release |
-| C10 | API Service працює під час Manager update | Не перевірено | Потрібен Stable Release |
-| C11 | Installed Apps збережено | Не перевірено | Потрібен Stable Release |
-| C12 | Retry Manager update | Не перевірено | Потрібен Stable Release |
-| D01 | Виявлення API Server update | Не перевірено | Потрібен Stable Release |
-| D02 | Завантаження Server ZIP | Не перевірено | Потрібен Stable Release |
-| D03 | SHA-256 та embedded manifest | Не перевірено | Потрібен Stable Release |
-| D04 | Попередження про зупинку API | Не перевірено | Потрібен Stable Release |
-| D05 | Підтвердження адміністратора | Не перевірено | Потрібен Stable Release |
-| D06 | Зупинка Service після згоди | Не перевірено | Потрібен Stable Release |
-| D07 | Транзакція та recovery artifacts | Не перевірено | Потрібен Stable Release |
-| D08 | Автоматичний запуск Service | Не перевірено | Потрібен Stable Release |
-| D09 | API health і фактичний результат | Не перевірено | Потрібен Stable Release |
-| D10 | SQLite збережена | Не перевірено | Потрібен Stable Release |
-| D11 | Конфігурація збережена | Не перевірено | Потрібен Stable Release |
-| D12 | Recovery після server failure | Не перевірено | Потрібен Stable Release |
-| E01 | Відсутність інтернету | Не перевірено | VM |
-| E02 | GitHub недоступний | Не перевірено | VM |
-| E03 | Перерване завантаження | Не перевірено | Потрібен Stable Release, VM |
-| E04 | Пошкоджений пакет | Не перевірено | Окрема тестова копія |
-| E05 | Недостатньо місця | Не перевірено | Тестовий диск/VM |
-| E06 | Відмова UAC | Не перевірено | VM |
-| E07 | Перерване встановлення | Не перевірено | Ізольована snapshot VM |
-| E08 | Retry після помилки | Не перевірено | VM |
-| E09 | Некоректний SemVer/prerelease | Не перевірено | Hosted частина потребує Release |
-| E10 | Незавершена server транзакція | Не перевірено | Ізольована snapshot VM |
+| A01 | Початкове встановлення Client-only | PENDING | |
+| A02 | Початкове встановлення Server-only | PENDING | |
+| A03 | Початкове встановлення Combined | PENDING | |
+| A04 | Створення Windows Service | PENDING | |
+| A05 | Перший запуск Client | PENDING | |
+| A06 | Перший запуск Server Manager | PENDING | |
+| A07 | Підключення Client до API Server | PENDING | |
+| A08 | Combined первинне налаштування з порожніми Data/Backups на різних дисках | VM PASS | Власник підтвердив на чистій Windows 10 x64 VM: Setup 0.1.1, первинне налаштування API на D:/E: та працездатність системи. Не поширюється на інші режими чи сценарії |
+| B01 | Автоматичне виявлення Client update | VM PASS | U01: тестовий Client 0.1.0 на Win10 x64 VM виявив справжній Stable 0.1.1; періодична перевірка кожні 3 години окремо не підтверджена |
+| B02 | Обов'язкове модальне вікно Client | PENDING | Окрему перевірку блокування основного UI не підтверджено |
+| B03 | Немає пропуску/відкладання Client | PENDING | Окрему перевірку неможливості пропуску/відкладання не підтверджено |
+| B04 | Client download і прогрес | VM PASS у межах завантаження | U01: офіційний Setup завантажено й перевірено; візуальний прогрес окремо не підтверджений. Timeout попередньої невдалої спроби збережено в історії вище |
+| B05 | Перевірка Client Setup | VM PASS | U01: пакет успішно перевірено; відхилення пошкодженого/підміненого пакета цим VM-тестом не перевірялося |
+| B06 | Client UAC підтвердження | VM PASS | Власник спостерігав і підтвердив стандартний Windows UAC у U01 |
+| B07 | Client NSIS встановлення | VM PASS | U01: справжній NSIS завершив установлення, Client 0.1.1 і свіжий marker підтверджено скриптом; попередній FAIL збережено в історії |
+| B08 | Автоматичний перезапуск Client | VM PASS | Власник спостерігав автоматичний restart після Setup та Client 0.1.1; події журналу окремо не аналізувалися |
+| B09 | Збереження Client налаштувань | PENDING | Окремого порівняння користувацьких налаштувань не підтверджено |
+| B10 | Server збережений у Combined | VM PASS у контрольному обсязі | U02: InstalledComponents, контрольні SHA-256 Server/Manager і стан/PID API Service незмінні; без повної SQLite/data integrity та безперервного API health |
+| B11 | Відмова UAC Client | PENDING (NOT TESTED) | U03: відмову UAC окремо не перевіряли |
+| B12 | Retry Client update | PENDING (NOT TESTED) | U03: повтор після відмови UAC/іншої помилки окремо не перевіряли |
+| C01 | Виявлення Manager update | VM PASS | Manager 0.1.0 на Win10 x64 VM виявив 0.1.1 |
+| C02 | Обов'язковість Manager update | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| C03 | Доступність recovery | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| C04 | Manager download | VM PASS | Setup завантажено до етапу перевірки SHA-256 |
+| C05 | Перевірка Manager Setup | PENDING | Перевірка розпочалася; успішний SHA-256 результат не підтверджений |
+| C06 | Manager-only NSIS | VM PASS (локальний Setup) | Власник підтвердив Manager 0.1.1 після SetOutPath swap fix; повний GitHub auto-update PENDING. Попередні FAIL збережені в історії |
+| C07 | UAC Manager update | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| C08 | Автоматичний перезапуск Manager | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| C09 | Збереження конфігурації | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| C10 | API Service працює під час Manager update | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| C11 | Installed Apps збережено | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| C12 | Retry Manager update | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| D00 | Основний API ZIP update 0.1.0 → 0.1.1 | VM PASS | Через Manager після локального Setup з installer helpers; окремі data/config preservation checks PENDING |
+| D01 | Виявлення API Server update | PENDING | D00 успішний; окрема перевірка discovery/стану служби при виявленні не підтверджена |
+| D02 | Завантаження Server ZIP | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| D03 | SHA-256 та embedded manifest | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| D04 | Попередження про зупинку API | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| D05 | Підтвердження адміністратора | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| D06 | Зупинка Service після згоди | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| D07 | Транзакція та recovery artifacts | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| D08 | Автоматичний запуск Service | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| D09 | API health і фактичний результат | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| D10 | SQLite збережена | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| D11 | Конфігурація збережена | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| D12 | Recovery після server failure | PENDING | Stable існує; окреме VM-підтвердження відсутнє |
+| E01 | Відсутність інтернету | PENDING | VM |
+| E02 | GitHub недоступний | PENDING | VM |
+| E03 | Перерване завантаження | PENDING | Потрібен Stable Release, VM |
+| E04 | Пошкоджений пакет | PENDING | Окрема тестова копія |
+| E05 | Недостатньо місця | PENDING | Тестовий диск/VM |
+| E06 | Відмова UAC | PENDING | VM |
+| E07 | Перерване встановлення | PENDING | Ізольована snapshot VM |
+| E08 | Retry після помилки | PENDING | VM |
+| E09 | Некоректний SemVer/prerelease | PENDING | Hosted частина потребує Release |
+| E10 | Незавершена server транзакція | PENDING | Ізольована snapshot VM |
+| W01 | Ярлики після Manager-only, Client-only та API ZIP update | PENDING | Дефект підтверджений, fix IMPLEMENTED / AUTOMATED PASS 14/14; новий Setup/VM-тест pending |

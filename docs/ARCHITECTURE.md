@@ -78,7 +78,10 @@ staging, але не перебудовує ACL кореня Backups під ко
 metadata, GitHub Releases API, HTTPS-перевірку redirect host, manifest contract,
 потокове завантаження, контроль точного розміру/SHA-256 і тимчасові файли з атомарним
 перейменуванням. `assets/release-channel.json` задає owner/repository; значення
-підтверджене Git remote. Токени не використовуються. Якщо джерело недоступне до
+підтверджене Git remote (`Anatol1ch/HromadaAID`). Токени не використовуються.
+З'єднання має timeout 20 с, потік — timeout бездіяльності 45 с; активне повільне
+завантаження не обмежується коротким загальним часом. JSON metadata має окремий
+обмежений timeout і size limit. Якщо джерело недоступне до
 підтвердження нового релізу, Client працює звичайно; після підтвердження номер версії
 і метадані зберігаються в Electron `userData`, тож вимога оновлення лишається після
 перезапуску й недоступності GitHub.
@@ -94,11 +97,25 @@ Electron main виконує асинхронну перевірку на зап
 дає ручну перевірку. Після підтвердженого релізу єдиний модальний gate блокує Client,
 поки перевірений Setup не встановить нову версію. Downloader тримає lock, показує
 progress, перевіряє цілісність і очищує лише власний неповний файл. Після явного
-підтвердження попередження про незбережені зміни окремий PowerShell launcher чекає
-завершення Client, викликає чинний Setup через звичайний UAC `RunAs`, чекає NSIS і
-підтверджує результат за маркером успішної секції; тоді запускає Client повторно.
+підтвердження попередження про незбережені зміни спільний
+`shared/windows-update-launcher.mjs` запускає короткий PowerShell bootstrap через
+абсолютний System32 шлях, без Node `detached:true`. Bootstrap через Start-Process
+створює незалежний launcher із файловими stdout/stderr. Electron очікує
+`ready.json` із правильним PID та завершення bootstrap, записує `handoff.confirmed`
+і лише тоді закривається. Без handoff Setup не авторизований.
+Launcher чекає завершення Client, викликає Setup через звичайний UAC `RunAs`, чекає
+NSIS і перевіряє exit code, свіжий success marker поточної спроби та ProductVersion
+EXE (допускається Windows fourth zero); тоді виконує один restart.
 Відмова UAC/невдале встановлення повертає Client до обов'язкового gate. Автоматичний
 rollback частково перезаписаного Client не заявляється.
+
+Діагностика лишається в користувацькому `updates/installer-launcher.log` і
+`updates/launcher-<uuid>/`: stdout/stderr, bootstrap stdout/stderr, ready/result,
+handoff та параметри bootstrap. Логи не містять credentials чи повного environment.
+Client і Manager використовують спільні `ReleaseUpdateDetails` / `ReleaseNotes` /
+`ReleaseUpdateProgress`: Markdown відтворюється React text nodes без raw HTML і
+активних посилань; довгий опис прокручується, download показує bytes/percent,
+невизначені етапи — indeterminate progress.
 
 Для цього використовується той самий NSIS Setup і запис Installed Apps. Спеціальний
 `/CLIENTUPDATE=1` обходить вибір компонентів/каталогів, виконує наявний Client
@@ -115,7 +132,7 @@ Server Manager повторно використовує той самий `shar
 три години, а розділ «Оновлення» дає ручну перевірку. Стан Manager з підтвердженим
 релізом атомарно зберігається в окремому `userData`; якщо GitHub згодом недоступний,
 обов’язковий gate залишається. Завантаження Setup перевіряється повторно перед
-запуском launcher. NSIS success marker підтверджує завершення; marker відсутній —
+запуском launcher. Свіжий NSIS marker і версія EXE підтверджують завершення; marker відсутній —
 після рестарту Manager зберігає вимогу оновлення. Менеджер оновлюється першим.
 
 Спільний release manifest описує сумісність Manager за `same-release-version` та
@@ -136,11 +153,28 @@ Data/Backups locators та не викликає server section, service control
 Setup через стандартний UAC `RunAs`, перевіряє exit code і marker, потім запускає
 Manager повторно. NSIS стадіює payload у `ServerManager.next`, виконує swap через
 `ServerManager.previous` і відновлює попередню папку, якщо rename перервався. Setup
-має візуальний progress. Після видалення попередньої папки повний rollback не
+перед swap виконує `SetOutPath "$INSTDIR"`, звільняючи робочий каталог
+`ServerManager.next`. Setup має візуальний progress. Після видалення попередньої папки повний rollback не
 гарантується. Реальні UAC, NSIS, переривання копіювання та перезапуск потребують
 Windows VM.
 
 ## Збірка
+
+`packaging/manager-setup-payload.mjs` залишає в Manager
+`resources/server-payload/installer` із PowerShell orchestration та sibling
+transaction/verifier/runtime-check modules; повний Server app/runtime/service
+повторно не копіюється. Manager має власні update/recovery helpers незалежно від
+версії завантаженого ZIP. Підготовка створює `Server.next` раніше за запуск
+installer; journal записується пізніше після preflight і зупинки Service.
+Залишки без journal зберігаються, автоматичне recovery заборонене.
+
+Ярлики обох компонентів синхронізує `packaging/windows-shortcuts.ps1` після
+встановлення/Modify. Selective update визначає інший встановлений компонент за
+`InstalledComponents`: Client-only передає ManagerSelected, Manager-only —
+ClientSelected. Звичайний режим використовує вибрані секції. Видаляються лише
+належні exact-name ярлики з очікуваним target/arguments/identity; сторонні й
+користувацькі ярлики зберігаються. API ZIP updater ярликами не керує. Єдиний
+Installed Apps запис і склад компонентів зберігає NSIS metadata section.
 
 TypeScript/React/Vite, Electron, pnpm; конфігурації й команди в `package.json`,
 `server/package.json`, `server-manager/electron-builder.yml`. NSIS Unicode + MUI2

@@ -4,7 +4,7 @@
 
 ## Executive summary
 
-**READY FOR PUBLICATION** для вихідного репозиторію за рішеннями власника: він підтвердив знеособлення трьох Client document templates і прямо дозволив публікацію власної контактної картки. За цими вказівками шаблонів не сканували повторно, картку не змінювали, Git history не переписували. Stable 0.1.0 Setup, Server ZIP і manifest підготовлені в `release/stage-9.1.3/stable-0.1.0/`; ручні Windows VM та live GitHub update перевірки залишаються невиконаними.
+**READY FOR PUBLICATION** для вихідного репозиторію в межах описаного аудиту та рішень власника: три Client templates знеособлені й підтверджені власником, публікація його контактної картки дозволена. Репозиторій уже Public; Stable 0.1.0/0.1.1 опубліковані. Поточні VM-результати та обмеження наведені в [HANDOFF.md](HANDOFF.md) і [manual testing](stage-9.1.3-manual-testing.md); це окрема оцінка від source publication readiness.
 
 Це висновок щодо публікації вихідного репозиторію в межах попереднього цільового аудиту, а не твердження про production readiness Stage 9.1. Ручні Windows VM і live GitHub Release перевірки лишаються окремими передумовами.
 
@@ -18,7 +18,30 @@ Production build явно копіює три шаблони з `reference/` у 
 
 Client portable ZIP не є залежністю первинного встановлення чи автоматичного оновлення: updater завантажує універсальний Setup, а release manifest містить лише Setup та Server ZIP. Client portable є окремим необов'язковим способом ручного перенесення/запуску. Manager portable каталог та його серверний runtime payload, навпаки, потрібні чинному процесу підготовки універсального Setup; Server ZIP потрібний API Server update.
 
-## Scope
+## Follow-up: консолідація 2026-10-27
+
+- Git: feature/client-server; baseline перед локальними consolidation commits —
+  b1fae6ff21111e26dad6242786106213dd54659d. Live ls-remote підтвердив default
+  feature/client-server, гілки feature/client-server та main, теги 0.1.0/0.1.1.
+  main є предком feature. Репозиторій не shallow; відомі remote tips доступні локально.
+- Перевірено лише новий diff/untracked source та чинні ignore rules; усю історію
+  повторно не сканували. На вході 22 tracked modifications і 7 untracked source/test
+  files; installer/archive/runtime-data/log artifacts серед них відсутні.
+  Цільовий пошук характерних token/private-key markers не дав нових знахідок;
+  це не повний secret scan і не повторний аудит XLSX.
+- Три дозволені XLSX tracked; видалений Реєстр.xlsx відсутній. Уже tracked
+  reference/ГЕРБ.png є попереднім графічним asset; нових документів не додано.
+  release/ та типові SQLite/log/backup/env/key шляхи ігноруються. `.gitignore`
+  не змінювався; дозволені TLS test fixtures збережені.
+- Потенційний історичний privacy blocker — контактна картка — прийнятий власником;
+  через нього history cleanup не потрібний. Нових підтверджених publication
+  blockers у межах цієї перевірки не виявлено. Неоголошені/видалені remote refs
+  залишаються поза початковим audit scope.
+- Попередні артефакти вже перебудовувалися в окремих packaging-завданнях. Для
+  майбутнього 0.1.2 потрібен новий production build зі штатного source за окремим
+  завданням; поточна консолідація не змінює жодного release artifact.
+
+## Scope початкового аудиту (історичний зріз 2026-10-26)
 
 - Поточна гілка: `feature/client-server`; HEAD: `521251067e2f9c6f81559ea337402e61dfbd78e5`.
 - Перевірено Git-tracked files поточного HEAD, назви файлів та вміст доступних історичних Git objects для всіх локально досяжних refs: 122 коміти, репозиторій не shallow.
@@ -39,7 +62,7 @@ Client portable ZIP не є залежністю первинного встан
 - **Використання:** `Список.xlsx` і `Зведений список.xlsx` читаються `electron/statements-ipc.ts` як основа персональної та зведеної відомостей; `ПриватБанк.xlsx` — як основа платіжного XLSX. Їхній layout потрібний Excel COM генераторам. `Реєстр.xlsx` раніше читав лише `scripts/import-2026-register.py` як джерело імпорту; власник його видалив. Три шаблони призначені для Git, імпортне джерело не відстежується й packaging його не копіює.
 - **Причина включення:** `electron/copy-assets.mjs` явно копіює перші три файли в `dist-electron/electron/reference`; `package.json` включає цей каталог у `app.asar`. `scripts/package-client-portable.mjs` перевіряє наявність цих трьох шаблонів. Server Manager payload їх не включає.
 - **Рекомендація:** збирати Client payload із цих трьох відстежуваних шаблонів; не включати імпортні реєстри чи інші локальні документи. Перед публікацією інсталяторів оновити release artifacts.
-- **Статус:** Шаблони підготовлено власником; технічні generation/packaging checks пройшли (див. HANDOFF). Stage 9.1.3 binaries не перебудовані.
+- **Статус:** Прийнято власником; три шаблони tracked, generation/packaging checks пройшли. Артефакти Stable 0.1.0/0.1.1 зібрані в попередніх завданнях; майбутні assets вимагають власної перевірки.
 
 ### F-02 – Контактні дані адміністратора/розробника у UI feature-гілки
 
@@ -63,7 +86,7 @@ Client portable ZIP не є залежністю первинного встан
 - **Шлях:** `.gitignore`.
 - **Ризик:** до аудиту не ігнорувалися поширені розширення локальних приватних ключів і crash dumps; можна було випадково додати такі файли в майбутньому. Тестові PEM fixtures лишаються явними винятками.
 - **Рекомендація:** зберегти додані вузькі правила та надалі перевіряти `git status` перед комітом. `.gitignore` не захищає файли, які вже відстежуються Git.
-- **Статус:** Виправлено в незакоміченій зміні цього завдання.
+- **Статус:** Виправлено та зафіксовано раніше; чинні правила збережені.
 
 ### F-05 – Секрети в доступному коді та історії
 
@@ -76,7 +99,7 @@ Client portable ZIP не є залежністю первинного встан
 ## Перевірка `.gitignore` та пакетів
 
 - Ігноруються production `.env`-варіанти, SQLite та журнали, резервні копії, runtime logs, локальні XLSX у `reference/`, каталоги збірки й `release/`. Для приватних ключів і crash dumps додано вузькі правила; потрібні TLS test fixtures залишені явними винятками.
-- `.gitignore` не знімає з відстеження наявні файли. Перевірено, що Excel-книги не є tracked.
+- `.gitignore` не знімає з відстеження наявні файли. Три дозволені Excel templates tracked; інші локальні книги не додаються автоматично.
 - Stage 9.1.3 артефакти знаходяться поза Git під `release/`; їх не потрібно видаляти з індексу.
 - Client `app.asar` містить три локальні reference XLSX. Server Manager `app.asar` їх не містить.
 - Переглянута серверна packaging-конфігурація виключає runtime data, test/fixture каталоги та приватні ключі; серверний ZIP має integrity manifest. Ця перевірка не замінює аудит кожного майбутнього release artifact.
@@ -86,12 +109,12 @@ Client portable ZIP не є залежністю первинного встан
 
 **READY FOR PUBLICATION** для source repository згідно з підтвердженнями та рішеннями власника.
 
-Source visibility readiness та наявність перевірених package hashes не означають production readiness Stage 9.1: інсталятор не встановлювався, служба не запускалася, а hosted GitHub Release/download не перевірявся.
+Source publication readiness та перевірені hashes не означають production readiness Stage 9.1. Актуальні VM PASS/PENDING/FAIL збережено в manual testing; цей документ не підвищує їхній статус.
 
-## Рекомендовані дії перед зміною видимості
+## Рекомендації перед майбутніми push/merge та releases
 
 1. Відстежувати лише три дозволені Client templates; не додавати інші документи з `reference/`.
 2. Після успішного технічного огляду за окремим погодженням перебудувати Setup і Server ZIP/manifest. Client portable не потрібен обов'язковому release workflow.
-3. Зберігати Windows VM та live GitHub update сценарії як невиконані до їх фактичного проходження; READY для source visibility не є production-ready для Stage 9.1.
+3. Зберігати межі вже підтверджених VM-результатів; Manager hosted update, shortcut fix та data-preservation/negative сценарії лишаються pending. READY для source publication не є production-ready для Stage 9.1.
 
 Власник дозволив публічний репозиторій і публікацію контактної картки. Під час поточного етапу не змінюються repository visibility, GitHub Releases, інсталяції, Windows Service чи робочі дані; push, tag і history rewrite не виконуються. Пакети не перебудовуються.
