@@ -407,13 +407,23 @@
 .sm-recovery-key { margin: 0 0 10px; max-height: none; overflow: visible; }
 .sm-recovery-content .sm-form-actions { justify-content: flex-start; }
 .sm-clipboard-input { position: fixed; width: 1px; height: 1px; opacity: 0; top: 0; left: 0; }
-.sm-package-summary { display: flex; align-items: flex-start; gap: 18px; padding: 22px; }
-.sm-package-summary > div { flex: 1; }
+.sm-package-summary { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(190px, 230px); align-items: start; gap: 18px; padding: 22px; }
+.sm-package-summary-content { min-width: 0; }
+.sm-card-actions { display: grid; justify-items: stretch; gap: 10px; min-width: 0; }
+.sm-card-actions > button { justify-content: center; max-width: 100%; }
 .sm-package-summary h2 { margin: 0 0 16px; font-size: 18px; }
 .sm-package-summary dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 0; }
 .sm-package-summary dt { color: var(--color-text-secondary); font-size: 12px; margin-bottom: 7px; }
 .sm-package-summary dd { margin: 0; font-weight: 650; }
-.sm-update-source { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 18px; padding: 24px; }
+.sm-release-status { display: grid; justify-items: start; gap: 5px; min-width: 0; }
+.sm-release-status-detail { color: var(--color-text-secondary); font-size: 12px; font-weight: 450; line-height: 1.45; overflow-wrap: anywhere; }
+.sm-release-notes-toggle { margin-top: 14px; border: 1px solid var(--border-surface); border-radius: var(--radius-control); background: var(--surface-panel); }
+.sm-release-notes-toggle > summary { padding: 10px 12px; color: var(--color-text-control); font-size: 13px; font-weight: 650; cursor: pointer; }
+.sm-release-notes-toggle[open] > summary { border-bottom: 1px solid var(--border-surface); }
+.sm-release-notes-toggle .release-notes-section { padding: 0 12px 12px; }
+.sm-release-notes-toggle .release-notes { max-height: none; margin: 0; overflow: visible; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
+.sm-package-summary .release-update-progress { grid-column: 2 / -1; }
+.sm-update-source { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 18px; padding: 24px; }
 .sm-update-source > svg { color: var(--accent-green); }
 .sm-update-source h2 { margin: 0 0 7px; font-size: 18px; }
 .sm-update-source p { margin: 0; color: var(--color-text-secondary); font-size: 13px; }
@@ -441,10 +451,10 @@
 .sm-release-update-modal .release-update-progress strong { color: var(--color-text-control); }
 .sm-release-update-modal .release-update-progress progress { width: 100%; min-width: 0; height: 12px; accent-color: var(--accent-green); }
 .sm-release-update-modal .release-update-progress small { font-size: 12px; }
-.sm-package-summary .release-notes { max-height: 140px; margin: 10px 0; overflow: auto; overflow-wrap: anywhere; }
-@media (max-width: 1000px) { .sm-setup-callout, .sm-update-source { grid-template-columns: auto minmax(0, 1fr); } .sm-setup-callout > button, .sm-update-source > button { grid-column: 2; justify-self: start; } .sm-package-summary dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.sm-package-summary .release-notes { overflow-wrap: anywhere; }
+@media (max-width: 1000px) { .sm-setup-callout, .sm-update-source { grid-template-columns: auto minmax(0, 1fr); } .sm-setup-callout > button, .sm-update-source > button { grid-column: 2; justify-self: start; } .sm-package-summary { grid-template-columns: auto minmax(0, 1fr) minmax(160px, 200px); } .sm-package-summary dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 800px) { .sm-backup-summary { grid-template-columns: 1fr; } .sm-backup-summary article { border-right: 0; border-bottom: 1px solid var(--border-surface); } .sm-backup-summary article:last-child { border-bottom: 0; } .sm-backup-scenarios { grid-template-columns: 1fr; } }
-@media (max-width: 600px) { .sm-modal { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); } .sm-modal-header, .sm-modal-footer, .sm-modal-body { padding: 16px; } .sm-modal-header h2 { font-size: 16px; } .sm-modal-footer > button { flex: 1 1 auto; } .sm-operation-stages { grid-template-columns: 1fr; } .sm-auth-card { padding: 22px; } .sm-package-summary { flex-direction: column; } .sm-backup-panel { padding: 12px; } .sm-backup-table td, .sm-backup-table th { padding: 10px 4px; } .sm-backup-table .sm-status { padding: 3px 5px; } }
+@media (max-width: 600px) { .sm-modal { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); } .sm-modal-header, .sm-modal-footer, .sm-modal-body { padding: 16px; } .sm-modal-header h2 { font-size: 16px; } .sm-modal-footer > button { flex: 1 1 auto; } .sm-operation-stages { grid-template-columns: 1fr; } .sm-auth-card { padding: 22px; } .sm-package-summary { grid-template-columns: auto minmax(0, 1fr); } .sm-card-actions { grid-column: 2; width: 100%; max-width: 320px; } .sm-package-summary .release-update-progress { grid-column: 1 / -1; } .sm-backup-panel { padding: 12px; } .sm-backup-table td, .sm-backup-table th { padding: 10px 4px; } .sm-backup-table .sm-status { padding: 3px 5px; } }
 @media (max-width: 760px) {
   .sm-app { grid-template-columns: 176px minmax(0, 1fr); }
   .sm-sidebar { position: sticky; top: 0; height: 100dvh; padding: 18px 10px; border-right: 1px solid var(--border-standard); border-bottom: 0; }

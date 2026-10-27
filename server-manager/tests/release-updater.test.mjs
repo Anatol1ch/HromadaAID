@@ -45,7 +45,8 @@ test('Manager and API checks share one Stable manifest, verify separate download
     })
     return child
   }
-  const updater = createReleaseUpdater({ currentVersion: '0.1.2', resourcesPath, userDataPath, executablePath, processId: 17, sharedModulePath: fileURLToPath(new URL('../../shared/release-updates.mjs', import.meta.url)), fetchImpl, publish: () => {}, spawnProcess })
+  const publishedStates = []
+  const updater = createReleaseUpdater({ currentVersion: '0.1.2', resourcesPath, userDataPath, executablePath, processId: 17, sharedModulePath: fileURLToPath(new URL('../../shared/release-updates.mjs', import.meta.url)), fetchImpl, publish: state => publishedStates.push(state), spawnProcess })
   try {
     const first = updater.check('0.1.2')
     assert.equal((await updater.check('0.1.2')).manager.status, 'checking')
@@ -75,12 +76,16 @@ test('Manager and API checks share one Stable manifest, verify separate download
     assert.match(failedLauncher.getState().manager.error, /synthetic launcher failure/)
 
     await writeFile(join(managerDirectory, 'manager-update-success.txt'), version)
-    const updatedManager = createReleaseUpdater({ currentVersion: version, resourcesPath, userDataPath, executablePath, processId: 18, sharedModulePath: fileURLToPath(new URL('../../shared/release-updates.mjs', import.meta.url)), fetchImpl, publish: () => {} })
+    const updatedManager = createReleaseUpdater({ currentVersion: version, resourcesPath, userDataPath, executablePath, processId: 18, sharedModulePath: fileURLToPath(new URL('../../shared/release-updates.mjs', import.meta.url)), fetchImpl, publish: state => publishedStates.push(state) })
     await updatedManager.restore()
     await updatedManager.check('0.1.2')
     const downloadedServer = await updatedManager.download('server')
     assert.equal((await readFile(downloadedServer.packagePath)).equals(server), true)
     assert.equal(updatedManager.getState().server.status, 'ready')
+    const serverDownloadStates = publishedStates.map(state => state.server).filter(state => state.status === 'downloading' || state.status === 'verifying' || state.status === 'ready')
+    assert.ok(serverDownloadStates.some(state => state.status === 'downloading' && state.receivedBytes > 0 && state.totalBytes === server.length))
+    assert.ok(serverDownloadStates.some(state => state.status === 'verifying' && state.receivedBytes === server.length && state.totalBytes === server.length))
+    assert.equal(serverDownloadStates.at(-1).status, 'ready')
 
   } finally { await rm(root, { recursive: true, force: true }) }
 })

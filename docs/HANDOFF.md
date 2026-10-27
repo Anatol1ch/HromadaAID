@@ -199,3 +199,26 @@ restart не змінювалися. `InstalledComponents`, Service, дані т
 цією UX-правкою. Цільові NSIS/selective-update перевірки проходять; ручна Windows VM
 перевірка welcome, selective flow, completion та restart залишається PENDING.
 Production Setup не пакувався.
+
+## 0.1.4 — Server Manager: сторінка оновлень
+
+IMPLEMENTED у `server-manager/src/UpdateManagement.tsx`: API Server ZIP download
+використовує спільний `ReleaseUpdateProgress`, як Client і завантаження Setup.
+Передані updater-ом `receivedBytes`/`totalBytes` визначають відсоток лише за відомого
+розміру; для невідомого розміру смуга лишається indeterminate і може показати реально
+отримані байти. Під час завантаження діалог не показує етапи серверної транзакції;
+після отримання та перевірки ZIP він переходить до наявного preview, а встановлення
+зберігає порядок семи етапів без змін.
+
+Три картки сторінки залишилися на місці, їхні основні дії перенесені у праву колонку;
+кнопка Server ZIP показується лише за статусу доступного оновлення та зберігає чинні
+guards. Release notes Server розгортаються через компактний disclosure з наявним
+безпечним renderer. Статуси Manager відповідають Client: «Встановлено останню
+перевірену версію», «Доступна версія …», повідомлення перевірки та помилки; перевірка
+позначається активною одразу після натискання. Update mechanisms, SHA-256, API
+transaction, Service, recovery та restart не змінювалися.
+
+Цільові автоматичні перевірки: 3/3 PASS (статусні стани, відсутність фіктивного
+відсотка без розміру та події байтів/перехід verifying → ready). Два Manager/Client
+UI TypeScript no-emit checks пройшли. Windows VM-візуальна перевірка кнопок, довгих
+release notes, невідомого download size і вузького вікна залишається PENDING.

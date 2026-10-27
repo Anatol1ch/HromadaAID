@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 
 function inline(text: string, keyPrefix: string): ReactNode[] {
   const pattern = /(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|(?<!\*)\*[^*]+\*|(?<!_)_[^_]+_|\[[^\]]+\]\([^)]+\))/g
@@ -31,14 +31,19 @@ export function ReleaseUpdateDetails({ currentVersion, targetVersion, notes }: {
   </>
 }
 
-export function ReleaseNotes({ notes }: { notes?: string }) {
+export function ReleaseNotes({ notes, heading = 'Що змінилося', preserveLineBreaks = false }: { notes?: string; heading?: string; preserveLineBreaks?: boolean }) {
   const source = notes?.replace(/\r/g, '') || 'Опис змін для цього випуску не надано.'
   const lines = source.split('\n')
   const blocks: ReactNode[] = []
   let paragraph: string[] = []
   let list: string[] = []
   const flushParagraph = () => {
-    if (paragraph.length) blocks.push(<p key={`p-${blocks.length}`}>{inline(paragraph.join(' '), `p-${blocks.length}`)}</p>)
+    if (paragraph.length) {
+      const key = `p-${blocks.length}`
+      blocks.push(<p key={key}>{preserveLineBreaks
+        ? paragraph.map((line, index) => <Fragment key={`${key}-${index}`}>{index > 0 && <br/>}{inline(line, `${key}-${index}`)}</Fragment>)
+        : inline(paragraph.join(' '), key)}</p>)
+    }
     paragraph = []
   }
   const flushList = () => {
@@ -63,7 +68,7 @@ export function ReleaseNotes({ notes }: { notes?: string }) {
   }
   flushParagraph(); flushList()
   return <section className="release-notes-section" aria-label="Опис змін">
-    <h3>Що змінилося</h3>
+    {heading && <h3>{heading}</h3>}
     <div className="release-notes" tabIndex={0}>{blocks}</div>
   </section>
 }
@@ -80,5 +85,6 @@ export function ReleaseUpdateProgress({ label, receivedBytes, totalBytes, indete
     <div><span>{label}</span>{!indeterminate && total > 0 && <strong>{percent}%</strong>}</div>
     <progress aria-label={label} max={total || undefined} value={indeterminate || !total ? undefined : Math.min(received, total)} />
     {!indeterminate && total > 0 && <small>{format(received)} з {format(total)}</small>}
+    {received > 0 && (indeterminate || total <= 0) && <small>Завантажено {format(received)}</small>}
   </div>
 }

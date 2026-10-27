@@ -64,7 +64,7 @@ function EventTable({ events, compact = false, caption = 'Демонстраці
   </table></div>
 }
 
-function RealContent({ section, inspection, checking, serviceOperation, controlService, refresh, filter, setFilter, startInstall, updatePreview, updateBusy, updateProgress, updateResult, lastUpdateResult, updateError, updateErrorDetails, chooseUpdate, cancelUpdate, applyUpdate, backupBusy, managerRelease, serverRelease, checkReleases, downloadManager, installManager, downloadServer }: { section: Section; inspection: InspectionSnapshot | null; checking: boolean; serviceOperation: ServiceControlOperation | null; controlService: (operation: ServiceControlOperation) => void; refresh: () => void; filter: 'all' | 'issues'; setFilter: (value: 'all' | 'issues') => void; startInstall: () => void; updatePreview: ServerUpdatePreview | null; updateBusy: boolean; updateProgress: ServerUpdateProgress | null; updateResult: ServerUpdateResult | null; lastUpdateResult: ServerUpdateResult | null; updateError: string; updateErrorDetails: string; chooseUpdate: () => void; cancelUpdate: () => void; applyUpdate: () => void; backupBusy: boolean; managerRelease: ReleaseUpdateState | null; serverRelease: ServerReleaseState | null; checkReleases: () => void; downloadManager: () => void; installManager: () => void; downloadServer: () => void }) {
+function RealContent({ section, inspection, checking, serviceOperation, controlService, refresh, filter, setFilter, startInstall, updatePreview, updateBusy, updateProgress, updateResult, lastUpdateResult, updateError, updateErrorDetails, chooseUpdate, cancelUpdate, applyUpdate, backupBusy, managerRelease, serverRelease, checkingReleases, checkReleases, downloadManager, installManager, downloadServer }: { section: Section; inspection: InspectionSnapshot | null; checking: boolean; serviceOperation: ServiceControlOperation | null; controlService: (operation: ServiceControlOperation) => void; refresh: () => void; filter: 'all' | 'issues'; setFilter: (value: 'all' | 'issues') => void; startInstall: () => void; updatePreview: ServerUpdatePreview | null; updateBusy: boolean; updateProgress: ServerUpdateProgress | null; updateResult: ServerUpdateResult | null; lastUpdateResult: ServerUpdateResult | null; updateError: string; updateErrorDetails: string; chooseUpdate: () => void; cancelUpdate: () => void; applyUpdate: () => void; backupBusy: boolean; managerRelease: ReleaseUpdateState | null; serverRelease: ServerReleaseState | null; checkingReleases: boolean; checkReleases: () => void; downloadManager: () => void; installManager: () => void; downloadServer: () => void }) {
   const snapshot = inspection
   const pending = notCheckedState(checking)
   const install = snapshot ? installationDisplay(snapshot.installation.status) : pending
@@ -157,7 +157,7 @@ function RealContent({ section, inspection, checking, serviceOperation, controlS
     <Panel title="Структуровані результати" icon={<Clock3 size={21} aria-hidden="true"/>} action={<label className="sm-filter">Показати<select value={filter} onChange={event => setFilter(event.target.value as 'all' | 'issues')}><option value="all">Усі перевірки</option><option value="issues">Проблеми й застереження</option></select></label>}><EventTable events={events.filter(event => filter === 'all' || event.level === 'error' || event.level === 'warning')} caption="Структуровані результати перевірок Windows та API"/></Panel>
   </>
 
-  return <UpdateManagement inspection={inspection} preview={updatePreview} busy={updateBusy} progress={updateProgress} result={updateResult} lastResult={lastUpdateResult} error={updateError} errorDetails={updateErrorDetails} disabled={checking || backupBusy || Boolean(serviceOperation)} choose={chooseUpdate} cancel={cancelUpdate} apply={applyUpdate} refresh={refresh} managerUpdate={managerRelease} serverUpdate={serverRelease} checkReleases={checkReleases} downloadManager={downloadManager} installManager={installManager} downloadServer={downloadServer}/>
+  return <UpdateManagement inspection={inspection} preview={updatePreview} busy={updateBusy} progress={updateProgress} result={updateResult} lastResult={lastUpdateResult} error={updateError} errorDetails={updateErrorDetails} disabled={checking || backupBusy || Boolean(serviceOperation)} choose={chooseUpdate} cancel={cancelUpdate} apply={applyUpdate} refresh={refresh} managerUpdate={managerRelease} serverUpdate={serverRelease} checkingReleases={checkingReleases} checkReleases={checkReleases} downloadManager={downloadManager} installManager={installManager} downloadServer={downloadServer}/>
 
 }
 
@@ -180,6 +180,7 @@ export default function App() {
   const [updateErrorDetails, setUpdateErrorDetails] = useState('')
   const [managerRelease, setManagerRelease] = useState<ReleaseUpdateState | null>(null)
   const [serverRelease, setServerRelease] = useState<ServerReleaseState | null>(null)
+  const [checkingReleases, setCheckingReleases] = useState(false)
   const [emergencyMode, setEmergencyMode] = useState(false)
   const [managerConfirm, setManagerConfirm] = useState(false)
   const [filter, setFilter] = useState<'all' | 'issues'>('all')
@@ -268,9 +269,24 @@ export default function App() {
     } finally { updateOperationInFlight.current = false; setUpdateBusy(false) }
   }, [updatePreview, acceptInspection])
   const checkReleases = useCallback(async () => {
-    try { const result = await window.hromadaManager.checkReleaseUpdates(); setManagerRelease(result.manager); setServerRelease(result.server) }
-    catch (error) { setNotice(error instanceof Error ? error.message : 'Не вдалося перевірити GitHub Releases.'); setNoticeTone('error') }
-  }, [])
+    if (checkingReleases) return
+    setCheckingReleases(true)
+    const previousCheckAt = managerRelease?.checkedAt
+    try {
+      const result = await window.hromadaManager.checkReleaseUpdates()
+      const checkDidNotComplete = result.manager.checkedAt === previousCheckAt && !result.manager.error
+      setManagerRelease(checkDidNotComplete
+        ? { ...result.manager, status: 'error', error: 'Не вдалося перевірити нову версію. Раніше знайдене оновлення збережено.' }
+        : result.manager)
+      setServerRelease(result.server)
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : 'Не вдалося перевірити GitHub Releases.'
+      setManagerRelease(current => current ? { ...current, status: 'error', error: message } : { installedVersion: __MANAGER_VERSION__, status: 'error', error: message, confirmed: false })
+      setNotice(message); setNoticeTone('error')
+    }
+    finally { setCheckingReleases(false) }
+  }, [checkingReleases, managerRelease?.checkedAt])
   const downloadManager = useCallback(async () => {
     try { await window.hromadaManager.downloadManagerUpdate(); setManagerRelease((await window.hromadaManager.releaseUpdateState()).manager) }
     catch (error) { setNotice(error instanceof Error ? error.message : 'Не вдалося завантажити Setup.'); setNoticeTone('error'); const state = await window.hromadaManager.releaseUpdateState(); setManagerRelease(state.manager) }
@@ -344,7 +360,7 @@ export default function App() {
         {!emergencyMode && installWizard && <InstallWizard onClose={() => setInstallWizard(false)} onInstalled={() => { setInstallWizard(false); setSection('overview'); void inspectReal() }} initial={inspection?.installation.status === 'partial_installation' || inspection?.installation.status === 'ready_to_configure' ? inspection.configuration : undefined}/>}
         {!emergencyMode && serviceConfirmation && <Modal title={serviceConfirmation === 'stop' ? 'Зупинити сервер?' : 'Перезапустити сервер?'} icon={<CircleAlert size={21}/>} onClose={() => setServiceConfirmation(null)} footer={<><button type="button" className="secondary-button" onClick={() => setServiceConfirmation(null)}>Скасувати</button><button type="button" className="danger-button" onClick={() => { const action = serviceConfirmation; setServiceConfirmation(null); void controlService(action) }}>{serviceConfirmation === 'stop' ? 'Зупинити' : 'Перезапустити'}</button></>}><p>Підключені користувачі тимчасово втратять доступ до HromadaAID.</p></Modal>}
         {emergencyMode && <div className="sm-emergency-gate"><Alert variant="warning">Доступні лише аварійні recovery-операції. Інші функції заблоковані до обов’язкового оновлення Server Manager.</Alert><button className="secondary-button" type="button" onClick={() => { setEmergencyMode(false); setSection('updates') }}>Повернутися до оновлення</button></div>}
-        {mode === 'real' && !emergencyMode ? section !== 'backups' && <RealContent section={section} inspection={inspection} checking={checking} serviceOperation={serviceOperation} controlService={operation => operation === 'start' ? void controlService(operation) : setServiceConfirmation(operation)} refresh={() => void inspectReal(true)} filter={filter} setFilter={setFilter} startInstall={() => setInstallWizard(true)} updatePreview={updatePreview} updateBusy={updateBusy} updateProgress={updateProgress} updateResult={updateResult} lastUpdateResult={lastUpdateResult} updateError={updateError} updateErrorDetails={updateErrorDetails} chooseUpdate={() => void chooseUpdate()} cancelUpdate={cancelUpdate} applyUpdate={() => void applyUpdate()} backupBusy={backupBusy} managerRelease={managerRelease} serverRelease={serverRelease} checkReleases={() => void checkReleases()} downloadManager={() => void downloadManager()} installManager={() => void installManager()} downloadServer={() => void downloadServer()}/> : <>
+        {mode === 'real' && !emergencyMode ? section !== 'backups' && <RealContent section={section} inspection={inspection} checking={checking} serviceOperation={serviceOperation} controlService={operation => operation === 'start' ? void controlService(operation) : setServiceConfirmation(operation)} refresh={() => void inspectReal(true)} filter={filter} setFilter={setFilter} startInstall={() => setInstallWizard(true)} updatePreview={updatePreview} updateBusy={updateBusy} updateProgress={updateProgress} updateResult={updateResult} lastUpdateResult={lastUpdateResult} updateError={updateError} updateErrorDetails={updateErrorDetails} chooseUpdate={() => void chooseUpdate()} cancelUpdate={cancelUpdate} applyUpdate={() => void applyUpdate()} backupBusy={backupBusy} managerRelease={managerRelease} serverRelease={serverRelease} checkingReleases={checkingReleases} checkReleases={() => void checkReleases()} downloadManager={() => void downloadManager()} installManager={() => void installManager()} downloadServer={() => void downloadServer()}/> : <>
         {section === 'overview' && <>
           <section className="sm-health-summary" aria-labelledby="server-state-title">
             <div className={scenarioId === 'running' ? 'visually-hidden' : `sm-scenario-notice sm-scenario-${scenario.tone}`}><h2 id="server-state-title">{scenario.title}</h2><p>{scenario.message}</p></div>
