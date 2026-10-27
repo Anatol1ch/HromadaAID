@@ -83,24 +83,24 @@ IMPLEMENTED означає наявність у source; AUTOMATED PASS — ці
   ярликів у VM помітили лише після обох операцій; точний момент не спостерігали.
   Виправлення не потрапило до жодного з наявних Setup, VM повторний тест pending.
 
-## Локальні артефакти — поза Git
+## Локальні артефакти — тимчасове сховище поза Git
 
-- Stable комплекти: `release/stage-9.1.3/stable-0.1.0/` і `stable-0.1.1/`;
-  contract — Universal Setup + Server ZIP + release-manifest.json. Client portable
-  не обов'язковий. Наявність старого артефакта не доводить актуальний source build.
-- Client full test: `release/diagnostics/stage-9.1.3/full-update-test/`, production
-  launcher у локальному Client 0.1.0, офіційний GitHub Setup 0.1.1; U01 VM PASS.
-- Manager full test: `release/diagnostics/stage-9.1.3/manager-full-update-test/`;
-  містить README і verify-manager-update.ps1. Повний hosted update PENDING.
-- API test: `release/diagnostics/stage-9.1.3/api-server-update-test/` містить
-  інструкцію і read-only SQLite/config/health verifier. Наявність скрипту не доводить,
-  що власник виконав усі його перевірки.
-- Local Setup тільки зі swap fix: `release/diagnostics/stage-9.1.3/manager-nsis-fix/`.
-  Setup з обома swap/helper fixes: `manager-server-packaging-fix/` — 224833330 bytes,
-  SHA-256 `e3825d318f8cc20efe211b0954dca717b1ea2ce65c747f5f5cc0a9b18cbbb531`.
-  Обидва не містять пізнішого shortcut fix і не є production artifacts 0.1.2.
-- Старі diagnostic/no-installer ZIP зберігаються. `release/stage-8.2.10.2/` видалив
-  власник вручну; не відновлювати. Під час консолідації артефакти не змінювалися.
+Власник вручну очистив увесь каталог `release/`; це навмисно. Попередні локальні
+збірки та діагностичні пакети не відновлювати. Згадані в історичних розділах нижче
+шляхи й контрольні суми фіксують результати минулих перевірок, але не означають, що
+файли досі є локально.
+
+Для майбутнього релізу автоматично створювати `release/<version>/` — наприклад,
+`release/0.1.4/` або `release/0.1.5/` — і зберігати там Setup, Server ZIP,
+`release-manifest.json`, `release-notes.md` та інші необхідні артефакти цієї версії.
+Підготовка не повинна залежати від наявності каталогів чи файлів попередніх версій.
+Після успішної публікації та перевірки GitHub Release власник може вручну видалити
+локальні артефакти. `release/` є тимчасовим сховищем результатів збірки, а не
+постійним архівом; версії 0.1.0–0.1.3 не відновлювати без окремої потреби.
+
+Client portable ZIP не є обов'язковим за чинним release contract; стандартний набір
+релізу — Universal Setup, Server ZIP і release manifest. Діагностичні артефакти
+додаються лише якщо їх вимагає окреме завдання.
 
 ## Перевірки консолідації
 
@@ -178,3 +178,19 @@ history і не повторювати оцінку XLSX. Реєстр.xlsx ві
 Наступний крок — окремий чистий Server-only/Combined Windows 10 x64 VM-тест
 підготовленого 0.1.3; після цього потрібне окреме погодження публікації. Заплановані
 зміни інтерфейсу Server Manager та інсталятора перенесені на 0.1.4.
+
+## 0.1.4 — installer welcome UX
+
+Task 1 реалізовано локально: вибір складу компонентів передує контекстній welcome
+сторінці. Її режим визначається за `InstalledComponents` у HKLM та перевіркою
+відповідних executable-файлів; залишкові каталоги самі собою не доводять, що версію
+встановлено. Зміна складу отримує окреме формулювання, а пошкоджений/неповний або
+невідомий стан — нейтральне. На сторінці оновлення показується лише цільова версія
+Setup: єдину встановлену версію не можна достовірно вивести, бо компоненти можуть
+оновлюватися незалежно.
+
+Client-only і Manager-only update modes пропускають обидві інтерактивні сторінки;
+логіка секцій, preflight, Service, даних і ярликів не змінювалася. Цільові NSIS
+source-contract тести та наявні branding/shortcut тести пройшли. Реальний NSIS UI,
+повторний запуск тієї самої версії й режими встановлення ще потрібно перевірити у
+Windows 10 VM; production build не виконувався.

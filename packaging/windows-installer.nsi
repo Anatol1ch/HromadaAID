@@ -63,6 +63,13 @@ Var ModeServerIcon
 Var ModeCombinedIcon
 Var ClientUpdateMode
 Var ManagerUpdateMode
+Var InstalledComponents
+Var WelcomeDialog
+Var WelcomeFont
+Var WelcomeHeader
+Var WelcomeHeading
+Var WelcomeDescription
+Var WelcomeVersion
 
 !define MUI_ICON "${PROJECT_DIR}\assets\hromadaaid.ico"
 !define MUI_UNICON "${PROJECT_DIR}\assets\hromadaaid.ico"
@@ -73,8 +80,6 @@ Var ManagerUpdateMode
 !define MUI_HEADERIMAGE_UNBITMAP_STRETCH AspectFitHeight
 !define MUI_BGCOLOR "FFFFFF"
 !define MUI_TEXTCOLOR "286343"
-!define MUI_WELCOMEPAGE_TITLE "Вас вітає майстер встановлення HromadaAID"
-!define MUI_WELCOMEPAGE_TEXT "Цей майстер допоможе встановити, оновити або змінити склад компонентів HromadaAID. Підключення до сервера чи керування ним налаштовується після встановлення."
 !define MUI_FINISHPAGE_TITLE "Операцію з HromadaAID завершено"
 !define MUI_FINISHPAGE_TEXT "Зміни до складу HromadaAID застосовано. Доступні компоненти можна відкрити через меню «Пуск»."
 !define MUI_FINISHPAGE_BUTTON "Готово"
@@ -102,8 +107,8 @@ Var ManagerUpdateMode
   ${EndIf}
 !macroend
 
-!insertmacro MUI_PAGE_WELCOME
 Page custom ModePageCreate ModePageLeave "Вибір компонентів"
+Page custom WelcomePageCreate
 !define MUI_PAGE_HEADER_TEXT "Папка встановлення"
 !define MUI_PAGE_HEADER_SUBTEXT "Виберіть папку для програмних файлів HromadaAID."
 !define MUI_DIRECTORYPAGE_TEXT_TOP "Виберіть папку для програмних файлів HromadaAID. Серверні дані зберігаються окремо."
@@ -520,6 +525,111 @@ Function ModePageLeave
     Abort
   ${EndIf}
   Call SummaryLeave
+  Call DetermineWelcomeContext
+FunctionEnd
+
+; The selected component set is known only after ModePageLeave. Use the
+; installer's registry marker plus its expected executables; directories alone
+; (which may be leftovers) never establish an installed version.
+Function DetermineWelcomeContext
+  StrCpy $WelcomeHeader "Налаштування HromadaAID"
+  StrCpy $WelcomeHeading "Вас вітає майстер налаштування HromadaAID"
+  StrCpy $WelcomeDescription "Перевірте вибрані компоненти. Майстер визначить потрібну операцію до початку змін."
+  StrCpy $WelcomeVersion ""
+
+  ReadRegStr $InstalledComponents HKLM "Software\HromadaAID\Installer" "InstalledComponents"
+  StrCmp $InstalledComponents "" welcomeContextInstall
+  StrCmp $InstalledComponents "Client" welcomeContextClient
+  StrCmp $InstalledComponents "Server,ServerManager" welcomeContextServer
+  StrCmp $InstalledComponents "Client,Server,ServerManager" welcomeContextCombined
+  Return
+
+welcomeContextInstall:
+  StrCpy $WelcomeHeader "Встановлення HromadaAID"
+  StrCpy $WelcomeHeading "Вас вітає майстер встановлення HromadaAID"
+  StrCpy $WelcomeDescription "Цей майстер допоможе встановити HromadaAID та вибрати необхідні компоненти. Підключення до сервера або його первинне налаштування виконуються після встановлення."
+  Return
+
+welcomeContextClient:
+  IfFileExists "$INSTDIR\Client\HromadaAID.exe" 0 welcomeContextUnknown
+  SectionGetFlags ${SEC_CLIENT} $0
+  IntOp $0 $0 & ${SF_SELECTED}
+  SectionGetFlags ${SEC_SERVER} $1
+  IntOp $1 $1 & ${SF_SELECTED}
+  ${If} $0 != 0
+  ${AndIf} $1 == 0
+    Goto welcomeContextUpdate
+  ${EndIf}
+  Goto welcomeContextComponentChange
+
+welcomeContextServer:
+  IfFileExists "$INSTDIR\ServerManager\HromadaAID Server Manager.exe" 0 welcomeContextUnknown
+  IfFileExists "$INSTDIR\Server\service\HromadaAIDService.exe" 0 welcomeContextUnknown
+  SectionGetFlags ${SEC_CLIENT} $0
+  IntOp $0 $0 & ${SF_SELECTED}
+  SectionGetFlags ${SEC_SERVER} $1
+  IntOp $1 $1 & ${SF_SELECTED}
+  ${If} $0 == 0
+  ${AndIf} $1 != 0
+    Goto welcomeContextUpdate
+  ${EndIf}
+  Goto welcomeContextComponentChange
+
+welcomeContextCombined:
+  IfFileExists "$INSTDIR\Client\HromadaAID.exe" 0 welcomeContextUnknown
+  IfFileExists "$INSTDIR\ServerManager\HromadaAID Server Manager.exe" 0 welcomeContextUnknown
+  IfFileExists "$INSTDIR\Server\service\HromadaAIDService.exe" 0 welcomeContextUnknown
+  SectionGetFlags ${SEC_CLIENT} $0
+  IntOp $0 $0 & ${SF_SELECTED}
+  SectionGetFlags ${SEC_SERVER} $1
+  IntOp $1 $1 & ${SF_SELECTED}
+  ${If} $0 != 0
+  ${AndIf} $1 != 0
+    Goto welcomeContextUpdate
+  ${EndIf}
+
+welcomeContextComponentChange:
+  StrCpy $WelcomeHeader "Зміна компонентів HromadaAID"
+  StrCpy $WelcomeHeading "Вас вітає майстер зміни компонентів HromadaAID"
+  StrCpy $WelcomeDescription "Цей майстер застосує вибраний склад компонентів. Наявні серверні дані й конфігурація зберігаються за чинними правилами встановлення."
+  Return
+
+welcomeContextUpdate:
+  StrCpy $WelcomeHeader "Оновлення HromadaAID"
+  StrCpy $WelcomeHeading "Вас вітає майстер оновлення HromadaAID"
+  StrCpy $WelcomeDescription "Цей майстер допоможе оновити встановлені компоненти HromadaAID. Налаштування сервера та дані користувачів будуть збережені."
+  StrCpy $WelcomeVersion "Версія оновлення: ${APP_VERSION}"
+  Return
+
+welcomeContextUnknown:
+  ; A stale registry marker or partial installation is not enough to promise
+  ; either a clean install or an update.
+  Return
+FunctionEnd
+
+Function WelcomePageCreate
+  ${If} $ClientUpdateMode == "1"
+  ${OrIf} $ManagerUpdateMode == "1"
+    Abort
+  ${EndIf}
+  nsDialogs::Create 1018
+  Pop $WelcomeDialog
+  ${If} $WelcomeDialog == error
+    Abort
+  ${EndIf}
+  !insertmacro MUI_HEADER_TEXT "$WelcomeHeader" "Майстер інсталяції HromadaAID"
+  ${NSD_CreateLabel} 0u 18u 100% 34u "$WelcomeHeading"
+  Pop $0
+  CreateFont $WelcomeFont "Segoe UI" 12 700
+  SendMessage $0 ${WM_SETFONT} $WelcomeFont 1
+  ${NSD_CreateLabel} 0u 62u 100% 66u "$WelcomeDescription"
+  Pop $0
+  ${If} $WelcomeVersion != ""
+    ${NSD_CreateLabel} 0u 132u 100% 18u "$WelcomeVersion"
+    Pop $0
+  ${EndIf}
+  nsDialogs::Show
+  System::Call 'gdi32::DeleteObject(p $WelcomeFont)'
 FunctionEnd
 
 Function .onInit
