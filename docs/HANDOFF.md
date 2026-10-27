@@ -4,8 +4,8 @@
 
 - Поточний Stable: **0.1.6**, опублікований у GitHub.
 - **Stage 9.1 — Automatic Updates завершено** після приймання основних сценаріїв у Windows 10 x64 VM.
-- Актуальна робоча гілка після фіналізації: `feature/client-server`; стабільну реалізацію інтегровано у `main` fast-forward способом. Обидві гілки синхронізовані з origin.
-- Релізний commit: `10b0b85b36a9cad84d75259aa6fe2dd90e08b4d4`; annotated tag `0.1.6` лишається на цьому commit, а документаційна фіналізація йде наступним commit у спільній історії гілок.
+- Stage 9.1 інтегровано у `main` fast-forward способом. Актуальний Git checkpoint перед Stage 9.2: `main` і `feature/client-server` на `263c50b74cabf3d1172676bcaa5b738f650559d3`, синхронізовані з origin. `0.1.6` лишається annotated tag на релізному commit нижче.
+- Релізний commit: `10b0b85b36a9cad84d75259aa6fe2dd90e08b4d4`; annotated tag `0.1.6` лишається на цьому commit. Документаційна фіналізація — `263c50b74cabf3d1172676bcaa5b738f650559d3`.
 - VM snapshot: `HromadaAID 0.1.6 – Stable Baseline`.
 
 ## Архітектура й оновлення
@@ -35,4 +35,4 @@ Client та Server Manager — окремі Electron-застосунки; API S
 
 ## Наступний етап
 
-**Stage 9.2 — Tailscale Connectivity** є наступним. Перед його початком інтегрувати стабільну feature-реалізацію в `main` звичайним fast-forward і актуалізувати гілковий checkpoint. Не змінювати TLS, auth/RBAC чи межі мережевого доступу без окремих вимог. Поточний план — у [ROADMAP.md](ROADMAP.md), призначення продукту — у [PROJECT.md](PROJECT.md).
+**Stage 9.2 — Tailscale Connectivity** є наступним. Його розробку планується вести в окремій гілці `feature/tailscale-connectivity`, створеній від `main`. Гілку ще не створено. Не змінювати TLS, auth/RBAC чи межі мережевого доступу без окремих вимог. Поточний план — у [ROADMAP.md](ROADMAP.md), призначення продукту — у [PROJECT.md](PROJECT.md).

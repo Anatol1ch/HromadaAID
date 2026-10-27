@@ -22,9 +22,11 @@ Server Manager update 0.1.5 → 0.1.6 та API Server update до 0.1.6. Так�
 ### Stage 9.2 — Tailscale Connectivity (**NEXT**)
 
 Планувати підключення Client до сервера через Tailscale із збереженням чинних
-TLS, авторизації та RBAC. Перед реалізацією інтегрувати стабільну гілку
-`feature/client-server` у `main` fast-forward способом і зафіксувати актуальний
-Git checkpoint. Конкретні вимоги Stage 9.2 визначатимуть обсяг реалізації.
+TLS, авторизації та RBAC. Stage 9.1 уже інтегровано у `main` fast-forward способом.
+Розробку Stage 9.2 планується вести в окремій гілці
+`feature/tailscale-connectivity`, створеній від `main`; гілку ще не створено.
+Конкретні вимоги Stage 9.2 визначатимуть обсяг реалізації. Етап має статус NEXT,
+ще не розпочатий.
 
 ## Історичні релізи та етапи
 
