@@ -10,14 +10,14 @@ import { createClientUpdateService } from './client-update-service.ts'
 
 const bytes = Buffer.from('signed-through-https-test-installer')
 const hash = createHash('sha256').update(bytes).digest('hex')
-const release = { tag_name: 'v1.2.0', draft: false, prerelease: false, body: 'Виправлення', assets: [
-  { name: 'release-manifest.json', browser_download_url: 'https://github.com/owner/repo/releases/download/v1.2.0/release-manifest.json' },
-  { name: 'HromadaAID-Setup-1.2.0.exe', browser_download_url: 'https://github.com/owner/repo/releases/download/v1.2.0/HromadaAID-Setup-1.2.0.exe' },
-  { name: 'HromadaAID-Server-v1.2.0-win-x64.zip', browser_download_url: 'https://github.com/owner/repo/releases/download/v1.2.0/HromadaAID-Server-v1.2.0-win-x64.zip' },
+const release = { tag_name: 'v0.1.3', draft: false, prerelease: false, body: 'Виправлення', assets: [
+  { name: 'release-manifest.json', browser_download_url: 'https://github.com/owner/repo/releases/download/v0.1.3/release-manifest.json' },
+  { name: 'HromadaAID-Setup-0.1.3.exe', browser_download_url: 'https://github.com/owner/repo/releases/download/v0.1.3/HromadaAID-Setup-0.1.3.exe' },
+  { name: 'HromadaAID-Server-v0.1.3-win-x64.zip', browser_download_url: 'https://github.com/owner/repo/releases/download/v0.1.3/HromadaAID-Server-v0.1.3-win-x64.zip' },
 ] }
-const manifest = { formatVersion: 1, version: '1.2.0', platform: 'win32', architecture: 'x64', compatibility: { installer: 'hromadaaid-universal-nsis-v1', installModes: ['Client-only', 'Server-only', 'Combined'], api: { contract: 'hromadaaid-rest', version: 1 }, manager: { versionPolicy: 'same-release-version', apiContract: 'hromadaaid-rest', apiContractVersion: 1 } }, artifacts: [
-  { component: 'installer', name: 'HromadaAID-Setup-1.2.0.exe', sha256: hash, sizeBytes: bytes.length },
-  { component: 'server', name: 'HromadaAID-Server-v1.2.0-win-x64.zip', sha256: 'a'.repeat(64), sizeBytes: 100, packageIntegrity: 'embedded-package-integrity-v1' },
+const manifest = { formatVersion: 1, version: '0.1.3', platform: 'win32', architecture: 'x64', compatibility: { installer: 'hromadaaid-universal-nsis-v1', installModes: ['Client-only', 'Server-only', 'Combined'], api: { contract: 'hromadaaid-rest', version: 1 }, manager: { versionPolicy: 'same-release-version', apiContract: 'hromadaaid-rest', apiContractVersion: 1 } }, artifacts: [
+  { component: 'installer', name: 'HromadaAID-Setup-0.1.3.exe', sha256: hash, sizeBytes: bytes.length },
+  { component: 'server', name: 'HromadaAID-Server-v0.1.3-win-x64.zip', sha256: 'a'.repeat(64), sizeBytes: 100, packageIntegrity: 'embedded-package-integrity-v1' },
 ] }
 const response = (url, json) => ({ ok: true, status: 200, url: String(url), json: async () => json, text: async () => JSON.stringify(json) })
 
@@ -51,7 +51,7 @@ test('client update serializes checks, persists confirmed updates, verifies down
     })
     return child
   }
-  const service = createClientUpdateService({ currentVersion: '1.1.9', resourcesPath, userDataPath, executablePath: join(root, 'Client', 'HromadaAID.exe'), processId: 44, publish: value => events.push(value.status), fetchImpl, spawnProcess })
+  const service = createClientUpdateService({ currentVersion: '0.1.2', resourcesPath, userDataPath, executablePath: join(root, 'Client', 'HromadaAID.exe'), processId: 44, publish: value => events.push(value.status), fetchImpl, spawnProcess })
   try {
     await service.restore()
     await assert.rejects(readFile(join(userDataPath, 'client-update-state.json.12345678-1234-1234-1234-123456789abc.tmp')))
@@ -62,7 +62,7 @@ test('client update serializes checks, persists confirmed updates, verifies down
     const checked = await firstCheck
     assert.equal(releaseCalls, 1)
     assert.equal(checked.confirmed, true)
-    assert.equal(checked.targetVersion, '1.2.0')
+    assert.equal(checked.targetVersion, '0.1.3')
     const firstDownload = service.download()
     const concurrentDownload = await service.download()
     assert.equal(concurrentDownload.status, 'downloading')
@@ -83,12 +83,12 @@ test('client update serializes checks, persists confirmed updates, verifies down
     const launcherEvents = (await readFile(join(userDataPath, 'updates', 'installer-launcher.log'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
     assert.deepEqual(launcherEvents.map(event => event.stage), ['install-command-received', 'powershell-launch-requested', 'powershell-process-created', 'powershell-bootstrap-exited', 'powershell-handoff-result'])
     assert.equal(launcherEvents[2].details.processId, null)
-    const resumed = createClientUpdateService({ currentVersion: '1.1.9', resourcesPath, userDataPath, executablePath: 'unused', processId: 45, publish: () => {}, fetchImpl })
+    const resumed = createClientUpdateService({ currentVersion: '0.1.2', resourcesPath, userDataPath, executablePath: 'unused', processId: 45, publish: () => {}, fetchImpl })
     await resumed.restore()
     assert.equal(resumed.getState().status, 'ready')
     assert.equal(resumed.getState().confirmed, true)
     assert.equal((await readFile(downloaded.targetPath ?? join(userDataPath, 'updates', `client-update-${hash}.exe`))).length, bytes.length)
-    const failedLauncher = createClientUpdateService({ currentVersion: '1.1.9', resourcesPath, userDataPath, executablePath: 'unused', processId: 46, publish: () => {}, fetchImpl, spawnProcess: () => { const child = Object.assign(new EventEmitter(), { unref() {} }); queueMicrotask(() => child.emit('error', new Error('launcher missing'))); return child } })
+    const failedLauncher = createClientUpdateService({ currentVersion: '0.1.2', resourcesPath, userDataPath, executablePath: 'unused', processId: 46, publish: () => {}, fetchImpl, spawnProcess: () => { const child = Object.assign(new EventEmitter(), { unref() {} }); queueMicrotask(() => child.emit('error', new Error('launcher missing'))); return child } })
     await failedLauncher.restore()
     const launchResult = await failedLauncher.install()
     assert.equal(launchResult.ok, false)

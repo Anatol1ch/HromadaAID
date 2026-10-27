@@ -12,7 +12,7 @@ import { createReleaseUpdater } from '../electron/release-updater.ts'
 const setup = Buffer.from('synthetic setup payload')
 const server = Buffer.from('synthetic server zip payload')
 const digest = value => createHash('sha256').update(value).digest('hex')
-const version = '1.1.0'
+const version = '0.1.3'
 const manifest = { formatVersion: 1, version, platform: 'win32', architecture: 'x64', compatibility: { installer: 'hromadaaid-universal-nsis-v1', installModes: ['Client-only', 'Server-only', 'Combined'], api: { contract: 'hromadaaid-rest', version: 1 }, manager: { versionPolicy: 'same-release-version', apiContract: 'hromadaaid-rest', apiContractVersion: 1 } }, artifacts: [
   { component: 'installer', name: `HromadaAID-Setup-${version}.exe`, sizeBytes: setup.length, sha256: digest(setup) },
   { component: 'server', name: `HromadaAID-Server-v${version}-win-x64.zip`, sizeBytes: server.length, sha256: digest(server), packageIntegrity: 'embedded-package-integrity-v1' },
@@ -45,10 +45,10 @@ test('Manager and API checks share one Stable manifest, verify separate download
     })
     return child
   }
-  const updater = createReleaseUpdater({ currentVersion: '1.0.0', resourcesPath, userDataPath, executablePath, processId: 17, sharedModulePath: fileURLToPath(new URL('../../shared/release-updates.mjs', import.meta.url)), fetchImpl, publish: () => {}, spawnProcess })
+  const updater = createReleaseUpdater({ currentVersion: '0.1.2', resourcesPath, userDataPath, executablePath, processId: 17, sharedModulePath: fileURLToPath(new URL('../../shared/release-updates.mjs', import.meta.url)), fetchImpl, publish: () => {}, spawnProcess })
   try {
-    const first = updater.check('1.0.0')
-    assert.equal((await updater.check('1.0.0')).manager.status, 'checking')
+    const first = updater.check('0.1.2')
+    assert.equal((await updater.check('0.1.2')).manager.status, 'checking')
     const state = await first
     assert.equal(state.manager.confirmed, true)
     assert.equal(state.manager.availableVersion, version)
@@ -68,7 +68,7 @@ test('Manager and API checks share one Stable manifest, verify separate download
     await assert.rejects(updater.download('server'), /Інша операція оновлення/)
     await assert.rejects(updater.installManager(), /Інша операція оновлення/)
 
-    const failedLauncher = createReleaseUpdater({ currentVersion: '1.0.0', resourcesPath, userDataPath, executablePath, processId: 19, sharedModulePath: fileURLToPath(new URL('../../shared/release-updates.mjs', import.meta.url)), fetchImpl, publish: () => {}, spawnProcess: () => { throw new Error('synthetic launcher failure') } })
+    const failedLauncher = createReleaseUpdater({ currentVersion: '0.1.2', resourcesPath, userDataPath, executablePath, processId: 19, sharedModulePath: fileURLToPath(new URL('../../shared/release-updates.mjs', import.meta.url)), fetchImpl, publish: () => {}, spawnProcess: () => { throw new Error('synthetic launcher failure') } })
     await failedLauncher.restore()
     await assert.rejects(failedLauncher.installManager(), /synthetic launcher failure/)
     assert.equal(failedLauncher.getState().manager.status, 'error')
@@ -77,7 +77,7 @@ test('Manager and API checks share one Stable manifest, verify separate download
     await writeFile(join(managerDirectory, 'manager-update-success.txt'), version)
     const updatedManager = createReleaseUpdater({ currentVersion: version, resourcesPath, userDataPath, executablePath, processId: 18, sharedModulePath: fileURLToPath(new URL('../../shared/release-updates.mjs', import.meta.url)), fetchImpl, publish: () => {} })
     await updatedManager.restore()
-    await updatedManager.check('1.0.0')
+    await updatedManager.check('0.1.2')
     const downloadedServer = await updatedManager.download('server')
     assert.equal((await readFile(downloadedServer.packagePath)).equals(server), true)
     assert.equal(updatedManager.getState().server.status, 'ready')

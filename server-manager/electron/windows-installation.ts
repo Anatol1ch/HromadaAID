@@ -12,6 +12,7 @@ import { verifyInitialInstallCandidate } from './initial-setup.js'
 import { inspectEnvironment } from './inspection-engine.js'
 import { createWindowsInspectionAdapters } from './windows-inspection.js'
 import { parseInstallerDiagnostic } from './server-install-diagnostic.js'
+import { resolvePackagedServerPayloadRoot } from './server-payload-path.js'
 
 async function verifyPackageCopy(source: string, candidate: string): Promise<void> {
   const sourceManifest = await readFile(join(source, 'package-integrity.json'))
@@ -47,15 +48,10 @@ function payloadRoot(): string {
   return appResourcesServerRoot()
 }
 function appResourcesServerRoot(): string {
-  // Portable Manager carries a read-only server payload. The unified installer
-  // omits that duplicate and stages the same verified payload at Server.next.
   if (app.isPackaged) {
-    const bundled = join(process.resourcesPath, 'server-payload')
-    if (existsSync(bundled)) return bundled
-    const installRoot = resolve(dirname(dirname(dirname(app.getAppPath()))))
-    const staged = join(installRoot, 'Server.next')
-    if (existsSync(staged)) return staged
-    throw new Error('Не знайдено комплектний серверний пакет. Повторіть встановлення або перевірте комплектність Server Manager.')
+    // Portable Manager has a complete bundled package. Universal Setup keeps
+    // only installer helpers here and stages the verified package in Server.next.
+    return resolvePackagedServerPayloadRoot(process.resourcesPath, app.getAppPath())
   }
   return resolve('release', 'installer-payload', 'Server')
 }

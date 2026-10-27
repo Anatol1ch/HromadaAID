@@ -1,6 +1,6 @@
 # Контекст для наступного чату
 
-Оновлено 2026-10-27 після локальної підготовки Stable 0.1.2.
+Оновлено 2026-10-27 під час підготовки Stable 0.1.3 hotfix.
 Це поточний checkpoint; технічна реалізація — у [ARCHITECTURE.md](ARCHITECTURE.md),
 домовленості — у [DECISIONS.md](DECISIONS.md), план — у [ROADMAP.md](ROADMAP.md),
 сценарії та історія VM — у [manual testing](stage-9.1.3-manual-testing.md).
@@ -16,11 +16,12 @@
 - `git ls-remote` підтвердив origin/default `feature/client-server`, гілки
   `main` і `feature/client-server`, теги `0.1.0` і `0.1.1`. `origin/main` є предком
   feature HEAD. Push/merge/rebase/tags у консолідації не виконуються.
-- Source SemVer усіх компонентів — **0.1.2**. Stable **0.1.0/0.1.1**
-  опубліковані та не змінювалися. Комплект 0.1.2 локально зібраний у
-  `release/stage-9.1.3/stable-0.1.2/`; він не опублікований і не пройшов Windows
-  VM-перевірки. Commit підготовки версії/документації створено локально; push, tag і
-  GitHub Release не виконувалися.
+- Stable **0.1.2 опубліковано**. Після чистого встановлення у Windows 10 x64 VM
+  виявлено блокер первинного налаштування: Manager обирає helper-only
+  `resources/server-payload` замість повного `Server.next`.
+- Поточна робота готує виправний Stable **0.1.3** без нових можливостей. Код і
+  production build підготовлені локально; чисте встановлення у Windows VM та
+  публікація залишаються pending.
 
 ## Stage 9.1.3: фактичний стан
 
@@ -118,7 +119,7 @@ server/recovery suite не повторювався. Попередні ціль
 У межах саме консолідаційної перевірки packaging не запускалося; Setup, Service та
 реальна SQLite не запускалися.
 
-## Stable 0.1.2 — локальна підготовка
+## Stable 0.1.2 — опублікований реліз і виявлений дефект
 
 Production `pnpm run windows:installer` завершився успішно: Client, API Server,
 Server Manager і Universal Setup побудовані зі source 0.1.2. Серверний ZIP сформовано
@@ -133,14 +134,37 @@ Payload review: Client ASAR містить побайтно актуальні �
 manifest і release manifest узгоджені на 0.1.2; Stable source лишається
 `Anatol1ch/HromadaAID`.
 
-Цільові updater/launcher/NSIS/shortcuts/Manager-payload/component/release-manifest
-тести: **46/46 AUTOMATED PASS**. Client, Manager та Server production build і серверний
-runtime verification завершилися. NSIS Setup був зібраний, але не запускався.
-Сертифікат code signing не налаштований: локальний Setup і вбудовані виконувані
-файли непідписані. Реальні UAC, Windows Installer, Services, fresh Combined setup,
-selective updates, Client/Manager/API update з GitHub та збереження робочих даних у VM
-залишаються PENDING. Stage 9.1.3 і Stage 9.1 не завершені; production readiness не
-заявляється.
+Stable 0.1.2 опубліковано з цими перевіреними артефактами. Власник повідомив про
+реальну чисту Windows 10 x64 VM-помилку `package.verify / ENOENT` для
+`ServerManager\resources\server-payload\package-integrity.json`. Setup містить
+повний `Server.next\package-integrity.json`, але в Manager resources залишає тільки
+installer/recovery helpers. Отже, відсутність Service та `server.json` є наслідком
+блокування до запуску первинного майстра, а не самостійно підтвердженими дефектами.
+
+## Stable 0.1.3 hotfix — локально підготовлено
+
+Source-виправлення обирає bundled Server лише за наявності його integrity manifest;
+helper-only payload переходить до повного `Server.next`, а відсутність повного пакета
+завершується контрольованою помилкою. Пошкоджений manifest лишається вибраним і буде
+відхилений штатною перевіркою. Portable Manager з повним bundled payload зберігає
+поточну поведінку. SemVer залишається `X.Y.Z`; 0.1.3 новіша за 0.1.2.
+
+Client, API Server, Server Manager, Universal Setup і Server ZIP зібрані штатним
+production workflow з версією 0.1.3. Цільові перевірки: **118/119 PASS, 1 SKIP**
+(наявний Windows ZIP-specific test пропускається без відповідного test ZIP); два
+Server Manager TypeScript no-emit checks пройшли. Setup та Server ZIP пройшли
+архівну/ціліснісну перевірку, release manifest створено штатним генератором і
+перевірено. Client ASAR містить три tracked Excel templates; `Реєстр.xlsx` відсутній.
+Setup містить повний `Server.next/package-integrity.json`, helper-only Manager
+payload та не дублює Server runtime у Manager resources. Code signing не
+налаштований; реальні Windows UAC, NSIS, первинне Server-only/Combined налаштування та
+API health після hotfix не перевірялися. Отже, це локально підготовлений комплект, а
+не VM-verified реліз. Stage 9.1.3 і Stage 9.1 не завершені.
+
+Артефакти: `release/stage-9.1.3/stable-0.1.3/`. SHA-256: Setup
+`764b033bb5eebe53081b73cd8b6e201f6c431049341c5922987ef3e631fb7811`, Server ZIP
+`8090f86a3f2e91cf3a8afaa793287bbf3bd9d1628f36c286b00d439de8b73e58`, manifest
+`c5fdde2697b00a5abcd6a0f4f097175decbca993e800f1f482cfa58d061290b6`.
 
 ## Публікаційна безпека та наступний крок
 
@@ -151,6 +175,6 @@ history і не повторювати оцінку XLSX. Реєстр.xlsx ві
 артефакти ігноруються. Зміни source не додали виявлених production credentials чи
 даних; це цільова перевірка diff, а не повторний аудит усієї історії.
 
-Наступний крок — review локального комплекту 0.1.2 та окреме погодження публікації.
-Нові вимоги для installer/Manager 0.1.3 власник
-надасть окремо; після baseline 0.1.2 потрібен послідовний hosted VM-тест до 0.1.3.
+Наступний крок — окремий чистий Server-only/Combined Windows 10 x64 VM-тест
+підготовленого 0.1.3; після цього потрібне окреме погодження публікації. Заплановані
+зміни інтерфейсу Server Manager та інсталятора перенесені на 0.1.4.

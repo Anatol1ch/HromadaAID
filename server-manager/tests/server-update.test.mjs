@@ -109,7 +109,7 @@ test('package API contract and SQLite manifest values must match the packaged im
 test('newer stable version can update a stopped service after read-only schema and contract checks', async t => {
   const root = await mkdtemp(join(tmpdir(), 'hromada-update-engine-')); t.after(() => rm(root, { recursive: true, force: true }))
   const calls = []
-  const io = adapters({ current: snapshot({ service: 'stopped', api: 'unavailable' }), events: calls, packageVersion: '0.1.1' })
+  const io = adapters({ current: snapshot({ service: 'stopped', api: 'unavailable', version: '0.1.2' }), events: calls, packageVersion: '0.1.3' })
   const prepared = await prepareServerUpdate(join(root, 'HromadaAID Server.zip'), io)
   assert.equal(prepared.preview.sameVersion, false)
   assert.equal(prepared.preview.currentSchema, 4)
@@ -122,8 +122,8 @@ test('newer stable version can update a stopped service after read-only schema a
 
 test('same and older versions are rejected after ZIP verification and before package preparation or installer invocation', async t => {
   const root = await mkdtemp(join(tmpdir(), 'hromada-update-version-policy-')); t.after(() => rm(root, { recursive: true, force: true }))
-  for (const [version, code] of [['0.1.0', 'UPDATE_VERSION_ALREADY_INSTALLED'], ['0.0.9', 'UPDATE_DOWNGRADE_BLOCKED']]) {
-    const calls = [], io = adapters({ packageVersion: version, events: calls })
+  for (const [version, currentVersion, code] of [['0.1.0', '0.1.0', 'UPDATE_VERSION_ALREADY_INSTALLED'], ['0.1.2', '0.1.3', 'UPDATE_DOWNGRADE_BLOCKED'], ['0.0.9', '0.1.0', 'UPDATE_DOWNGRADE_BLOCKED']]) {
+    const calls = [], io = adapters({ current: snapshot({ version: currentVersion }), packageVersion: version, events: calls })
     await assert.rejects(prepareServerUpdate(join(root, `${version}.zip`), io), { code })
     assert.deepEqual(calls, [], `${version}: neither Server.next preparation nor installer may run`)
   }
@@ -133,6 +133,7 @@ test('same and older versions are rejected after ZIP verification and before pac
 
 test('SemVer precedence handles numeric components, prereleases, numeric identifiers and build metadata', () => {
   for (const [left, right, expected] of [
+    ['0.1.2', '0.1.3', -1], ['0.1.3', '0.1.2', 1],
     ['0.10.0', '0.9.99', 1], ['1.0.0-alpha', '1.0.0', -1], ['1.0.0-alpha.2', '1.0.0-alpha.10', -1],
     ['1.0.0-rc.1', '1.0.0-rc.1', 0], ['1.0.0+build.2', '1.0.0+build.1', 0], ['1.0.0-beta', '1.0.0-alpha', 1],
   ]) assert.equal(compareSemVer(left, right), expected, `${left} vs ${right}`)

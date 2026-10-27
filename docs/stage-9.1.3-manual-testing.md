@@ -13,12 +13,19 @@ Setup, Server ZIP та `release-manifest.json` описують лише фак�
 Stable Release **0.1.1 опубліковано**. Перевірте його актуальний manifest/assets
 перед тестом; лише реальний запуск із GitHub рахується як hosted update.
 
-Комплект Stable **0.1.2 підготовлено локально** у
+Комплект Stable **0.1.2 опубліковано** у
 `release/stage-9.1.3/stable-0.1.2/`: production Universal Setup, Server ZIP,
-release manifest і release notes. Артефакти та цільові перевірки пройшли локальну
-перевірку; 0.1.2 не опублікований. Чисте встановлення, selective NSIS режими,
-оновлення Client/Manager/API Server, UAC і збереження системних даних у Windows VM
-для цієї збірки залишаються **PENDING**.
+release manifest і release notes. Під час першого чистого встановлення у Windows 10
+x64 VM підтверджено FAIL первинного налаштування API Server: Manager шукав
+`package-integrity.json` у helper-only `ServerManager/resources/server-payload`, тоді
+як повний пакет знаходився в `Server.next`. Реєстрація служби й створення `server.json`
+не відбулися, бо wizard заблокувався раніше; API health не перевірено.
+
+Stable **0.1.3 hotfix** без функціональних змін зібрано локально зі штатного
+production workflow. Payload resolver має цільові regression tests; manifest та
+пакети локально перевірені. Це не VM PASS і не публікація. Перед публікацією
+потрібні чисті Server-only і Combined VM tests із перевіркою первинного wizard,
+конфігурації, Windows Service та API health.
 
 ### Поточна матриця доказів — консолідація 2026-10-27
 
@@ -42,10 +49,10 @@ updater/launcher/NSIS/shortcuts/package тести **46/46 PASS**. Це не є 
 інсталятор не запускався, а UAC, Service й автоматичні оновлення 0.1.2 залишаються
 неперевіреними у Windows VM.
 
-Наступний релізний цикл 0.1.2 → 0.1.3 описано в [ROADMAP.md](ROADMAP.md).
+Поточний релізний цикл 0.1.2 → hotfix 0.1.3 → функціональний 0.1.4 описано в [ROADMAP.md](ROADMAP.md).
 Нижче зберігаються сценарії та історичні fixtures 0.1.0 → 0.1.1; вони не є доказом
-поведінки нової збірки. Перед тестом 0.1.2 спершу потрібне окреме погодження та
-публікація Stable; Stage 9.1.3 триває.
+поведінки 0.1.3. Для підготовленого 0.1.3 ще потрібні окремі чисті Server-only та
+Combined VM тести; Stage 9.1.3 триває.
 
 ### Регресія ярликів після selective update — VM повторний тест pending
 

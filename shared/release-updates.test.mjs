@@ -17,6 +17,16 @@ test('SemVer accepts stable/prerelease identifiers and orders prereleases correc
   assert.equal(parseStableVersion('01.2.3'), null)
   assert.equal(compareVersions('1.2.3-rc.2', '1.2.3-rc.10'), -1)
   assert.equal(compareVersions('1.2.3', '1.2.3-rc.10'), 1)
+  assert.equal(compareVersions('0.1.2', '0.1.3'), -1)
+  assert.equal(parseStableVersion('0.1.2.1'), null)
+})
+
+test('0.1.3 is accepted as a newer Stable release after 0.1.2', () => {
+  const next = manifest('0.1.3')
+  const release = { tag_name: 'v0.1.3', prerelease: false, draft: false, body: 'Виправлення' }
+  assert.equal(validateReleaseManifest(next, release, '0.1.2').version, '0.1.3')
+  assert.equal(validateReleaseManifest(manifest('0.1.2'), { ...release, tag_name: 'v0.1.2' }, '0.1.3'), null)
+  assert.throws(() => validateReleaseManifest(manifest('0.1.3'), { ...release, prerelease: true }, '0.1.2'))
 })
 
 test('release metadata rejects prereleases, wrong platform, stale versions, and missing integrity metadata', () => {

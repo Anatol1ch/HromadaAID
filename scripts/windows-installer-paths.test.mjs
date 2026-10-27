@@ -114,13 +114,16 @@ test('component removal protects transactional artifacts and preserves server da
   assert.match(control, /Server\.next уже існує[\s\S]*?Файли збережено/)
 })
 
-test('unified installer metadata and Manager first-setup fallback match the bundled layout', async () => {
+test('unified installer metadata and Manager first-setup resolver match the staged package layout', async () => {
   const packager = await readFile(new URL('./package-windows.mjs', import.meta.url), 'utf8')
   const manager = await readFile(new URL('../server-manager/electron/windows-installation.ts', import.meta.url), 'utf8')
+  const resolver = await readFile(new URL('../server-manager/electron/server-payload-path.ts', import.meta.url), 'utf8')
   assert.match(packager, /Server-only \(API Server \+ Server Manager\)/)
   assert.match(packager, /clean server setup is completed through Server Manager/)
-  assert.match(manager, /const bundled = join\(process\.resourcesPath, 'server-payload'\)[\s\S]*?const staged = join\(installRoot, 'Server\.next'\)/)
-  assert.match(manager, /Не знайдено комплектний серверний пакет/)
+  assert.match(manager, /resolvePackagedServerPayloadRoot\(process\.resourcesPath, app\.getAppPath\(\)\)/)
+  assert.match(resolver, /existsSync\(join\(bundled, 'package-integrity\.json'\)\)/)
+  assert.match(resolver, /existsSync\(join\(staged, 'package-integrity\.json'\)\)/)
+  assert.match(resolver, /Не знайдено повний перевірений пакет сервера/)
 })
 
 test('server installer blocks stable SemVer downgrade and fails closed on prerelease ordering', { skip: process.platform !== 'win32' }, () => {

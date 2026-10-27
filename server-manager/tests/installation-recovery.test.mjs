@@ -10,6 +10,7 @@ import { verifyServerPackage } from '../../packaging/verify-server-package.mjs'
 
 const { inspectEnvironment } = await import('../../dist-server-manager/main/inspection-engine.js')
 const { verifyInitialInstallCandidate, markInitialSetupReadiness } = await import('../../dist-server-manager/main/initial-setup.js')
+const { resolvePackagedServerPayloadRoot } = await import('../../dist-server-manager/main/server-payload-path.js')
 const { runServerInstallation } = await import('../../dist-server-manager/main/installation-engine.js')
 const { classifyLocatorFailure, locatorQueryScript } = await import('../../dist-server-manager/main/windows-inspection.js')
 const presentation = ts.transpileModule(await readFile(new URL('../src/inspection-presentation.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText
@@ -90,6 +91,9 @@ async function stagedFixture(t, source = 'standard_locations') {
   const dataDirectory = join(programData, 'HromadaAID', 'Data')
   const backupDirectory = join(programData, 'HromadaAID', 'Backups')
   const stage = join(programDirectory, 'Server.next')
+  const managerResources = join(programDirectory, 'ServerManager', 'resources')
+  await mkdir(join(managerResources, 'server-payload', 'installer'), { recursive: true })
+  await writeFile(join(managerResources, 'server-payload', 'installer', 'verify-server-package.mjs'), '// helper-only payload')
   const files = {
     'runtime/node.exe': 'fixture runtime, never executed',
     'service/HromadaAIDService.exe': 'fixture wrapper, never executed',
@@ -120,7 +124,7 @@ async function stagedFixture(t, source = 'standard_locations') {
   let verifications = 0
   const inspect = () => inspectEnvironment(adapter)
   const verify = request => verifyInitialInstallCandidate(request, {
-    inspect, payloadRoot: () => stage,
+    inspect, payloadRoot: () => resolvePackagedServerPayloadRoot(managerResources, join(managerResources, 'app.asar')),
     verifyPackageCopy: async (sourceRoot, candidate) => {
       verifications++
       assert.deepEqual(await readFile(join(sourceRoot, 'package-integrity.json')), await readFile(join(candidate, 'package-integrity.json')))
