@@ -2,47 +2,57 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const source = readFileSync('packaging/windows-installer.nsi', 'utf8')
-const section = (name, next) => source.slice(source.indexOf(name), source.indexOf(next, source.indexOf(name)))
-const context = section('Function DetermineWelcomeContext', 'Function WelcomePageCreate')
+const installer = readFileSync('packaging/windows-installer.nsi', 'utf8')
+const section = (start, end) => installer.slice(installer.indexOf(start), installer.indexOf(end, installer.indexOf(start)))
+const state = section('Function SetStandardWelcomeContext', 'Function WelcomePageCreate')
 const welcome = section('Function WelcomePageCreate', 'Function .onInit')
+const init = section('Function .onInit', 'Function un.onInit')
 
-test('component selection precedes the contextual welcome page; selective updater modes skip both pages', () => {
-  assert.match(source, /Page custom ModePageCreate ModePageLeave[\s\S]*?Page custom WelcomePageCreate[\s\S]*?!insertmacro MUI_PAGE_DIRECTORY/)
-  assert.doesNotMatch(source, /!insertmacro MUI_PAGE_WELCOME/)
-  assert.match(section('Function ModePageCreate', 'Function SelectClientMode'), /\$ClientUpdateMode == "1"[\s\S]*?\$ManagerUpdateMode == "1"[\s\S]*?Abort/)
-  assert.match(welcome, /\$ClientUpdateMode == "1"[\s\S]*?\$ManagerUpdateMode == "1"[\s\S]*?Abort/)
+test('manual setup shows Welcome before component choice and keeps the existing page sequence', () => {
+  const welcomePage = installer.indexOf('Page custom WelcomePageCreate')
+  const componentPage = installer.indexOf('Page custom ModePageCreate ModePageLeave')
+  assert.ok(welcomePage >= 0 && welcomePage < componentPage)
+  assert.ok(componentPage < installer.indexOf('!insertmacro MUI_PAGE_DIRECTORY'))
+  assert.ok(installer.indexOf('!insertmacro MUI_PAGE_DIRECTORY') < installer.indexOf('!insertmacro MUI_PAGE_INSTFILES'))
+  assert.ok(installer.indexOf('!insertmacro MUI_PAGE_INSTFILES') < installer.indexOf('!insertmacro MUI_PAGE_FINISH'))
+  assert.match(installer, /Page custom ModePageCreate ModePageLeave "Вибір компонентів"/)
 })
 
-test('clean install is determined from the installer registry marker, not leftover directories', () => {
-  assert.match(context, /ReadRegStr \$InstalledComponents HKLM "Software\\HromadaAID\\Installer" "InstalledComponents"/)
-  assert.match(context, /StrCmp \$InstalledComponents "" welcomeContextInstall/)
-  assert.match(context, /welcomeContextInstall:[\s\S]*?StrCpy \$WelcomeHeader "Встановлення HromadaAID"[\s\S]*?Вас вітає майстер встановлення HromadaAID/)
+test('regular welcome distinguishes only clean, complete registered, and unknown or partial states', () => {
+  assert.match(init, /Call SetStandardWelcomeContext[\s\S]*?GetOptions/)
+  assert.match(state, /StrCpy \$WelcomeHeader "HromadaAID – майстер встановлення"[\s\S]*?Не вдалося достовірно визначити стан/)
+  assert.match(state, /ReadRegStr \$InstalledComponents HKLM "Software\\HromadaAID\\Installer" "InstalledComponents"/)
+  assert.match(state, /StrCmp \$InstalledComponents "" welcomeContextClean/)
+  assert.match(state, /StrCmp \$InstalledComponents "Client" welcomeContextClient/)
+  assert.match(state, /StrCmp \$InstalledComponents "Server,ServerManager" welcomeContextServer/)
+  assert.match(state, /StrCmp \$InstalledComponents "Client,Server,ServerManager" welcomeContextCombined/)
+  assert.match(state, /welcomeContextClean:[\s\S]*?Встановлення HromadaAID[\s\S]*?Майстер допоможе встановити необхідні компоненти HromadaAID на цей комп'ютер\./)
+  assert.match(state, /welcomeContextClient:[\s\S]*?Client\\HromadaAID\.exe[\s\S]*?welcomeContextServer/)
+  assert.match(state, /welcomeContextServer:[\s\S]*?ServerManager\\HromadaAID Server Manager\.exe[\s\S]*?Server\\service\\HromadaAIDService\.exe[\s\S]*?welcomeContextCombined/)
+  assert.match(state, /welcomeContextCombined:[\s\S]*?Client\\HromadaAID\.exe[\s\S]*?ServerManager\\HromadaAID Server Manager\.exe[\s\S]*?Server\\service\\HromadaAIDService\.exe[\s\S]*?welcomeContextInstalled/)
+  assert.match(state, /welcomeContextInstalled:[\s\S]*?Обслуговування HromadaAID[\s\S]*?На цьому комп'ютері вже встановлено компоненти HromadaAID\. Ви можете оновити їх або змінити склад встановлення\./)
+  assert.doesNotMatch(state, /InstallVersion|DisplayVersion|GetDLLVersion|FileGetVersion/)
 })
 
-test('recognized installed component sets require their executables and compare selected components before saying update', () => {
-  assert.match(context, /StrCmp \$InstalledComponents "Client" welcomeContextClient/)
-  assert.match(context, /StrCmp \$InstalledComponents "Server,ServerManager" welcomeContextServer/)
-  assert.match(context, /StrCmp \$InstalledComponents "Client,Server,ServerManager" welcomeContextCombined/)
-  assert.match(context, /welcomeContextClient:[\s\S]*?Client\\HromadaAID\.exe[\s\S]*?welcomeContextServer/)
-  assert.match(context, /welcomeContextServer:[\s\S]*?ServerManager\\HromadaAID Server Manager\.exe[\s\S]*?Server\\service\\HromadaAIDService\.exe[\s\S]*?welcomeContextCombined/)
-  assert.match(context, /welcomeContextCombined:[\s\S]*?Client\\HromadaAID\.exe[\s\S]*?ServerManager\\HromadaAID Server Manager\.exe[\s\S]*?Server\\service\\HromadaAIDService\.exe/)
-  assert.match(context, /welcomeContextComponentChange:[\s\S]*?Зміна компонентів HromadaAID/)
-  assert.match(context, /welcomeContextUpdate:[\s\S]*?Оновлення HromadaAID[\s\S]*?Вас вітає майстер оновлення HromadaAID[\s\S]*?Налаштування сервера та дані користувачів будуть збережені\.[\s\S]*?Версія оновлення: \$\{APP_VERSION\}/)
-  assert.match(context, /welcomeContextUnknown:[\s\S]*?Return/)
+test('selective update welcome uses the current Setup version and names the correct component', () => {
+  assert.match(init, /clientUpdateTargetExists:[\s\S]*?Оновлення HromadaAID Client[\s\S]*?до версії \$\{APP_VERSION\}\.[\s\S]*?client-update-success\.txt/)
+  assert.match(init, /managerUpdateTargetExists:[\s\S]*?Оновлення HromadaAID Server Manager[\s\S]*?до версії \$\{APP_VERSION\}\.[\s\S]*?managerPreviousPresent/)
+  assert.doesNotMatch(welcome, /ClientUpdateMode|ManagerUpdateMode/)
 })
 
-test('unknown and partial installs use neutral wording and no shared installed-version claim is shown', () => {
-  assert.match(context, /StrCpy \$WelcomeHeader "Налаштування HromadaAID"/)
-  assert.match(context, /StrCpy \$WelcomeDescription "Перевірте вибрані компоненти\./)
-  assert.doesNotMatch(context, /InstallVersion|DisplayVersion/)
-  assert.match(welcome, /\$WelcomeVersion != ""[\s\S]*?\$WelcomeVersion/)
+test('both selective update modes still bypass Components and ordinary directory selection', () => {
+  const modePage = section('Function ModePageCreate', 'Function SelectClientMode')
+  const directoryPre = section('Function DirectoryPagePre', 'Function ModePageLeave')
+  assert.match(modePage, /ClientUpdateMode == "1"[\s\S]*?ManagerUpdateMode == "1"[\s\S]*?Abort[\s\S]*?nsDialogs::Create/)
+  assert.match(directoryPre, /ManagerUpdateMode == "1"[\s\S]*?Abort/)
+  assert.match(directoryPre, /ClientUpdateMode == "1"[\s\S]*?Call SummaryLeave[\s\S]*?Abort/)
+  assert.match(init, /SectionSetFlags \$\{SEC_CLIENT\} \$\{SF_SELECTED\}[\s\S]*?SectionSetFlags \$\{SEC_SERVER\} 0[\s\S]*?Goto initDone/)
 })
 
-test('installer context helper is read-only and leaves install/update sections outside it', () => {
-  assert.doesNotMatch(context, /WriteReg|DeleteReg|File \/r|Rename |RMDir|ExecToLog|ExecToStack/)
-  assert.match(section('Function ModePageLeave', 'Function DetermineWelcomeContext'), /Call SummaryLeave[\s\S]*?Call DetermineWelcomeContext/)
-  assert.match(section('Section -ManagerOnlyUpdate', 'Section -ProductBranding'), /ServerManager\.next[\s\S]*?Rename "\$INSTDIR\\ServerManager" "\$INSTDIR\\ServerManager\.previous"[\s\S]*?Rename "\$INSTDIR\\ServerManager\.next" "\$INSTDIR\\ServerManager"/)
-  assert.match(source, /Section "Клієнт HromadaAID" SEC_CLIENT/)
-  assert.match(source, /Section "API Server \+ Server Manager \(обов’язковий комплект\)" SEC_SERVER/)
+test('welcome initialization does not reset component choices or alter installer operations', () => {
+  assert.doesNotMatch(state, /SectionSetFlags|WriteReg|DeleteReg|File \/r|Rename |RMDir|ExecToLog|ExecToStack/)
+  assert.doesNotMatch(welcome, /SectionSetFlags|WriteReg|DeleteReg|File \/r|Rename |RMDir|ExecToLog|ExecToStack/)
+  assert.match(section('Function ModePageLeave', 'Function SetStandardWelcomeContext'), /SectionSetFlags \$\{SEC_CLIENT\}[\s\S]*?SectionSetFlags \$\{SEC_SERVER\}[\s\S]*?Call SummaryLeave/)
+  assert.match(installer, /Section -RemoveDeselected[\s\S]*?ClientUpdateMode == "1"[\s\S]*?ManagerUpdateMode == "1"[\s\S]*?Goto removeDeselectedDone/)
+  assert.match(installer, /Section -UninstallMetadata[\s\S]*?InstalledComponents[\s\S]*?client-update-success\.txt[\s\S]*?manager-update-success\.txt/)
 })

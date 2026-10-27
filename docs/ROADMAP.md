@@ -59,15 +59,14 @@ Stable 0.1.2 уже опубліковано. 0.1.3 — виправний ре�
 
 ## 0.1.4 — Task 1: Installation / Update UX
 
-IMPLEMENTED у `packaging/windows-installer.nsi`: після вибору компонентів welcome
-сторінка розрізняє чисте встановлення, оновлення, зміну складу та невизначений стан.
-Класифікація спирається на `InstalledComponents` і наявність executable-файлів;
-перевстановлення з тим самим набором показується як оновлення. Для update UI
-відображає цільову версію Setup, але не приписує одну встановлену версію компонентам,
-які могли оновлюватися окремо. Вибір компонентів та інсталяційні/оновлювальні секції
-збережені. Цільові automated NSIS source tests пройшли; візуальна Windows 10/11 VM
-перевірка чистого встановлення, оновлення та повторного запуску залишається PENDING.
-Повний реліз 0.1.4 не готувався.
+IMPLEMENTED у `packaging/windows-installer.nsi`: звичайний Universal Setup показує
+Welcome → Components, а Client/Manager selective update — відповідний Update Welcome
+і пропускає Components. Clean/installed/unknown визначається тільки з
+`InstalledComponents` разом із перевіркою потрібних EXE; стан не виводить версію, а
+selective update показує цільову версію зі Setup. API Server і далі оновлюється
+окремо через Server Manager. Цільові automated NSIS/selective-update tests пройшли;
+ручна Windows 10/11 VM-перевірка сторінок, completion і restart залишається PENDING.
+Full production build 0.1.4 не виконувався.
 
 ## Подальші напрями
 
