@@ -68,6 +68,13 @@ Var InstalledComponents
 Var WelcomeDialog
 Var WelcomeHeader
 Var WelcomeDescription
+Var InstallerTitleFont
+Var InstallerVersionFont
+Var InstallCompleted
+Var FinishTitle
+Var FinishDescription
+Var FinishHint
+Var FinishLogo
 
 !define MUI_ICON "${PROJECT_DIR}\assets\hromadaaid.ico"
 !define MUI_UNICON "${PROJECT_DIR}\assets\hromadaaid.ico"
@@ -79,8 +86,8 @@ Var WelcomeDescription
 !define MUI_HEADERIMAGE_UNBITMAP_STRETCH AspectFitHeight
 !define MUI_BGCOLOR "FFFFFF"
 !define MUI_TEXTCOLOR "24352C"
-!define MUI_FINISHPAGE_TITLE "Готово"
-!define MUI_FINISHPAGE_TEXT "Вибрану операцію завершено. Застосунки доступні в меню «Пуск». Після автоматичного оновлення застосунок відкриється самостійно."
+!define MUI_FINISHPAGE_TITLE "$FinishTitle"
+!define MUI_FINISHPAGE_TEXT "$FinishDescription"
 !define MUI_FINISHPAGE_BUTTON "Готово"
 !define MUI_INSTFILESPAGE_FINISHHEADER_TEXT "Операцію завершено"
 !define MUI_INSTFILESPAGE_FINISHHEADER_SUBTEXT "Перейдіть далі, щоб закрити майстер."
@@ -117,6 +124,9 @@ Page custom ModePageCreate ModePageLeave "Вибір компонентів"
 !define MUI_PAGE_HEADER_TEXT "Встановлення HromadaAID"
 !define MUI_PAGE_HEADER_SUBTEXT "Зачекайте, поки майстер завершить вибрану операцію."
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_PAGE_CUSTOMFUNCTION_PRE FinishPagePre
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW FinishPageShow
+!define MUI_PAGE_CUSTOMFUNCTION_DESTROYED FinishPageDestroyed
 !insertmacro MUI_PAGE_FINISH
 !define MUI_PAGE_HEADER_TEXT "Видалення HromadaAID"
 !define MUI_PAGE_HEADER_SUBTEXT "Будуть видалені програмні компоненти; серверні дані залишаться."
@@ -381,6 +391,8 @@ Section -UninstallMetadata
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1
 updateMetadataDone:
+  ; UI-only completion gate: a section Abort must never show a success page.
+  StrCpy $InstallCompleted "1"
 SectionEnd
 
 Section "Uninstall"
@@ -566,30 +578,114 @@ welcomeContextUnknown:
   Return
 FunctionEnd
 
+; Native nsDialogs composition shared by welcome and the existing MUI2 finish.
+!macro InstallerHero TOP TITLE DESCRIPTION HINT
+  !define /math HeroTitleTop ${TOP} + 6
+  !define /math HeroDescriptionTop ${TOP} + 44
+  !define /math HeroVersionTop ${TOP} + 80
+  !define /math HeroVersionLabelTop ${TOP} + 88
+  !define /math HeroHintTop ${TOP} + 120
+  ${NSD_CreateLabel} 12u ${HeroTitleTop}u 92% 34u "${TITLE}"
+  Pop $0
+  SetCtlColors $0 183F2B F6F8F6
+  SendMessage $0 ${WM_SETFONT} $InstallerTitleFont 0
+  ${NSD_CreateLabel} 12u ${HeroDescriptionTop}u 92% 30u "${DESCRIPTION}"
+  Pop $0
+  SetCtlColors $0 46594D F6F8F6
+  ${NSD_CreateLabel} 0u ${HeroVersionTop}u 100% 32u ""
+  Pop $0
+  SetCtlColors $0 286343 E6F0E9
+  ${NSD_CreateLabel} 12u ${HeroVersionLabelTop}u 54% 16u "Версія пакета"
+  Pop $0
+  SetCtlColors $0 286343 E6F0E9
+  ${NSD_CreateLabel} 70% ${HeroVersionLabelTop}u 26% 16u "${APP_VERSION}"
+  Pop $0
+  SetCtlColors $0 183F2B E6F0E9
+  SendMessage $0 ${WM_SETFONT} $InstallerVersionFont 0
+  ${NSD_CreateLabel} 12u ${HeroHintTop}u 92% 18u "${HINT}"
+  Pop $0
+  SetCtlColors $0 59675F F6F8F6
+  !undef HeroTitleTop
+  !undef HeroDescriptionTop
+  !undef HeroVersionTop
+  !undef HeroVersionLabelTop
+  !undef HeroHintTop
+!macroend
+
 Function WelcomePageCreate
   nsDialogs::Create 1018
   Pop $WelcomeDialog
   ${If} $WelcomeDialog == error
     Abort
   ${EndIf}
-  !insertmacro MUI_HEADER_TEXT "$WelcomeHeader" ""
-  SetCtlColors $WelcomeDialog 24352C FFFFFF
-  ${NSD_CreateLabel} 0u 4u 100% 2u ""
-  Pop $0
-  SetCtlColors $0 286343 286343
-  ${NSD_CreateLabel} 0u 16u 100% 14u "Версія ${APP_VERSION}"
-  Pop $0
-  SetCtlColors $0 286343 FFFFFF
-  ${NSD_CreateLabel} 0u 38u 100% 48u "$WelcomeDescription"
-  Pop $0
-  SetCtlColors $0 24352C FFFFFF
-  ${NSD_CreateLabel} 0u 100u 100% 26u "Натисніть «Далі», щоб продовжити."
-  Pop $0
-  SetCtlColors $0 59675F FFFFFF
+  !insertmacro MUI_HEADER_TEXT "HromadaAID" "Майстер встановлення та оновлення"
+  SetCtlColors $WelcomeDialog 24352C F6F8F6
+  !insertmacro InstallerHero 0 "$WelcomeHeader" "$WelcomeDescription" "Натисніть «Далі», щоб продовжити."
   nsDialogs::Show
 FunctionEnd
 
+Function FinishPagePre
+  ${If} $InstallCompleted != "1"
+    Abort
+  ${EndIf}
+  StrCpy $FinishTitle "Зміни застосовано"
+  StrCpy $FinishHint "Натисніть «Готово», щоб закрити майстер."
+  ${If} $ClientUpdateMode == "1"
+    StrCpy $FinishTitle "Client оновлено"
+    StrCpy $FinishDescription "Клієнтський застосунок HromadaAID оновлено. Після закриття майстра застосунок автоматично відкриється."
+  ${ElseIf} $ManagerUpdateMode == "1"
+    StrCpy $FinishTitle "Server Manager оновлено"
+    StrCpy $FinishDescription "Server Manager оновлено. Після закриття майстра застосунок автоматично відкриється."
+  ${Else}
+    SectionGetFlags ${SEC_SERVER} $0
+    IntOp $0 $0 & ${SF_SELECTED}
+    SectionGetFlags ${SEC_CLIENT} $1
+    IntOp $1 $1 & ${SF_SELECTED}
+    ${If} $0 == 0
+      StrCpy $FinishDescription "HromadaAID Client встановлено. Відкрийте застосунок через меню «Пуск»."
+    ${ElseIf} $1 == 0
+      StrCpy $FinishDescription "API Server і Server Manager встановлено. Відкрийте Manager для перевірки або первинного налаштування сервера."
+    ${Else}
+      StrCpy $FinishDescription "Client, API Server і Server Manager встановлено. Сервер перевіряється та налаштовується окремо в Manager."
+    ${EndIf}
+  ${EndIf}
+FunctionEnd
+
+Function FinishPageShow
+  ; Keep the stock MUI2 reboot controls if Windows ever requires a restart.
+  ${If} ${RebootFlag}
+    Return
+  ${EndIf}
+  ShowWindow $mui.FinishPage.Image ${SW_HIDE}
+  ShowWindow $mui.FinishPage.Title ${SW_HIDE}
+  ShowWindow $mui.FinishPage.Text ${SW_HIDE}
+  SetCtlColors $mui.FinishPage 24352C F6F8F6
+  ${NSD_CreateIcon} 12u 6u 28u 28u ""
+  Pop $0
+  ${NSD_SetIconFromInstaller} $0 $FinishLogo
+  ${NSD_CreateLabel} 48u 13u 80% 18u "HromadaAID"
+  Pop $0
+  SetCtlColors $0 286343 F6F8F6
+  SendMessage $0 ${WM_SETFONT} $InstallerVersionFont 0
+  !insertmacro InstallerHero 40 "$FinishTitle" "$FinishDescription" "$FinishHint"
+FunctionEnd
+
+Function FinishPageDestroyed
+  ${If} $FinishLogo != ""
+    ${NSD_FreeIcon} $FinishLogo
+    StrCpy $FinishLogo ""
+  ${EndIf}
+FunctionEnd
+
+Function .onGUIEnd
+  System::Call 'gdi32::DeleteObject(p $InstallerTitleFont)'
+  System::Call 'gdi32::DeleteObject(p $InstallerVersionFont)'
+FunctionEnd
+
 Function .onInit
+  StrCpy $InstallCompleted "0"
+  CreateFont $InstallerTitleFont "Segoe UI" 14 700
+  CreateFont $InstallerVersionFont "Segoe UI" 11 600
   SetRegView 64
   SetShellVarContext all
   Call SetStandardWelcomeContext

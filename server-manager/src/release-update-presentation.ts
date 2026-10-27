@@ -8,7 +8,7 @@ export function releaseUpdateDisplay(state: ReleaseState | null | undefined, che
   if (!state) return { label: 'Перевірка ще не завершена', tone: 'info' }
 
   switch (state.status) {
-    case 'up-to-date': return { label: 'Встановлено останню перевірену версію', tone: 'success' }
+    case 'up-to-date': return { label: 'Актуальна версія', tone: 'success' }
     case 'available': return { label: state.availableVersion ? `Доступна версія ${state.availableVersion}` : 'Доступне оновлення', tone: 'warning' }
     case 'downloading': return { label: 'Завантаження оновлення…', tone: 'info' }
     case 'verifying': return { label: 'Перевірка цілісності…', tone: 'info' }

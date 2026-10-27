@@ -20,7 +20,7 @@ const stages = [
 
 function UpdateStatus({ state, checking = false }: { state: ReleaseUpdateState | ServerReleaseState | null; checking?: boolean }) {
   const display = releaseUpdateDisplay(state, checking)
-  return <div className="sm-release-status" role={display.tone === 'error' ? 'alert' : 'status'} aria-live="polite">
+  return <div className={`sm-release-status${state?.status === 'up-to-date' && !checking ? ' sm-release-status-current' : ''}`} role={display.tone === 'error' ? 'alert' : 'status'} aria-live="polite">
     <StatusBadge tone={display.tone}>{display.label}</StatusBadge>
     {state?.error && <span className="sm-release-status-detail">{state.error}</span>}
   </div>

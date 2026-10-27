@@ -1,11 +1,60 @@
 # Контекст для наступного чату
 
-Оновлено 2026-10-27 під час підготовки hotfix 0.1.5.
+Оновлено під час підготовки UI-релізу 0.1.6.
 Це поточний checkpoint; технічна реалізація — у [ARCHITECTURE.md](ARCHITECTURE.md),
 домовленості — у [DECISIONS.md](DECISIONS.md), план — у [ROADMAP.md](ROADMAP.md),
 сценарії та історія VM — у [manual testing](stage-9.1.3-manual-testing.md).
 
 ## Git і версії
+
+Поточний етап — **0.1.6** у `feature/client-server`, початковий HEAD `21f83b5`.
+Робоче дерево на початку чисте, origin синхронізований; tag 0.1.6 був відсутній.
+Версії Client/Manager/API/Setup узгоджено на 0.1.6, same-release-version збережено.
+Описи 0.1.5 та попередніх версій нижче є історичними checkpoints.
+
+### Підтвердження Windows VM від власника для 0.1.5
+
+- Stable 0.1.5 опубліковано й перевірено у Windows 10 VM.
+- Client 0.1.3 → 0.1.4 — VM PASS.
+- Manager 0.1.3 → 0.1.5 — VM PASS **через ручний Setup**.
+- API Server 0.1.3 → 0.1.5 — VM PASS через автоматичний ZIP update: служба
+  перезапускається, API доступний, серверні дані збережені за звітом власника.
+- Manager auto-update з launcher 0.1.5 ще не перевірено; ручне встановлення не
+  доводить повного автоматичного handoff/UAC/swap/restart.
+
+### 0.1.6 — UI реалізовано, VM acceptance pending
+
+- Лише на сторінці Manager «Оновлення»: однакова права секція дій із вертикальним
+  роздільником та центруванням кнопок; на вузькому вікні дії під інформацією.
+  «Що нового» займає інформаційну колонку без заходу під кнопки. Manager/API
+  показують компактний зелений badge «Актуальна версія» зі збереженням статусів.
+- Welcome і штатний finish MUI2 використовують спільний native nsDialogs hero:
+  великий Segoe UI заголовок, короткий опис, світлий фон і зелений блок версії.
+  Finish показує компонент/результат для Client, Manager або звичайного Setup;
+  UI-прапорець завершення встановлюється лише в кінці останньої install section.
+  Помилка/Abort до цього не відкриває success finish. Штатний reboot UI збережено.
+- Порядок сторінок, swap/recovery, marker, launcher CWD/handoff, restart,
+  InstalledComponents, служба, API й SQLite не змінювалися.
+- Цільові launcher/Client/Manager/NSIS/shortcut/payload/manifest/status tests
+  та production ZIP → Server.next test: **43 PASS / 0 FAIL / 0 SKIP**.
+  Штатний `pnpm run windows:installer` завершився успішно з TypeScript checks
+  Client/API/Manager і NSIS compilation. У `release/0.1.6/` готові Setup, Server
+  ZIP, manifest і release notes. Manifest штатно створений і перевірений за
+  SHA-256/size; API v1, SQLite 1–28, same-release-version збережені.
+  ZIP archive/integrity/runtime checks — PASS; Server.next test не керував SCM.
+  Витягнуті з фінального Setup ASAR/launcher/Server integrity metadata побайтно
+  збігаються з перевіреними payloads. Manager helpers присутні без другого runtime;
+  три Excel templates збігаються з tracked originals, Реєстр.xlsx відсутній.
+  `git diff --check` — PASS; production artifacts залишаються поза Git.
+- Windows VM 0.1.6 PENDING: зовнішній вигляд welcome/finish, три конфігурації,
+  narrow Manager UI, повний Manager auto-update **0.1.5 → 0.1.6**, незалежні Client
+  та API updates, completion/restart і збереження даних/інших компонентів.
+
+Git-етап передбачає один release commit, звичайний push та annotated tag 0.1.6.
+Наступний крок — ручна публікація GitHub Release власником із перевіреної гілки
+й тегу, потім Windows VM acceptance. Stage 9.1 не завершено.
+
+### Історичний checkpoint підготовки 0.1.5
 
 Поточний релізний етап — **0.1.5**: виправлення CWD незалежного launcher-а й
 компактніше оформлення Universal Setup. Початковий HEAD — `d52b456d`, гілка

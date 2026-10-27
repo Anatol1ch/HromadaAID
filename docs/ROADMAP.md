@@ -45,6 +45,27 @@ Stage 9.1.3 та Stage 9.1 не завершені; production readiness не з
 
 ## Версії та наступні кроки
 
+### 0.1.6 — точковий Manager UI polish і нова композиція Setup
+
+**IMPLEMENTED / VM PENDING.** На сторінці «Оновлення» реалізовано праву секцію
+дій із роздільником і вертикальним центруванням, повноширинні notes в інформаційній
+колонці та badge «Актуальна версія». Інші сторінки й дизайн-система не змінені.
+NSIS welcome/finish мають спільну native nsDialogs композицію з великим заголовком,
+сценарним описом, логотипом і блоком версії. Finish success захищений UI-прапорцем
+останньої install section; порядок сторінок та updater/recovery не змінені.
+Версії всіх компонентів — 0.1.6. Цільові тести й production ZIP → Server.next:
+**43 PASS / 0 FAIL / 0 SKIP**. Штатний production workflow, TypeScript, NSIS,
+ZIP integrity/runtime, три templates і release manifest — PASS.
+Setup, Server ZIP, manifest і release notes підготовлено в `release/0.1.6/`.
+Git-етап: один release commit, звичайний push і annotated tag. Далі GitHub Release
+публікує власник вручну, потім Windows VM acceptance.
+
+Власник підтвердив публікацію 0.1.5 та VM PASS Manager 0.1.3 → 0.1.5 через ручний
+Setup і API Server 0.1.3 → 0.1.5 через автоматичний ZIP update. Служба
+перезапускається, API доступний, дані збережено за його звітом. Manager auto-update
+із новим launcher 0.1.5 залишається PENDING і є головним наступним VM-сценарієм.
+Наведені нижче checkpoints попередніх релізів зберігають історію.
+
 ### 0.1.5 — launcher CWD hotfix та оформлення Setup
 
 **IMPLEMENTED; VM PENDING.** Bootstrap і незалежний launcher працюють із user-data

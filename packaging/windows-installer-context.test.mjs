@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 const installer = readFileSync('packaging/windows-installer.nsi', 'utf8')
 const section = (start, end) => installer.slice(installer.indexOf(start), installer.indexOf(end, installer.indexOf(start)))
 const state = section('Function SetStandardWelcomeContext', 'Function WelcomePageCreate')
-const welcome = section('Function WelcomePageCreate', 'Function .onInit')
+const welcome = section('Function WelcomePageCreate', 'Function FinishPagePre')
 const init = section('Function .onInit', 'Function un.onInit')
 
 test('manual setup shows Welcome before component choice and keeps the existing page sequence', () => {
@@ -55,4 +55,14 @@ test('welcome initialization does not reset component choices or alter installer
   assert.match(section('Function ModePageLeave', 'Function SetStandardWelcomeContext'), /SectionSetFlags \$\{SEC_CLIENT\}[\s\S]*?SectionSetFlags \$\{SEC_SERVER\}[\s\S]*?Call SummaryLeave/)
   assert.match(installer, /Section -RemoveDeselected[\s\S]*?ClientUpdateMode == "1"[\s\S]*?ManagerUpdateMode == "1"[\s\S]*?Goto removeDeselectedDone/)
   assert.match(installer, /Section -UninstallMetadata[\s\S]*?InstalledComponents[\s\S]*?client-update-success\.txt[\s\S]*?manager-update-success\.txt/)
+})
+
+test('finish success requires the final installation section and keeps launch/marker ownership unchanged', () => {
+  assert.match(init, /StrCpy \$InstallCompleted "0"/)
+  assert.equal((installer.match(/StrCpy \$InstallCompleted "1"/g) ?? []).length, 1)
+  assert.match(installer, /updateMetadataDone:\s*;[^\r\n]*\r?\n\s*StrCpy \$InstallCompleted "1"\s*SectionEnd/)
+  const finish = section('Function FinishPagePre', 'Function .onGUIEnd')
+  assert.match(finish, /\$InstallCompleted != "1"[\s\S]*?Abort/)
+  assert.match(finish, /ClientUpdateMode == "1"[\s\S]*?Client оновлено[\s\S]*?ManagerUpdateMode == "1"[\s\S]*?Server Manager оновлено/)
+  assert.doesNotMatch(finish, /FileWrite|FileOpen|WriteReg|Exec(?:Shell|Wait)? |Rename |RMDir/)
 })
