@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { copyManagerSetupPayload } from '../packaging/manager-setup-payload.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const release = join(root, 'release')
@@ -56,13 +57,8 @@ function main() {
   }
   rmSync(manager, { recursive: true, force: true })
   mkdirSync(manager, { recursive: true })
-  // The installer keeps one copy of the server payload at Server.next. Server
-  // Manager uses that verified staged package for first setup; its normal
-  // portable build still carries resources/server-payload for standalone use.
-  cpSync(managerSource, manager, {
-    recursive: true,
-    filter: path => !path.replaceAll('\\', '/').includes('/resources/server-payload'),
-  })
+  // Keep one server runtime at Server.next, plus Manager-owned installer helpers.
+  copyManagerSetupPayload(managerSource, manager)
   const managerVersionPath = join(manager, 'resources', 'manager-version.ini')
   if (!existsSync(managerVersionPath)) throw new Error('Server Manager package is missing its version marker.')
   const managerBrandingId = /^brandingId=([a-f0-9]{64})\r?$/m.exec(readFileSync(managerVersionPath, 'utf8'))?.[1]

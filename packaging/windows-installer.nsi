@@ -157,6 +157,9 @@ managerStageReady:
   MessageBox MB_ICONSTOP|MB_OK "Знайдено попередню копію Server Manager. Спершу перевірте її відновлення; файли збережено."
   Abort
 managerPreviousMissing:
+  ; SetOutPath also changes the installer's working directory. Leave the staged
+  ; payload before renaming it: Windows cannot rename the process's current directory.
+  SetOutPath "$INSTDIR"
   ClearErrors
   Rename "$INSTDIR\ServerManager" "$INSTDIR\ServerManager.previous"
   IfErrors managerPreserveOld

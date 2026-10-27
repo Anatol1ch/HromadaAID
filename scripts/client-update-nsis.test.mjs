@@ -42,6 +42,39 @@ test('external launcher logs installer lifecycle, uses UAC with the selective mo
   assert.match(launcher, /Start-Process -FilePath \$ApplicationExecutable/)
 })
 
+test('Manager-only swap leaves staging before rename and Windows preserves both payloads on a blocked swap', { skip: process.platform !== 'win32' }, async () => {
+  const section = installer.slice(installer.indexOf('Section -ManagerOnlyUpdate'), installer.indexOf('Section -ProductBranding'))
+  assert.match(section, /managerPreviousMissing:\s*(?:;[^\r\n]*\r?\n\s*)*SetOutPath "\$INSTDIR"\s+ClearErrors\s+Rename "\$INSTDIR\\ServerManager" "\$INSTDIR\\ServerManager\.previous"/)
+  const root = await mkdtemp(join(tmpdir(), 'hromada-manager-swap-'))
+  const active = join(root, 'ServerManager')
+  const next = active + '.next'
+  await mkdir(active)
+  await mkdir(next)
+  await writeFile(join(active, 'sentinel.txt'), 'old')
+  await writeFile(join(next, 'sentinel.txt'), 'new')
+  try {
+    const result = spawnSync(process.execPath, ['--input-type=module', '--eval', `
+      import assert from 'node:assert/strict';
+      import { renameSync, readFileSync, existsSync } from 'node:fs';
+      import { join } from 'node:path';
+      const root = process.argv[1], active = join(root, 'ServerManager');
+      const next = active + '.next', previous = active + '.previous';
+      renameSync(active, previous);
+      assert.throws(() => renameSync(next, active), { code: 'EBUSY' });
+      renameSync(previous, active);
+      assert.equal(readFileSync(join(active, 'sentinel.txt'), 'utf8'), 'old');
+      assert.equal(readFileSync(join(next, 'sentinel.txt'), 'utf8'), 'new');
+      process.chdir(root);
+      renameSync(active, previous);
+      renameSync(next, active);
+      assert.equal(readFileSync(join(active, 'sentinel.txt'), 'utf8'), 'new');
+      assert.equal(readFileSync(join(previous, 'sentinel.txt'), 'utf8'), 'old');
+      assert.equal(existsSync(next), false);
+    `, root], { cwd: next, encoding: 'utf8', windowsHide: true, timeout: 15_000 })
+    assert.equal(result.status, 0, result.error?.message || result.stderr || result.stdout)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
 test('Manager-only NSIS mode replaces only Manager, preserves installation metadata and bypasses server/service work', () => {
   assert.match(installer, /\$\{GetOptions\} "\$CMDLINE" "\/MANAGERUPDATE=" \$ManagerUpdateMode/)
   assert.match(installer, /Section -ManagerOnlyUpdate[\s\S]*?SetOutPath "\$INSTDIR\\ServerManager\.next"[\s\S]*?File \/r "\$\{MANAGER_PAYLOAD\}\\\*"[\s\S]*?Rename "\$INSTDIR\\ServerManager\.next" "\$INSTDIR\\ServerManager"[\s\S]*?SectionEnd/)
