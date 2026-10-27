@@ -1,6 +1,6 @@
 # Контекст для наступного чату
 
-Оновлено 2026-10-27 під час Repository Cleanup & Documentation Consolidation.
+Оновлено 2026-10-27 після локальної підготовки Stable 0.1.2.
 Це поточний checkpoint; технічна реалізація — у [ARCHITECTURE.md](ARCHITECTURE.md),
 домовленості — у [DECISIONS.md](DECISIONS.md), план — у [ROADMAP.md](ROADMAP.md),
 сценарії та історія VM — у [manual testing](stage-9.1.3-manual-testing.md).
@@ -16,9 +16,11 @@
 - `git ls-remote` підтвердив origin/default `feature/client-server`, гілки
   `main` і `feature/client-server`, теги `0.1.0` і `0.1.1`. `origin/main` є предком
   feature HEAD. Push/merge/rebase/tags у консолідації не виконуються.
-- Source SemVer усіх компонентів залишається **0.1.1**. Stable **0.1.0/0.1.1**
-  опубліковані та не змінювалися. Нові виправлення — локальні source commits;
-  офіційний Setup 0.1.1 їх не містить. **Release 0.1.2 preparation не розпочато.**
+- Source SemVer усіх компонентів — **0.1.2**. Stable **0.1.0/0.1.1**
+  опубліковані та не змінювалися. Комплект 0.1.2 локально зібраний у
+  `release/stage-9.1.3/stable-0.1.2/`; він не опублікований і не пройшов Windows
+  VM-перевірки. Commit підготовки версії/документації створено локально; push, tag і
+  GitHub Release не виконувалися.
 
 ## Stage 9.1.3: фактичний стан
 
@@ -113,7 +115,32 @@ tsconfig.app.json, server-manager/tsconfig.electron.json, server-manager/tsconfi
 Серверний transaction/recovery source у поточному diff не змінено, тому повний
 server/recovery suite не повторювався. Попередні цільові перевірки: Server update
 24 PASS / 1 SKIP та recovery/process tests; mock SCM/health не доводить VM-поведінку.
-Packaging не запускалося; Setup, Service та реальна SQLite на цій машині не запускалися.
+У межах саме консолідаційної перевірки packaging не запускалося; Setup, Service та
+реальна SQLite не запускалися.
+
+## Stable 0.1.2 — локальна підготовка
+
+Production `pnpm run windows:installer` завершився успішно: Client, API Server,
+Server Manager і Universal Setup побудовані зі source 0.1.2. Серверний ZIP сформовано
+зі свіжого `release/installer-payload/Server`, збережено його `package-integrity.json`
+і додано component compatibility manifest (REST API v1, SQLite schema 1–28).
+`release-manifest.json` створено штатним генератором і повторно перевірено за точними
+розмірами/SHA-256 Setup та ZIP. Додатковий 7-Zip archive test — PASS.
+
+Payload review: Client ASAR містить побайтно актуальні три погоджені tracked templates;
+`Реєстр.xlsx` відсутній. Manager Setup payload містить installer/recovery helper-и,
+але не дублює Server app/runtime/service. Версії Client, Manager, API Server, Setup
+manifest і release manifest узгоджені на 0.1.2; Stable source лишається
+`Anatol1ch/HromadaAID`.
+
+Цільові updater/launcher/NSIS/shortcuts/Manager-payload/component/release-manifest
+тести: **46/46 AUTOMATED PASS**. Client, Manager та Server production build і серверний
+runtime verification завершилися. NSIS Setup був зібраний, але не запускався.
+Сертифікат code signing не налаштований: локальний Setup і вбудовані виконувані
+файли непідписані. Реальні UAC, Windows Installer, Services, fresh Combined setup,
+selective updates, Client/Manager/API update з GitHub та збереження робочих даних у VM
+залишаються PENDING. Stage 9.1.3 і Stage 9.1 не завершені; production readiness не
+заявляється.
 
 ## Публікаційна безпека та наступний крок
 
@@ -124,8 +151,6 @@ history і не повторювати оцінку XLSX. Реєстр.xlsx ві
 артефакти ігноруються. Зміни source не додали виявлених production credentials чи
 даних; це цільова перевірка diff, а не повторний аудит усієї історії.
 
-Наступне окреме завдання — Release 0.1.2 Preparation за
-[погодженим планом](ROADMAP.md).
-Воно потребує production build усіх компонентів, перевірки Setup/Server ZIP/manifest
-і окремого погодження публікації. Нові вимоги для installer/Manager 0.1.3 власник
+Наступний крок — review локального комплекту 0.1.2 та окреме погодження публікації.
+Нові вимоги для installer/Manager 0.1.3 власник
 надасть окремо; після baseline 0.1.2 потрібен послідовний hosted VM-тест до 0.1.3.

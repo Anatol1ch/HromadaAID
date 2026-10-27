@@ -13,6 +13,13 @@ Setup, Server ZIP та `release-manifest.json` описують лише фак�
 Stable Release **0.1.1 опубліковано**. Перевірте його актуальний manifest/assets
 перед тестом; лише реальний запуск із GitHub рахується як hosted update.
 
+Комплект Stable **0.1.2 підготовлено локально** у
+`release/stage-9.1.3/stable-0.1.2/`: production Universal Setup, Server ZIP,
+release manifest і release notes. Артефакти та цільові перевірки пройшли локальну
+перевірку; 0.1.2 не опублікований. Чисте встановлення, selective NSIS режими,
+оновлення Client/Manager/API Server, UAC і збереження системних даних у Windows VM
+для цієї збірки залишаються **PENDING**.
+
 ### Поточна матриця доказів — консолідація 2026-10-27
 
 | Напрям | Статус | Межі підтвердження |
@@ -28,12 +35,17 @@ Stable Release **0.1.1 опубліковано**. Перевірте його �
 IMPLEMENTED — код існує; AUTOMATED PASS — цільова автоматизація пройшла;
 VM PASS — пряме підтвердження власника в зазначеному обсязі; PENDING — доказу
 немає; FAIL — зафіксована невдала спроба. Історичні FAIL нижче зберігаються.
-У консолідації updater/launcher/manifest/NSIS/packaging tests — **40/40 PASS**,
-чотири TypeScript no-emit checks пройшли; нові пакети не створювалися.
+Під час консолідації updater/launcher/manifest/NSIS/packaging tests — **40/40 PASS**;
+тоді нові пакети не створювалися. Окрема локальна підготовка 0.1.2 виконала штатні
+Client/Manager/Server production builds, серверний runtime/package checks і цільові
+updater/launcher/NSIS/shortcuts/package тести **46/46 PASS**. Це не є VM PASS;
+інсталятор не запускався, а UAC, Service й автоматичні оновлення 0.1.2 залишаються
+неперевіреними у Windows VM.
 
 Наступний релізний цикл 0.1.2 → 0.1.3 описано в [ROADMAP.md](ROADMAP.md).
-Нижче зберігаються сценарії та історичні fixtures 0.1.0 → 0.1.1. Нову версію,
-збірку й публікацію виконувати лише за окремими завданнями; Stage 9.1.3 триває.
+Нижче зберігаються сценарії та історичні fixtures 0.1.0 → 0.1.1; вони не є доказом
+поведінки нової збірки. Перед тестом 0.1.2 спершу потрібне окреме погодження та
+публікація Stable; Stage 9.1.3 триває.
 
 ### Регресія ярликів після selective update — VM повторний тест pending
 
@@ -143,7 +155,7 @@ selective update, success marker і restart у цьому тесті не вик
 Власник успішно використав ZIP
 `release/diagnostics/stage-9.1.3/full-update-test/HromadaAID-Client-FullUpdateTest-0.1.0-win-x64.zip`
 і README поруч із ним. Це свіжа ізольована збірка Client 0.1.0 з повним production
-launcher; обмеження diagnostic-no-installer відсутнє. Main source лишається 0.1.1,
+launcher; обмеження diagnostic-no-installer відсутнє. Main source на момент тесту був 0.1.1,
 на момент тесту виправлений updater був у незакоміченому коді; під час подальшої
 консолідації його зафіксовано локальними комітами. Опублікований Stable 0.1.1 не
 змінювався; тест установив саме офіційний Client цього релізу.
