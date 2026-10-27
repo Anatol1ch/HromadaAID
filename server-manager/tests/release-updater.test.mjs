@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Readable } from 'node:stream'
+import { EventEmitter } from 'node:events'
 import { createReleaseUpdater } from '../electron/release-updater.ts'
 
 const setup = Buffer.from('synthetic setup payload')
@@ -32,7 +33,19 @@ test('Manager and API checks share one Stable manifest, verify separate download
     const payload = target.endsWith('.exe') ? setup : server
     return { ok: true, status: 200, url: target, headers: { get: () => String(payload.length) }, body: Readable.from([payload.subarray(0, 4), payload.subarray(4)]) }
   }
-  const updater = createReleaseUpdater({ currentVersion: '1.0.0', resourcesPath, userDataPath, executablePath, processId: 17, sharedModulePath: fileURLToPath(new URL('../../shared/release-updates.mjs', import.meta.url)), fetchImpl, publish: () => {} })
+  let launcherInvocation
+  const spawnProcess = (executable, args, options) => {
+    const child = Object.assign(new EventEmitter(), { unref() {} })
+    queueMicrotask(async () => {
+      const config = JSON.parse(await readFile(args.at(-1), 'utf8'))
+      launcherInvocation = { executable, args: config.argumentLine, options }
+      child.emit('spawn')
+      await writeFile(config.resultPath, JSON.stringify({ status: 'ready', launcherProcessId: 123 }))
+      child.emit('exit', 0, null)
+    })
+    return child
+  }
+  const updater = createReleaseUpdater({ currentVersion: '1.0.0', resourcesPath, userDataPath, executablePath, processId: 17, sharedModulePath: fileURLToPath(new URL('../../shared/release-updates.mjs', import.meta.url)), fetchImpl, publish: () => {}, spawnProcess })
   try {
     const first = updater.check('1.0.0')
     assert.equal((await updater.check('1.0.0')).manager.status, 'checking')
@@ -43,7 +56,24 @@ test('Manager and API checks share one Stable manifest, verify separate download
     const downloadedManager = await updater.download('installer')
     assert.equal((await readFile(downloadedManager.packagePath)).equals(setup), true)
     assert.equal(updater.getState().manager.status, 'ready')
-    await assert.rejects(updater.download('server'), /Спочатку оновіть Server Manager/)
+    assert.equal(await updater.installManager(), true)
+    assert.ok(launcherInvocation.executable.endsWith('\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'))
+    assert.equal(launcherInvocation.options.detached, false)
+    assert.ok(launcherInvocation.args.includes('-Component') && launcherInvocation.args.includes('ServerManager'))
+    assert.ok(launcherInvocation.args.includes('-InstallerPath') && launcherInvocation.args.includes(downloadedManager.packagePath))
+    assert.ok(launcherInvocation.args.includes('-LogPath') && launcherInvocation.args.includes('installer-launcher.log'))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    const launcherEvents = (await readFile(join(userDataPath, 'updates', 'installer-launcher.log'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    assert.deepEqual(launcherEvents.map(event => event.stage), ['install-command-received', 'powershell-launch-requested', 'powershell-process-created', 'powershell-bootstrap-exited', 'powershell-handoff-result'])
+    await assert.rejects(updater.download('server'), /Інша операція оновлення/)
+    await assert.rejects(updater.installManager(), /Інша операція оновлення/)
+
+    const failedLauncher = createReleaseUpdater({ currentVersion: '1.0.0', resourcesPath, userDataPath, executablePath, processId: 19, sharedModulePath: fileURLToPath(new URL('../../shared/release-updates.mjs', import.meta.url)), fetchImpl, publish: () => {}, spawnProcess: () => { throw new Error('synthetic launcher failure') } })
+    await failedLauncher.restore()
+    await assert.rejects(failedLauncher.installManager(), /synthetic launcher failure/)
+    assert.equal(failedLauncher.getState().manager.status, 'error')
+    assert.match(failedLauncher.getState().manager.error, /synthetic launcher failure/)
+
     await writeFile(join(managerDirectory, 'manager-update-success.txt'), version)
     const updatedManager = createReleaseUpdater({ currentVersion: version, resourcesPath, userDataPath, executablePath, processId: 18, sharedModulePath: fileURLToPath(new URL('../../shared/release-updates.mjs', import.meta.url)), fetchImpl, publish: () => {} })
     await updatedManager.restore()
@@ -51,5 +81,6 @@ test('Manager and API checks share one Stable manifest, verify separate download
     const downloadedServer = await updatedManager.download('server')
     assert.equal((await readFile(downloadedServer.packagePath)).equals(server), true)
     assert.equal(updatedManager.getState().server.status, 'ready')
+
   } finally { await rm(root, { recursive: true, force: true }) }
 })

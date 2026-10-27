@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { access, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { access, appendFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { checkLatestRelease, compareVersions, downloadVerifiedArtifact, validateRepository, type ReleaseArtifact } from '../shared/release-updates.mjs'
+import { launchUpdatePowerShell } from '../shared/windows-update-launcher.mjs'
 
 export type ClientUpdateState = {
   status: 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'verifying' | 'ready' | 'preparing' | 'installing' | 'restarting' | 'error'
@@ -136,6 +137,12 @@ export function createClientUpdateService(options: {
   }
 
   const install = async () => {
+    const logPath = join(updateDirectory, 'installer-launcher.log')
+    const logEvent = async (stage: string, details: Record<string, unknown> = {}) => {
+      await mkdir(updateDirectory, { recursive: true })
+      await appendFile(logPath, `${JSON.stringify({ timestamp: new Date().toISOString(), component: 'Client', stage, parentProcessId: options.processId, details })}\n`, 'utf8')
+    }
+    await logEvent('install-command-received', { installerPath: pending?.downloadedPath ?? null, expectedVersion: pending?.version ?? null })
     if (busy || state.status === 'installing' || state.status === 'restarting') return { ok: false as const, message: 'Операція оновлення вже виконується.' }
     if (!pending?.downloadedPath) return { ok: false as const, message: 'Спочатку завантажте й перевірте інсталятор.' }
     busy = true
@@ -144,17 +151,11 @@ export function createClientUpdateService(options: {
       await access(launcher)
       if (!await matchesArtifact(pending.downloadedPath, pending.artifact)) throw new Error('Перевірена копія інсталятора пошкоджена. Завантажте її повторно.')
       setState({ status: 'preparing', error: undefined })
-      const child = (options.spawnProcess ?? spawn)('powershell.exe', [
-        '-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', launcher,
+      const args = [
         '-ProcessId', String(options.processId), '-InstallerPath', pending.downloadedPath, '-ApplicationExecutable', options.executablePath,
-        '-ExpectedVersion', pending.version, '-Component', 'Client',
-      ], { detached: true, windowsHide: true, stdio: 'ignore' })
-      const started = await new Promise<boolean>(resolve => {
-        child.once('spawn', () => resolve(true))
-        child.once('error', error => { setState({ status: 'error', confirmed: true, error: friendlyError(error) }); resolve(false) })
-      })
-      if (!started) return { ok: false as const, message: state.error }
-      child.unref()
+        '-ExpectedVersion', pending.version, '-Component', 'Client', '-LogPath', join(updateDirectory, 'installer-launcher.log'),
+      ]
+      await launchUpdatePowerShell({ updateDirectory, launcherPath: launcher, launcherArguments: args, logEvent, spawnProcess: options.spawnProcess })
       setState({ status: 'installing' })
       return { ok: true as const }
     } catch (error) {

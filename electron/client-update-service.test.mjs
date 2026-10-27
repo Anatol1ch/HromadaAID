@@ -39,7 +39,18 @@ test('client update serializes checks, persists confirmed updates, verifies down
     return { ...response(url), body: Readable.from([bytes.subarray(0, 7), bytes.subarray(7)]) }
   }
   const events = []
-  const spawnProcess = () => { const child = Object.assign(new EventEmitter(), { unref() {} }); queueMicrotask(() => child.emit('spawn')); return child }
+  let launcherInvocation
+  const spawnProcess = (executable, args, options) => {
+    const child = Object.assign(new EventEmitter(), { unref() {} })
+    queueMicrotask(async () => {
+      const config = JSON.parse(await readFile(args.at(-1), 'utf8'))
+      launcherInvocation = { executable, args: config.argumentLine, options }
+      child.emit('spawn')
+      await writeFile(config.resultPath, JSON.stringify({ status: 'ready', launcherProcessId: 123 }))
+      child.emit('exit', 0, null)
+    })
+    return child
+  }
   const service = createClientUpdateService({ currentVersion: '1.1.9', resourcesPath, userDataPath, executablePath: join(root, 'Client', 'HromadaAID.exe'), processId: 44, publish: value => events.push(value.status), fetchImpl, spawnProcess })
   try {
     await service.restore()
@@ -62,6 +73,16 @@ test('client update serializes checks, persists confirmed updates, verifies down
     const launcherResult = await service.install()
     assert.equal(launcherResult.ok, true)
     assert.ok(events.includes('installing'))
+    assert.ok(launcherInvocation.executable.endsWith('\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'))
+    assert.equal(launcherInvocation.options.detached, false)
+    assert.equal(launcherInvocation.options.stdio[0], 'ignore')
+    assert.equal(typeof launcherInvocation.options.stdio[2], 'number')
+    assert.ok(launcherInvocation.args.includes('-Component') && launcherInvocation.args.includes('Client'))
+    assert.ok(launcherInvocation.args.includes('/CLIENTUPDATE=1') === false, 'NSIS mode is passed by the external launcher after UAC elevation')
+    assert.ok(launcherInvocation.args.includes('installer-launcher.log'))
+    const launcherEvents = (await readFile(join(userDataPath, 'updates', 'installer-launcher.log'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    assert.deepEqual(launcherEvents.map(event => event.stage), ['install-command-received', 'powershell-launch-requested', 'powershell-process-created', 'powershell-bootstrap-exited', 'powershell-handoff-result'])
+    assert.equal(launcherEvents[2].details.processId, null)
     const resumed = createClientUpdateService({ currentVersion: '1.1.9', resourcesPath, userDataPath, executablePath: 'unused', processId: 45, publish: () => {}, fetchImpl })
     await resumed.restore()
     assert.equal(resumed.getState().status, 'ready')
@@ -72,5 +93,7 @@ test('client update serializes checks, persists confirmed updates, verifies down
     const launchResult = await failedLauncher.install()
     assert.equal(launchResult.ok, false)
     assert.equal(failedLauncher.getState().status, 'error')
+    const failedEvents = (await readFile(join(userDataPath, 'updates', 'installer-launcher.log'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    assert.ok(failedEvents.some(event => event.stage === 'powershell-process-error'))
   } finally { await rm(root, { recursive: true, force: true }) }
 })

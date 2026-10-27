@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createHash } from 'node:crypto'
-import { readFile, mkdir, stat, rm } from 'node:fs/promises'
+import { appendFile, readFile, mkdir, stat, rm } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -92,7 +92,7 @@ export function createReleaseUpdater(options: { currentVersion: string; resource
     return { manager: { ...manager }, server: { ...server } }
   }
   const download = async (component: 'installer' | 'server') => {
-    if (busy) throw new Error('Інша операція оновлення вже виконується.')
+    if (busy || manager.status === 'installing' || manager.status === 'restarting') throw new Error('Інша операція оновлення вже виконується.')
     const candidate = component === 'installer' ? pending : serverPending
     if (!candidate) throw new Error('Спочатку перевірте доступність оновлення.')
     if (component === 'server' && options.currentVersion !== candidate.version) throw new Error('Спочатку оновіть Server Manager до версії серверного релізу та повторно перевірте сумісність.')
@@ -108,21 +108,36 @@ export function createReleaseUpdater(options: { currentVersion: string; resource
     finally { busy = false }
   }
   const installManager = async () => {
-    if (busy) throw new Error('Інша операція оновлення вже виконується.')
+    const logPath = join(updateDir, 'installer-launcher.log')
+    const logEvent = async (stage: string, details: Record<string, unknown> = {}) => {
+      await mkdir(updateDir, { recursive: true })
+      await appendFile(logPath, `${JSON.stringify({ timestamp: new Date().toISOString(), component: 'ServerManager', stage, parentProcessId: options.processId, details })}\n`, 'utf8')
+    }
+    await logEvent('install-command-received', { installerPath: pending?.downloadedPath ?? null, expectedVersion: pending?.version ?? null })
+    if (busy || manager.status === 'installing' || manager.status === 'restarting') throw new Error('Інша операція оновлення вже виконується.')
     const candidate = pending
     const packagePath = candidate?.downloadedPath
     if (!candidate || !packagePath) throw new Error('Завантажте й перевірте Setup перед встановленням.')
-    if (packagePath !== join(updateDir, `client-update-${candidate.artifact.sha256}.exe`) || !await matchesArtifact(packagePath, candidate.artifact)) {
-      delete candidate.downloadedPath
-      manager = { ...manager, status: 'available', error: 'Перевірений Setup змінився або пошкоджений. Завантажте його повторно.' }
-      await persist(); emit()
+    busy = true
+    try {
+      if (packagePath !== join(updateDir, `client-update-${candidate.artifact.sha256}.exe`) || !await matchesArtifact(packagePath, candidate.artifact)) {
+        delete candidate.downloadedPath
+        manager = { ...manager, status: 'available', error: 'Перевірений Setup змінився або пошкоджений. Завантажте його повторно.' }
+        await persist(); emit()
+        throw new Error(manager.error)
+      }
+      manager = { ...manager, status: 'installing' }; emit()
+      const helperPath = options.sharedModulePath ? join(dirname(options.sharedModulePath), 'windows-update-launcher.mjs') : join(dirname(fileURLToPath(import.meta.url)), 'shared', 'windows-update-launcher.mjs')
+      const { launchUpdatePowerShell } = await import(pathToFileURL(helperPath).href)
+      const args = ['-ProcessId', String(options.processId), '-InstallerPath', packagePath, '-ApplicationExecutable', options.executablePath, '-ExpectedVersion', candidate.version, '-Component', 'ServerManager', '-LogPath', logPath]
+      await launchUpdatePowerShell({ updateDirectory: updateDir, launcherPath: join(options.resourcesPath, 'component-update-launcher.ps1'), launcherArguments: args, logEvent, spawnProcess: options.spawnProcess })
+      manager = { ...manager, status: 'restarting' }; emit(); setTimeout(() => appQuit(), 250)
+    } catch (error) {
+      manager = { ...manager, status: 'error', error: `Не вдалося створити процес launcher: ${error instanceof Error ? error.message.slice(0, 200) : 'невідома помилка'}` }
+      busy = false
+      emit()
       throw new Error(manager.error)
     }
-    busy = true; manager = { ...manager, status: 'installing' }; emit()
-    const spawnProcess = options.spawnProcess ?? (await import('node:child_process')).spawn
-    const child = spawnProcess('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', join(options.resourcesPath, 'component-update-launcher.ps1'), '-ProcessId', String(options.processId), '-InstallerPath', packagePath, '-ApplicationExecutable', options.executablePath, '-ExpectedVersion', candidate.version, '-Component', 'ServerManager'], { detached: true, stdio: 'ignore', windowsHide: true })
-    child.once('error', error => { manager = { ...manager, status: 'error', error: `Не вдалося запустити launcher: ${error.message.slice(0, 200)}` }; busy = false; emit() })
-    child.once('spawn', () => { manager = { ...manager, status: 'restarting' }; emit(); setTimeout(() => appQuit(), 250); child.unref(); busy = false })
     return true
   }
   return { restore, check, getState: () => ({ manager: { ...manager }, server: { ...server } }), download, installManager, setServerVersion(version: string | null) { server = { ...server, installedVersion: version }; emit() }, markServerUpdated(version: string) { server = { installedVersion: version, availableVersion: version, checkedAt: new Date().toISOString(), status: 'up-to-date' }; serverPending = undefined; emit() }, setServerError(message: string) { server = { ...server, status: 'error', error: message.slice(0, 300) }; emit() }, getServerPackage() { if (!server.packagePath || !serverPending) return null; return { path: server.packagePath, artifact: serverPending.artifact, version: serverPending.version } } }
