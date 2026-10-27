@@ -45,17 +45,18 @@ Stage 9.1.3 та Stage 9.1 не завершені; production readiness не з
 
 ## Версії та наступні кроки
 
-`0.1.2` — попередній Stable Release. `0.1.3` — опублікований Stable hotfix.
-Поточний вихідний код зберігає версію `0.1.3`; `0.1.4` ще не має version bump,
-production build, Git tag або GitHub Release.
+`0.1.2` — попередній Stable Release. `0.1.3` — останній опублікований Stable
+hotfix. Source version піднято до `0.1.4`; production Setup, Server ZIP, manifest і
+release notes локально підготовлено в `release/0.1.4/`. Tag і GitHub Release `0.1.4`
+не створювалися.
 
 Для `0.1.4` вже реалізовано два UX-завдання: спрощений потік Universal Setup та
 покращення сторінки оновлень Server Manager. Їхні цільові автоматизовані перевірки
-пройшли; ручна Windows VM-перевірка залишається pending. Порядок наступних етапів:
+пройшли; production packaging завершено локально, ручна Windows VM-перевірка
+залишається pending. Порядок наступних етапів:
 
-1. Окреме завдання production packaging `0.1.4`: узгодження версій і підготовка
-   Setup, Server ZIP та release manifest у `release/0.1.4/`.
-2. Ручна публікація GitHub Stable Release власником після перевірки артефактів.
+1. Перегляд власником підготовлених артефактів та окреме погодження публікації.
+2. Ручна публікація GitHub Stable Release власником.
 3. Windows 10 x64 VM acceptance після публікації; не заявляти VM PASS раніше.
 
 ## 0.1.4 — Task 1: Installation / Update UX
@@ -67,8 +68,8 @@ Welcome → Components, а Client/Manager selective update — відповід�
 selective update показує цільову версію зі Setup. API Server і далі оновлюється
 окремо через Server Manager. Цільові automated NSIS/selective-update tests пройшли;
 ручна Windows 10/11 VM-перевірка сторінок, completion і restart залишається PENDING.
-Production packaging та GitHub publication `0.1.4` — PENDING; version bump не
-виконувався.
+Production packaging `0.1.4` виконано локально; GitHub publication і VM acceptance
+залишаються PENDING.
 
 ## 0.1.4 — Task 2: Server Manager Updates UI
 
@@ -79,8 +80,9 @@ transaction stages до завершення завантаження та пе�
 правій колонці; довгі release notes можна розгорнути. Стани перевірки Manager
 узгоджені з Client, з окремими доступним, актуальним, активним і помилковим станами.
 Цільові результати наведені у HANDOFF; перевірка UI, адаптивності й реального
-завантаження у Windows VM — PENDING. Production packaging та GitHub publication
-`0.1.4` — PENDING. Механізми оновлення та серверної транзакції не змінювалися.
+завантаження у Windows VM — PENDING. Production packaging `0.1.4` виконано локально;
+GitHub publication і VM acceptance залишаються PENDING. Механізми оновлення та
+серверної транзакції не змінювалися.
 
 ## Подальші напрями
 

@@ -1,6 +1,6 @@
 # Контекст для наступного чату
 
-Оновлено 2026-10-27 під час синхронізації документації перед підготовкою 0.1.4.
+Оновлено 2026-10-27 після локального production packaging 0.1.4.
 Це поточний checkpoint; технічна реалізація — у [ARCHITECTURE.md](ARCHITECTURE.md),
 домовленості — у [DECISIONS.md](DECISIONS.md), план — у [ROADMAP.md](ROADMAP.md),
 сценарії та історія VM — у [manual testing](stage-9.1.3-manual-testing.md).
@@ -16,8 +16,26 @@
   merge/rebase/cherry-pick/revert операцій немає.
 - Stable `0.1.3` опубліковано на GitHub; tag `0.1.3` вказує на hotfix commit
   `ada0c8bed6989cedbb25b83efe1cd451642bdaae`. Tag `0.1.4` не створювався.
-- Остання опублікована версія — **0.1.3**; package/source version лишається `0.1.3`.
-  Розробка `0.1.4` триває. Stage 9.1.3 і Stage 9.1 не завершені.
+- Остання опублікована версія — **0.1.3**; source/package version тепер `0.1.4`.
+  Локальний комплект `0.1.4` зібраний, але ще не опублікований і не перевірений у VM.
+  Stage 9.1.3 і Stage 9.1 не завершені.
+
+## Stable 0.1.4 — локально підготовлено; publication і VM pending
+
+Production workflow зібрав Client, API Server, Server Manager і Universal NSIS
+Setup з версією `0.1.4`. У `release/0.1.4/` є Setup, Server ZIP,
+`release-manifest.json` і `release-notes.md`. Manifest штатно створений і повторно
+перевірений за розмірами та SHA-256. Server ZIP пройшов 7-Zip archive test,
+внутрішню integrity/runtime перевірку та production ZIP → `Server.next` тест.
+Client ASAR містить три погоджені tracked Excel templates побайтно; `Реєстр.xlsx`
+відсутній. Manager Setup payload містить installer/recovery helpers без другого
+Server runtime. Цільові перевірки охопили 65 сценаріїв; усі пройшли після окремого
+повторного запуску production ZIP test, пропущеного в першому наборі.
+
+Windows UAC, GUI, реальне встановлення, служба й GitHub auto-update `0.1.4` ще не
+перевірені у VM. Stable `0.1.4`, tag і push не створювалися. Code signing не
+налаштований. Наступні кроки: власник перевіряє локальні артефакти, вручну
+публікує погоджений GitHub Release, потім виконується Windows 10 x64 VM acceptance.
 
 ## Stage 9.1.3: фактичний стан
 
