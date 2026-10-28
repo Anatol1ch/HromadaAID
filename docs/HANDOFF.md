@@ -7,8 +7,11 @@
 - **Stage 9.4 — CI/CD Automation завершено та прийнято власником.** Stable v0.2.2
   успішно зібрано й опубліковано через GitHub Actions; приймальне тестування у
   Windows VM пройшло за всіма п'ятьма пунктами.
-- **Stage 9.5 — Bank Details Validation & Production Release 1.0.0** погоджено в
-  оновленому обсязі, але реалізацію ще не розпочато. Stable 1.0.0 ще не випущено.
+- **Stage 9.5.1–9.5.2 — Bank Details Validation реалізовано** в гілці
+  `codex/stage-9-5-bank-validation`: МФО та ЄДРПОУ автоматично перевіряються
+  сервером і клієнтом та блокують некоректне збереження; checksum ЄДРПОУ немає.
+  IBAN перевіряється вручну кнопкою за українським форматом і MOD 97, без впливу
+  на збереження. Stage 9.5.1–9.5.3 функціонально прийнято власником після ручного тестування. Production Release v1.0.0 підготовлено. На момент release commit публікація очікує GitHub Actions; попередній підтверджений Stable — v0.2.2. Фактичний стан: [GitHub Releases](https://github.com/Anatol1ch/HromadaAID/releases).
 - **Stage 9.1 — Automatic Updates завершено** після приймання основних сценаріїв у Windows 10 x64 VM.
 - **Stage 9.2 — Tailscale Connectivity завершено** та прийнято власником у Windows VM; Stable tag `0.2.1` вказує на `e159ab5b8536beb74e31ae8a3cee4c7151487932`.
 - Автоматичне оновлення Client, Server Manager та API Server з 0.2.0 до 0.2.1 підтверджене власником. Конфігурація, SQLite й наявні дані збережені; служба та система працюють після оновлення.
@@ -184,14 +187,19 @@ notes. Порожній/нечитабельний файл зупиняє publi
 Цільові перевірки publication виконуються локально, без Windows packaging.
 Реальний Actions build/publication та Windows VM acceptance успішні; Stage 9.4 завершено.
 
-## Наступний етап
+## Stage 9.5.4 — Production Release preparation
 
-Наступна дія — цільово інспектувати форми банківських реквізитів, відповідні API
-та правила збереження перед реалізацією Stage 9.5. Погоджений scope: блокувальна
-серверна перевірка заповненого МФО; добровільні перевірки ЄДРПОУ та IBAN за кнопкою,
-які не блокують збереження; без зовнішніх API та без зміни чинної обов'язковості
-полів. Структуру SQLite не змінювати без доведеної необхідності. Після реалізації
-й приймання планується Stable 1.0.0 через чинний release pipeline.
+Stage 9.5.1–9.5.3 функціонально прийнято власником після ручного тестування. Production Release v1.0.0 підготовлено. На момент release commit публікація очікує GitHub Actions; попередній підтверджений Stable — v0.2.2. Фактичний стан: [GitHub Releases](https://github.com/Anatol1ch/HromadaAID/releases).
 
-Stage 9.5 — PLANNED / NEXT; Stage 9.6 — Installation & Administration Guide
-залишається наступним етапом після Stage 9.5 зі своїм незміненим обсягом.
+МФО — автоматично рівно 6 цифр, ЄДРПОУ — автоматично рівно 8 цифр, із блокуванням збереження на клієнті й сервері. Контрольний розряд ЄДРПОУ не перевіряється. IBAN — добровільно кнопкою за українським форматом і MOD 97, без нових блокувальних правил.
+
+Власник дозволив commit, інтеграцію в main та push для автоматичної публікації.
+
+Передрелізні перевірки: bank/recipient/field formats — 33/33; accounting years/reporting/migrations/integrity — 14/14; auth-session — 3/3; server lifecycle/API authorization — 8/8; release manifest/package integrity/ZIP/publication — 18/18 PASS.
+pnpm build, pnpm server:build, pnpm manager:build (включно з TypeScript) і git diff --check — PASS. Локальне Windows release packaging не запускалося.
+
+Тестові передумови актуалізовано до expectedUpdatedAt, confirmationToken, requestId та schema 28. Міграційні fixtures відтворюють узгоджену синтетичну v18 замість підміни лише user_version. Production-код для проходження старих тестів не змінювався.
+
+Root/server package.json синхронізовано на 1.0.0; lockfile не містить версії root package й не змінювався. Client/Manager/Setup отримують версію з чинних scripts. Notes: docs/release-notes/1.0.0.md. Workflow незмінний: push main публікує нову Stable версію; workflow_dispatch build-only.
+
+На момент release commit публікація не підтверджена. Фактичний результат — у [Actions](https://github.com/Anatol1ch/HromadaAID/actions/workflows/release.yml) та [v1.0.0](https://github.com/Anatol1ch/HromadaAID/releases/tag/v1.0.0). Саме посилання не доводить публікацію. Stage 9.5 стає COMPLETED після успішного run та перевірки трьох assets. Наступний етап — Stage 9.6. Після релізу власнику потрібно перевірити оновлення 0.2.2 → 1.0.0 у Windows VM.

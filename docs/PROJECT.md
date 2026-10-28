@@ -39,10 +39,9 @@ Server Manager показує loopback, доступні LAN IPv4 та визн�
 
 ## Поточний стан
 
-Останній опублікований Stable Release — **v0.2.2**. Stage 9.4 CI/CD Automation
-завершено та прийнято; Windows x64 build і Stable publication виконані через
-GitHub Actions. **Stage 9.5 — Bank Details Validation & Production Release 1.0.0**
-заплановано; погоджені перевірки ще не реалізовані, а Stable 1.0.0 ще не випущено.
+Stage 9.5.1–9.5.3 функціонально прийнято власником після ручного тестування. Production Release v1.0.0 підготовлено. На момент release commit публікація очікує GitHub Actions; попередній підтверджений Stable — v0.2.2. Фактичний стан: [GitHub Releases](https://github.com/Anatol1ch/HromadaAID/releases).
+
+МФО — автоматично рівно 6 цифр, ЄДРПОУ — автоматично рівно 8 цифр, із блокуванням збереження на клієнті й сервері. Контрольний розряд ЄДРПОУ не перевіряється. IBAN — добровільно кнопкою за українським форматом і MOD 97, без нових блокувальних правил.
 
 Відоме некритичне обмеження, підтверджене на Windows VM у 0.2.1: Server Manager
 може некоректно визначати або показувати LAN/Tailscale IPv4 у деяких конфігураціях

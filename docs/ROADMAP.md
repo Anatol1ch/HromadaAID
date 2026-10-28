@@ -98,15 +98,15 @@ Stable Release і assets: [v0.2.2](https://github.com/Anatol1ch/HromadaAID/relea
 Actions run: [40688787157](https://github.com/Anatol1ch/HromadaAID/actions/runs/40688787157);
 release commit: `62fff52d2ff0929adc502b77a490bfbd229057c2`.
 
-## Stage 9.5 — Bank Details Validation & Production Release 1.0.0 — NEXT / PLANNED
+## Stage 9.5 — Bank Details Validation & Production Release 1.0.0 — RELEASE PREPARED
 
 Реалізувати й прийняти три точкові перевірки банківських реквізитів, а потім
 підготувати та опублікувати Stable Release **1.0.0**:
 
 - МФО: автоматична блокувальна перевірка рівно шести цифр для заповненого поля,
   з перевіркою на серверному рівні та без зміни чинної обов'язковості.
-- ЄДРПОУ: добровільна перевірка рівно восьми цифр і контрольного розряду лише
-  після натискання кнопки; результат не блокує збереження.
+- ЄДРПОУ: автоматична блокувальна перевірка рівно восьми цифр; контрольний
+  розряд не перевіряється.
 - IBAN: добровільна перевірка українського формату й MOD 97 лише після натискання
   кнопки; результат не блокує збереження.
 - Без зовнішніх API/довідників і без висновків про існування банку, юридичної
@@ -116,9 +116,9 @@ release commit: `62fff52d2ff0929adc502b77a490bfbd229057c2`.
 - Після реалізації й приймання — підготовка та публікація Stable 1.0.0 через
   чинний GitHub Actions pipeline.
 
-Поточний статус — **PLANNED / NEXT**; реалізацію ще не розпочато. Не змінювати
-чинну обов'язковість полів або структуру SQLite без окремо доведеної потреби.
-Stage 9.5 не вважати завершеним до фактичного приймання та публікації Stable 1.0.0.
+Stage 9.5.1–9.5.3 функціонально прийнято власником після ручного тестування. Production Release v1.0.0 підготовлено. На момент release commit публікація очікує GitHub Actions; попередній підтверджений Stable — v0.2.2. Фактичний стан: [GitHub Releases](https://github.com/Anatol1ch/HromadaAID/releases).
+
+Stage 9.5 стає COMPLETED лише після успішного Actions run та перевірки трьох Stable assets. Передрелізні перевірки успішні; подробиці в HANDOFF.
 
 ## Stage 9.6 — Installation & Administration Guide — PLANNED
 
