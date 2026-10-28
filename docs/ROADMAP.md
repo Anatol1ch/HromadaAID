@@ -98,7 +98,7 @@ Stable Release і assets: [v0.2.2](https://github.com/Anatol1ch/HromadaAID/relea
 Actions run: [40688787157](https://github.com/Anatol1ch/HromadaAID/actions/runs/40688787157);
 release commit: `62fff52d2ff0929adc502b77a490bfbd229057c2`.
 
-## Stage 9.5 — Bank Details Validation & Production Release 1.0.0 — RELEASE PREPARED
+## Stage 9.5 — Bank Details Validation & Production Release 1.0.0 — COMPLETED
 
 Реалізувати й прийняти три точкові перевірки банківських реквізитів, а потім
 підготувати та опублікувати Stable Release **1.0.0**:
@@ -116,24 +116,30 @@ release commit: `62fff52d2ff0929adc502b77a490bfbd229057c2`.
 - Після реалізації й приймання — підготовка та публікація Stable 1.0.0 через
   чинний GitHub Actions pipeline.
 
-Stage 9.5.1–9.5.3 функціонально прийнято власником після ручного тестування. Production Release v1.0.0 підготовлено. На момент release commit публікація очікує GitHub Actions; попередній підтверджений Stable — v0.2.2. Фактичний стан: [GitHub Releases](https://github.com/Anatol1ch/HromadaAID/releases).
+Stage 9.5.1–9.5.3 функціонально прийнято власником після ручного тестування. Stable **1.0.0** успішно опубліковано через GitHub Actions; реліз містить Universal Setup, Server ZIP і `release-manifest.json`. Release commit: `d7980aab22ccd5ac6975cfb396d58c2585aae410`. Післярелізний checkpoint та незавершене VM-приймання наведено в [HANDOFF](HANDOFF.md). Реліз: [Stable 1.0.0](https://github.com/Anatol1ch/HromadaAID/releases/tag/v1.0.0).
 
-Stage 9.5 стає COMPLETED лише після успішного Actions run та перевірки трьох Stable assets. Передрелізні перевірки успішні; подробиці в HANDOFF.
+## Stage 9.6 — Installation & Administration Guide — COMPLETED (documentation deliverable)
 
-## Stage 9.6 — Installation & Administration Guide — PLANNED
+Підготовлено [одну комплексну Markdown-інструкцію](installation-and-administration.md)
+для Stable 1.0.0 українською для працівників ОМС із базовими навичками роботи у
+Windows. Відповідність реалізації технічно перевірено. Описано погоджений обсяг:
 
-Після стабілізації відповідних механізмів створити коротку практичну інструкцію
-українською для адміністратора HromadaAID. Вона охоплюватиме встановлення Server
-і Client, первинне налаштування, loopback/LAN/Tailscale підключення, встановлення
-та налаштування Tailscale, додаткові робочі місця, базову діагностику, резервне
-копіювання та оновлення компонентів. До Stage 9.6 інструкцію не створювати.
+1. Встановлення Client-only, Server-only і Combined.
+2. Початкове налаштування Server Manager та підключення Client.
+3. Робота на одному ПК і в LAN.
+4. Зовнішні процедури Windows Firewall і DHCP Reservation, включно зі старими
+   маршрутизаторами TP-Link із класичним вебінтерфейсом.
+5. Tailscale для віддаленого підключення.
+6. Адміністрування Server Manager, резервне копіювання та відновлення.
+7. Оновлення Client, Server Manager і API Server.
+8. Діагностика й усунення несправностей.
 
-Окремий пункт Stage 9.6 — інструкція із закріплення локальної IPv4 серверного ПК
-через **DHCP Reservation на маршрутизаторах TP-Link, зокрема старих моделях**:
-визначення MAC-адреси ПК, вхід до вебінтерфейсу, типовий розділ
-DHCP → Address Reservation, закріплення IPv4, застосування налаштувань і перевірка
-отриманої адреси. Врахувати відмінності моделей і прошивок. Повну інструкцію
-створити на Stage 9.6; DHCP Reservation у HromadaAID не реалізовувати.
+Інструкція містить практичні процедури Tailscale і DHCP Reservation.
+Windows Firewall, DHCP Reservation і Tailscale — зовнішні процедури/засоби, а не
+вбудовані функції HromadaAID. Технічні обмеження й ризики зазначено. Stage 9.6
+завершено як документаційний результат; ручне експлуатаційне приймання не
+позначено виконаним. Відкриті перевірки, включно з окремим оновленням
+0.2.2 → 1.0.0, наведено в [HANDOFF.md](HANDOFF.md#operational-acceptance).
 
 ## Post-release backlog
 

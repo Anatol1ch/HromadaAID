@@ -2,7 +2,26 @@
 
 ## Стан проєкту
 
-- Останній Stable: **v0.2.2**, опублікований через GitHub Actions.
+- **Stage 9.6 — COMPLETED (documentation deliverable).** Підготовлено
+  [єдину практичну інструкцію](installation-and-administration.md) для Stable
+  1.0.0 та працівників ОМС із базовими навичками Windows. Описано всі погоджені
+  сценарії встановлення й адміністрування, LAN, Windows Firewall, DHCP
+  Reservation для різних поколінь TP-Link, Tailscale, резервування, відновлення
+  й оновлення. Відповідність реалізації перевірено; обмеження й ризики зазначено.
+  Наступний крок — ручне експлуатаційне приймання.
+- **Stage 9.5 — COMPLETED.** Stable **1.0.0** опубліковано через GitHub Actions.
+  Release commit: `d7980aab22ccd5ac6975cfb396d58c2585aae410`. Релізні артефакти:
+  Universal Setup, Server ZIP і `release-manifest.json`.
+- **Відкрите приймання:** ручна перевірка оновлення 0.2.2 → 1.0.0 у Windows VM
+  ще не підтверджена й не вважається виконаною.
+- Рішення власника для Stage 9.6: створити одну комплексну інструкцію; включити
+  практичні процедури Tailscale і DHCP Reservation, передбачити старі моделі
+  TP-Link із класичним вебінтерфейсом; код HromadaAID заради документації не
+  змінювати. Tailscale, DHCP Reservation і Windows Firewall описувати як зовнішні
+  процедури, не як вбудовані функції.
+
+
+- Історичний Stable до v1.0.0: **v0.2.2**, опублікований через GitHub Actions.
 - Stage 9.3 включено до опублікованого Stable v0.2.2.
 - **Stage 9.4 — CI/CD Automation завершено та прийнято власником.** Stable v0.2.2
   успішно зібрано й опубліковано через GitHub Actions; приймальне тестування у
@@ -11,13 +30,31 @@
   `codex/stage-9-5-bank-validation`: МФО та ЄДРПОУ автоматично перевіряються
   сервером і клієнтом та блокують некоректне збереження; checksum ЄДРПОУ немає.
   IBAN перевіряється вручну кнопкою за українським форматом і MOD 97, без впливу
-  на збереження. Stage 9.5.1–9.5.3 функціонально прийнято власником після ручного тестування. Production Release v1.0.0 підготовлено. На момент release commit публікація очікує GitHub Actions; попередній підтверджений Stable — v0.2.2. Фактичний стан: [GitHub Releases](https://github.com/Anatol1ch/HromadaAID/releases).
+  на збереження. Stage 9.5.1–9.5.3 функціонально прийнято власником після ручного тестування.
 - **Stage 9.1 — Automatic Updates завершено** після приймання основних сценаріїв у Windows 10 x64 VM.
 - **Stage 9.2 — Tailscale Connectivity завершено** та прийнято власником у Windows VM; Stable tag `0.2.1` вказує на `e159ab5b8536beb74e31ae8a3cee4c7151487932`.
 - Автоматичне оновлення Client, Server Manager та API Server з 0.2.0 до 0.2.1 підтверджене власником. Конфігурація, SQLite й наявні дані збережені; служба та система працюють після оновлення.
 - Відоме некритичне обмеження: Manager може некоректно визначати/показувати LAN або Tailscale IPv4 у деяких Windows VM. Client підключається через вручну введену адресу. Власник прийняв обмеження; окремого виправлення не планується.
 - Релізний commit: `10b0b85b36a9cad84d75259aa6fe2dd90e08b4d4`; annotated tag `0.1.6` лишається на цьому commit. Документаційний checkpoint перед README update був `263c50b74cabf3d1172676bcaa5b738f650559d3`.
 - Історичний VM snapshot Stage 9.1: `HromadaAID 0.1.6 – Stable Baseline`; він зберігає лише результати Stage 9.1.
+
+<a id="operational-acceptance"></a>
+## Відкрите експлуатаційне приймання Stable 1.0.0
+
+Жоден із наведених пунктів не позначено виконаним. Це відкриті завдання
+експлуатаційного приймання, які не змінюють завершеності документаційного результату.
+
+1. Перевірка Combined Setup у Windows VM.
+2. Перевірка Client-only та підключення до окремого сервера.
+3. Перевірка LAN і Windows Firewall з іншого ПК.
+4. Перевірка підключення через Tailscale.
+5. Перевірка DHCP Reservation на конкретних моделях TP-Link.
+6. Перевірка створення, експорту й відновлення архіву на ізольованій VM.
+7. Перевірка аварійних сценаріїв відновлення та поведінки Windows Service.
+8. Окреме приймання оновлення **0.2.2 → 1.0.0**.
+
+Історичні записи нижче описують стан на час відповідного етапу; поточний
+документаційний статус і відкриті перевірки наведено вище.
 
 ## Архітектура й оновлення
 
@@ -187,9 +224,9 @@ notes. Порожній/нечитабельний файл зупиняє publi
 Цільові перевірки publication виконуються локально, без Windows packaging.
 Реальний Actions build/publication та Windows VM acceptance успішні; Stage 9.4 завершено.
 
-## Stage 9.5.4 — Production Release preparation
+## Stage 9.5 — Production Release 1.0.0 — COMPLETED
 
-Stage 9.5.1–9.5.3 функціонально прийнято власником після ручного тестування. Production Release v1.0.0 підготовлено. На момент release commit публікація очікує GitHub Actions; попередній підтверджений Stable — v0.2.2. Фактичний стан: [GitHub Releases](https://github.com/Anatol1ch/HromadaAID/releases).
+Stage 9.5.1–9.5.3 функціонально прийнято власником після ручного тестування. Stable v1.0.0 опубліковано через GitHub Actions. Цей checkpoint замінює передрелізний статус нижче; історичні результати підготовки збережені.
 
 МФО — автоматично рівно 6 цифр, ЄДРПОУ — автоматично рівно 8 цифр, із блокуванням збереження на клієнті й сервері. Контрольний розряд ЄДРПОУ не перевіряється. IBAN — добровільно кнопкою за українським форматом і MOD 97, без нових блокувальних правил.
 
@@ -202,4 +239,8 @@ pnpm build, pnpm server:build, pnpm manager:build (включно з TypeScript)
 
 Root/server package.json синхронізовано на 1.0.0; lockfile не містить версії root package й не змінювався. Client/Manager/Setup отримують версію з чинних scripts. Notes: docs/release-notes/1.0.0.md. Workflow незмінний: push main публікує нову Stable версію; workflow_dispatch build-only.
 
-На момент release commit публікація не підтверджена. Фактичний результат — у [Actions](https://github.com/Anatol1ch/HromadaAID/actions/workflows/release.yml) та [v1.0.0](https://github.com/Anatol1ch/HromadaAID/releases/tag/v1.0.0). Саме посилання не доводить публікацію. Stage 9.5 стає COMPLETED після успішного run та перевірки трьох assets. Наступний етап — Stage 9.6. Після релізу власнику потрібно перевірити оновлення 0.2.2 → 1.0.0 у Windows VM.
+Stable 1.0.0 опубліковано; реліз містить Universal Setup, Server ZIP і
+`release-manifest.json`. Release commit: `d7980aab22ccd5ac6975cfb396d58c2585aae410`.
+Деталі передрелізних перевірок вище є історичними. Відкрите приймання: ручна
+перевірка оновлення 0.2.2 → 1.0.0 у Windows VM ще очікує фактичного підтвердження.
+Наступний і поточний етап — Stage 9.6 (**IN PROGRESS**).

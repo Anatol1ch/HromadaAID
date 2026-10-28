@@ -39,7 +39,7 @@ Server Manager показує loopback, доступні LAN IPv4 та визн�
 
 ## Поточний стан
 
-Stage 9.5.1–9.5.3 функціонально прийнято власником після ручного тестування. Production Release v1.0.0 підготовлено. На момент release commit публікація очікує GitHub Actions; попередній підтверджений Stable — v0.2.2. Фактичний стан: [GitHub Releases](https://github.com/Anatol1ch/HromadaAID/releases).
+Останній підтверджений Stable — **1.0.0**, опублікований через GitHub Actions разом із Universal Setup, Server ZIP і `release-manifest.json`. Stage 9.5 — **COMPLETED**. Stage 9.6 — **COMPLETED (documentation deliverable)**: підготовлено [єдину практичну інструкцію](installation-and-administration.md) для Stable 1.0.0 та перевірено її відповідність реалізації. Описано всі погоджені сценарії встановлення й адміністрування, LAN, Windows Firewall, DHCP Reservation для різних поколінь TP-Link, Tailscale, резервування, відновлення й оновлення; технічні обмеження та ризики зазначено. Ручне експлуатаційне приймання залишається відкритим; перелік перевірок — у [HANDOFF.md](HANDOFF.md#operational-acceptance). Фактичний реліз: [Stable 1.0.0](https://github.com/Anatol1ch/HromadaAID/releases/tag/v1.0.0).
 
 МФО — автоматично рівно 6 цифр, ЄДРПОУ — автоматично рівно 8 цифр, із блокуванням збереження на клієнті й сервері. Контрольний розряд ЄДРПОУ не перевіряється. IBAN — добровільно кнопкою за українським форматом і MOD 97, без нових блокувальних правил.
 
@@ -47,7 +47,7 @@ Stage 9.5.1–9.5.3 функціонально прийнято власнико
 може некоректно визначати або показувати LAN/Tailscale IPv4 у деяких конфігураціях
 Windows VM. Це не перешкоджає
 підключенню Client; адресу сервера можна ввести вручну. Власник прийняв обмеження,
-окреме виправлення не планується. Наступний етап — Stage 9.5;
+окреме виправлення не планується. Наступний крок — практичне приймання Stable 1.0.0;
 поточний checkpoint — у [HANDOFF.md](HANDOFF.md), план — у [ROADMAP.md](ROADMAP.md).
 
 Технічні межі: [ARCHITECTURE.md](ARCHITECTURE.md). Подальша робота:
