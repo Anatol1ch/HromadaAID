@@ -39,15 +39,16 @@ Server Manager показує loopback, доступні LAN IPv4 та визн�
 
 ## Поточний стан
 
-Останній опублікований Stable Release — **0.2.1**. Власник підтвердив у Windows VM
-успішне оновлення Client, Server Manager та API Server із 0.2.0 до 0.2.1,
-збереження конфігурації й бази даних та працездатність системи після оновлення.
-**Stage 9.1 — Automatic Updates і Stage 9.2 — Tailscale Connectivity завершено.**
+Останній опублікований Stable Release — **v0.2.2**. Stage 9.4 CI/CD Automation
+завершено та прийнято; Windows x64 build і Stable publication виконані через
+GitHub Actions. **Stage 9.5 — Bank Details Validation & Production Release 1.0.0**
+заплановано; погоджені перевірки ще не реалізовані, а Stable 1.0.0 ще не випущено.
 
-Відоме некритичне обмеження 0.2.1: Server Manager може некоректно визначати або
-показувати LAN/Tailscale IPv4 у деяких конфігураціях Windows VM. Це не перешкоджає
+Відоме некритичне обмеження, підтверджене на Windows VM у 0.2.1: Server Manager
+може некоректно визначати або показувати LAN/Tailscale IPv4 у деяких конфігураціях
+Windows VM. Це не перешкоджає
 підключенню Client; адресу сервера можна ввести вручну. Власник прийняв обмеження,
-окреме виправлення не планується. Наступний етап — Stage 9.3: Project Cleanup;
+окреме виправлення не планується. Наступний етап — Stage 9.5;
 поточний checkpoint — у [HANDOFF.md](HANDOFF.md), план — у [ROADMAP.md](ROADMAP.md).
 
 Технічні межі: [ARCHITECTURE.md](ARCHITECTURE.md). Подальша робота:
