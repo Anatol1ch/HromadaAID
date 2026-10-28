@@ -1,0 +1,149 @@
+name: Release build and publication
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hromadaaid-stable-release
+  cancel-in-progress: false
+
+jobs:
+  windows-release:
+    name: Windows x64 release package
+    runs-on: windows-2025
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      publish: ${{ steps.gate.outputs.publish }}
+      version: ${{ steps.gate.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check release eligibility before building
+        id: gate
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const { readFile } = require('node:fs/promises');
+            const { releaseEligibility } = await import(pathToFileURL(`${process.cwd()}/scripts/github-release.mjs`).href);
+            const { version } = JSON.parse(await readFile('package.json', 'utf8'));
+            const result = await releaseEligibility({ github, context, version });
+            core.info(result.reason);
+            core.setOutput('build', String(result.build));
+            core.setOutput('publish', String(result.publish));
+            core.setOutput('version', version);
+
+      - name: Set up Node.js
+        if: steps.gate.outputs.build == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+          architecture: x64
+          package-manager-cache: false
+
+      - name: Set up pnpm
+        if: steps.gate.outputs.build == 'true'
+        uses: pnpm/action-setup@v6
+        with:
+          version: '11.25.0'
+          run_install: false
+
+      - name: Install dependencies
+        if: steps.gate.outputs.build == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build release package
+        if: steps.gate.outputs.build == 'true'
+        run: pnpm release:package
+
+      - name: Verify release artifacts
+        if: steps.gate.outputs.build == 'true'
+        id: release
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+            throw 'package.json must contain a stable SemVer X.Y.Z version.'
+          }
+          $directory = "release/$version"
+          $expected = @(
+            "HromadaAID-Setup-$version.exe"
+            "HromadaAID-Server-v$version-win-x64.zip"
+            'release-manifest.json'
+          )
+          foreach ($name in $expected) {
+            if (-not (Test-Path -LiteralPath "$directory/$name" -PathType Leaf)) {
+              throw "Missing release artifact: $name"
+            }
+          }
+          if (@(Get-ChildItem -LiteralPath $directory -Force).Count -ne $expected.Count) {
+            throw 'Release directory must contain exactly the three expected artifacts.'
+          }
+          $manifest = Get-Content -LiteralPath "$directory/release-manifest.json" -Raw | ConvertFrom-Json
+          if ($manifest.version -cne $version) { throw 'Release manifest version does not match package.json.' }
+          node packaging/release-manifest.mjs --verify $directory
+          if ($LASTEXITCODE -ne 0) { throw 'Release manifest verification failed.' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "directory=$directory" >> $env:GITHUB_OUTPUT
+
+      - name: Upload release package
+        if: steps.gate.outputs.build == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: HromadaAID-${{ steps.release.outputs.version }}-win-x64
+          path: ${{ steps.release.outputs.directory }}/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  publish:
+    name: Publish verified Stable release
+    needs: windows-release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.windows-release.outputs.publish == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout triggering commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+          architecture: x64
+          package-manager-cache: false
+
+      - name: Download verified build package
+        uses: actions/download-artifact@v7
+        with:
+          name: HromadaAID-${{ needs.windows-release.outputs.version }}-win-x64
+          path: release-package
+
+      - name: Create Draft, upload and verify assets, publish Stable
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const { readFile } = require('node:fs/promises');
+            const { publishRelease } = await import(pathToFileURL(`${process.cwd()}/scripts/github-release.mjs`).href);
+            const { version } = JSON.parse(await readFile('package.json', 'utf8'));
+            const result = await publishRelease({ github, context, version, directory: 'release-package' });
+            core.info(result.reason);

@@ -1,10 +1,13 @@
 {
   "name": "hromada-aid",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "engines": { "node": "24.22.1" },
   "type": "module",
   "description": "Клієнт-серверна система обліку матеріальних допомог громади",
   "scripts": {
+    "release:package": "pnpm windows:installer && node scripts/package-release.mjs",
     "dev": "node scripts/dev.mjs",
     "manager:dev": "node scripts/server-manager.mjs dev",
     "manager:build": "node scripts/clean-server-manager-main.mjs && tsc -p server-manager/tsconfig.json && tsc -p server-manager/tsconfig.electron.json && vite build --config server-manager/vite.config.ts",

@@ -7,7 +7,8 @@
   опублікованих інсталяційних пакетів і release artifacts Stable 0.2.1. Окрему
   збірку чи реліз для Stage 9.3 не створювали. Їх потрібно включити до наступного
   релізу після Stage 9.4; перед публікацією перевірити, що артефакти зібрано з
-  commit, який містить Stage 9.3. Номер наступної версії не визначено.
+  commit, який містить Stage 9.3. Наступна версія — **0.2.2**; вона підготовлена
+  у вихідних manifests, але ще не опублікована.
 - **Stage 9.1 — Automatic Updates завершено** після приймання основних сценаріїв у Windows 10 x64 VM.
 - **Stage 9.2 — Tailscale Connectivity завершено** та прийнято власником у Windows VM; Stable tag `0.2.1` вказує на `e159ab5b8536beb74e31ae8a3cee4c7151487932`.
 - Автоматичне оновлення Client, Server Manager та API Server з 0.2.0 до 0.2.1 підтверджене власником. Конфігурація, SQLite й наявні дані збережені; служба та система працюють після оновлення.
@@ -89,6 +90,101 @@ Stable залишається **0.2.1**: зміни Stage 9.3 існують у 
 Git-історії, але не входять до вже опублікованих інсталяційних пакетів чи release
 artifacts. Окремої збірки або релізу Stage 9.3 не створювали. Зміни слід включити
 до наступного релізу після Stage 9.4; перед його підготовкою перевірити, що release
-artifacts зібрано з commit, який містить Stage 9.3. Номер наступної версії не
-призначено. CL-05–08 залишаються завданнями Stage 9.4.
+artifacts зібрано з commit, який містить Stage 9.3. Наступна версія — 0.2.2;
+локальну реалізацію Stage 9.4 описано нижче.
 Протокол приймання Stage 9.2: [stage-9.2-manual-testing.md](stage-9.2-manual-testing.md).
+
+## Stage 9.4 — Step 1: Release Packaging Preparation
+
+Реалізовано `pnpm release:package`: чинний Universal Setup, ZIP із того самого
+Server payload, чинні component/package/release manifests і перевірка ZIP
+справжнім extractor та verifier Manager. Структуру й toolchain описано в
+ARCHITECTURE. Наявний `release/<version>/` не перезаписується.
+На момент Step 1 версія застосунку залишалася 0.2.1. Під час preparation її
+піднято до 0.2.2; опублікований Stable поки залишається 0.2.1.
+
+Автоматично перевірено: pnpm 11.25.0 приймає lockfile без змін через frozen/offline
+lockfile-only install; Manager build; 7/7 цільових packaging/integrity tests,
+включно із синтетичним ZIP round-trip через чинний Windows updater, Unicode,
+прихованим файлом, пошкодженими даними й захистом наявного output.
+Повний `release:package` з новим Universal Setup не запускався; його потрібно
+підтвердити на чистому Windows runner. VM acceptance не виконувалося.
+
+Погоджено майбутню модель: один `release.yml`, push у `main`, Windows x64,
+версія з package.json, автоматична публікація комплекту у GitHub Releases;
+функціональні tests виконуються до merge. Локальну реалізацію publication описано нижче.
+
+## Stage 9.4 — Step 2: GitHub Actions Build
+
+Додано `.github/workflows/release.yml`: push у main та workflow_dispatch,
+один Windows x64 job на windows-2025, Node 24.22.1 / pnpm 11.25.0,
+frozen-lockfile install і `pnpm release:package`. Перед upload workflow перевіряє
+наявність рівно трьох очікуваних файлів, збіг версій і чинний release manifest.
+Комплект завантажується одним Actions artifact із retention 30 днів.
+Build job має лише contents: read, checkout credentials не зберігаються;
+секрети packaging scripts не передаються.
+
+Локально пройшли YAML/structure assertions, звірка toolchain, output paths,
+upload settings, permissions та PowerShell syntax parse. Реального запуску на
+GitHub runner не було: workflow ще не відправлено до GitHub. Перший hosted build
+має підтвердити встановлення залежностей, NSIS і повний packaging pipeline.
+
+## Stage 9.4 — Step 3: Automatic GitHub Releases
+
+У тому самому release.yml додано publication job з contents: write і стандартним
+GITHUB_TOKEN через actions/github-script; build job зберігає contents: read.
+Workflow concurrency серіалізує запуски без переривання активної публікації.
+Лише push у main із новішою Stable SemVer X.Y.Z дозволяє автоматичний Release.
+До packaging перевіряються GitHub Releases (включно з видимими drafts), обидва
+формати тегів X.Y.Z / vX.Y.Z і останній Stable; наявна або застаріла версія
+завершує workflow без повторної збірки. workflow_dispatch завжди build-only.
+
+Publication завантажує готовий Actions artifact, повторно перевіряє його manifest,
+версію й точний склад та повторює eligibility check. Створює новий vX.Y.Z tag
+на triggering SHA, Draft із автоматичними GitHub release notes, завантажує три
+assets, перевіряє назви/розміри/state (і SHA-256 digest, якщо API його повернув)
+та SHA тега, після чого публікує Stable/latest. Перебудови між jobs немає.
+Помилки upload/перевірки залишають Draft; наявні tags/Releases не змінюються.
+Перерваний запуск із tag або Draft не відновлюється автоматично: потрібна ручна
+інспекція власником. Збій між створенням tag і Draft може залишити лише tag.
+
+Пройшли 10 цільових tests із підставним GitHub API (SemVer, existing tag/release,
+повторний запуск, event guards, upload/integrity failures), YAML/структурні та
+синтаксичні перевірки workflow. Реальних GitHub API mutations, hosted run,
+commit/push/tag/Release у цьому завданні не було. Перший реальний Windows runner
+ще має підтвердити build, NSIS, artifact transfer та GITHUB_TOKEN publication.
+Stage 9.4 не вважати прийнятим до реального виконання й перевірки результатів.
+
+## Підготовка v0.2.2
+
+На main, HEAD 7b7311da458eecdd75f14d25d4d3289e42e2091e, Stage 9.3
+інтегрований commit 739e80d. GitHub Stable має історичний tag `0.2.1` без `v`,
+що вказує на e159ab5b8536beb74e31ae8a3cee4c7151487932. Після нього в історії —
+b286a30, 739e80d та 7b7311d. Зміни Stage 9.4 і preparation ще незакомічені.
+
+Кореневий і server/package.json узгоджено на 0.2.2. Client, Manager,
+Universal Setup і release manifest отримують цю версію з наявних build scripts;
+сторонні залежності й lockfile не змінено. Українські notes підготовлено в
+`docs/release-notes/0.2.2.md`; publication використовує цей файл як body.
+Під час read-only перевірки GitHub Release/tag для 0.2.2 і v0.2.2 відсутні.
+Повний Windows packaging локально не запускається; першу збірку й публікацію
+має виконати Actions після окремо погоджених commit/push. Потрібне подальше VM
+приймання оновлення 0.2.1 → 0.2.2. Жоден реліз preparation не публікує.
+
+Перевірки preparation: Manager build (включно з TypeScript) — PASS;
+windows:test-installer — 56/56; release/ZIP/publication tests — 13/13.
+Окремо пройшли assertions узгодженості 0.2.2, незмінності dependencies/lockfile,
+workflow permissions/pins, eligibility проти підтвердженого remote snapshot та
+назв/manifest 0.2.2 на синтетичних файлах. `git diff --check` — PASS.
+Workflow не змінювався; hosted run та фактичні release artifacts не перевірені.
+
+## Запуск першого автоматичного релізу v0.2.2
+
+Власник дозволив один commit із Stage 9.4 та preparation 0.2.2 і push у main.
+Stage 9.3 вже інтегрований в історію. Перед push remote main збігався з локальним
+HEAD; tags/Releases 0.2.2 і v0.2.2 були відсутні. Publication бере body із
+`docs/release-notes/<version>.md`; лише відсутній файл вмикає автоматичні GitHub
+notes. Порожній/нечитабельний файл зупиняє publication до створення tag.
+Цільові перевірки publication виконуються локально, без Windows packaging.
+Результат реального Actions run потрібно перевірити після push; Stage 9.4
+залишається неприйнятим до реального build/publication і VM acceptance.

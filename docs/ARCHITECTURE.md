@@ -127,6 +127,19 @@ metadata, GitHub Releases API, HTTPS-перевірку redirect host, manifest 
 локально перевіряє metadata за фактичними файлами, `--verify <directory>` звіряє
 наявний manifest. Скрипт не публікує GitHub Release.
 
+`pnpm release:package` викликає чинний `windows:installer`, потім
+`scripts/package-release.mjs`. Toolchain: Node.js 24.22.1 (`.node-version`,
+`engines`) і pnpm 11.25.0 (`packageManager`); lockfile збережено.
+Release packager копіює той самий `installer-payload/Server` у власний staging,
+додає Deployment 2.0 component manifest наявним generator і формує ZIP без
+каталогу-обгортки: `app/`, `runtime/`, `service/`, `installer/`,
+`package-integrity.json`, `package-manifest.json`. ZIP entries використовують `/`.
+Перед фінальною публікацією каталогу ZIP проходить чинний безпечний extractor
+Manager, обидва package verifiers, runtime check і `verifyUpdatePackage`.
+`release/<version>/` містить рівно Setup EXE, Server ZIP та release manifest із
+чинними назвами. Наявний version directory не перезаписується; незавершений
+власний staging видаляється. Це локальне формування комплекту, без GitHub publication.
+
 Electron main виконує асинхронну перевірку на запуску та кожні три години; Settings
 дає ручну перевірку. Після підтвердженого релізу єдиний модальний gate блокує Client,
 поки перевірений Setup не встановить нову версію. Downloader тримає lock, показує

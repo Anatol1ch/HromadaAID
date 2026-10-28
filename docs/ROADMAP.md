@@ -60,7 +60,7 @@ packaging не проводилися.
 Git-історії, але не входять до пакетів чи release artifacts 0.2.1; окрему збірку
 або реліз не створювали. Їх потрібно включити до наступного релізу після Stage 9.4.
 Перед підготовкою релізу перевірити, що artifacts зібрано з commit, який містить
-Stage 9.3. Наступну версію не призначено.
+Stage 9.3. Для наступного релізу обрано 0.2.2; він ще не опублікований.
 
 CL-05–08 — фіксація CI toolchain, NSIS compiler, підготовка окремих regression
 checks і release artifact orchestration — залишаються завданнями Stage 9.4.
@@ -77,11 +77,39 @@ Code signing не є обов’язковою умовою цього етап�
 - Ризик-орієнтовані automated tests та TypeScript/build checks.
 - Windows x64 packaging: Universal NSIS Setup і Server ZIP.
 - Release manifest generation та перевірка цілісності зовнішніх і внутрішніх manifests.
-- Контрольована підготовка GitHub Release із публікацією лише після підтвердження.
+- Погоджена модель: один `release.yml` на push у `main`, Windows x64, версія з
+  package.json та автоматична публікація у GitHub Releases. Функціональні tests
+  виконуються до merge, поза release workflow.
 - Пріоритет тестів: authentication/RBAC, database integrity, migrations, financial
   calculations, update/recovery, release integrity та packaging correctness.
 - Не створювати надмірний GUI automation suite для сценаріїв, які надійно
   перевіряються вручну.
+
+Step 1 реалізовано: `pnpm release:package`, toolchain pinning, Server ZIP із
+installer payload і перевірка чинними integrity/updater mechanisms. Цільові
+автоматичні перевірки пройшли; повний Windows release build ще не перевірено.
+Step 2 реалізовано локально: один build workflow на windows-2025, push у main /
+workflow_dispatch, frozen install, release packaging, manifest verification та
+один Actions artifact із retention 30 днів. Статичні перевірки пройшли;
+реальний hosted build ще не виконувався.
+
+Step 3 реалізовано локально: той самий workflow автоматично публікує Stable після
+push у main лише для новішої SemVer без наявного tag/Release. Повторна версія
+пропускається до build; workflow_dispatch — лише build. Окремий publication job
+із contents: write отримує готовий artifact, створює vX.Y.Z на triggering SHA,
+Draft із GitHub notes та публікує лише після перевірки всіх трьох assets.
+Upload/verification failure залишає Draft; повторний запуск не перезаписує tag
+чи Release. Цільові тести із підставним API пройшли. Перший реальний запуск на
+Windows runner і перевірка фактичної публікації залишаються необхідними.
+
+До першого автоматичного релізу v0.2.2 підготовлено версії Client/Server/Manager
+та українські release notes. Він включає Stage 9.3 і всю локальну реалізацію
+Stage 9.4. Commit/push, hosted build/publication та Windows VM acceptance ще
+не виконані; Stage 9.4 не позначено COMPLETED.
+
+Для запуску v0.2.2 власник дозволив commit і push у main. Publication використовує
+версійні українські notes, з автоматичною генерацією лише за відсутності файла.
+Фактичний результат першого hosted run та VM acceptance ще потрібно підтвердити.
 
 ## Stage 9.5 — Production Release 1.0.0 — PLANNED
 
