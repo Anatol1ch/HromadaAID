@@ -2,15 +2,23 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { parseNetworkAddresses, readNetworkAddresses, createAddressCopyHandler } from '../../dist-server-manager/main/network-addresses.js'
 
-test('addresses include all active physical interfaces; CGNAT or alias alone cannot identify Tailscale', () => {
+test('Windows adapter metadata tolerates Tailscale naming variants and requires trusted identity', () => {
   const result = parseNetworkAddresses([
-    { description: 'Intel Ethernet', physical: true, addresses: ['192.168.1.10', '192.168.1.11', '::1', '0.0.0.0', '127.0.0.1'] },
-    { description: 'Wi-Fi', physical: true, addresses: ['192.168.2.10', '192.168.1.10'] },
-    { description: 'Wintun', alias: 'Tailscale', physical: false, addresses: ['100.64.1.2'] },
-    { description: 'Hyper-V Virtual Ethernet Adapter', physical: false, addresses: ['172.18.1.1'] },
-    { description: 'Tailscale Tunnel', physical: false, addresses: ['100.101.102.103', '192.168.3.10'] },
+    { alias: 'Ethernet', description: 'Intel Ethernet', pnpDeviceId: 'PCI\\VEN_1234', status: 'Up', physical: true, addresses: ['192.168.1.10', '192.168.1.11', '::1', '0.0.0.0', '127.0.0.1'] },
+    { alias: 'Wi-Fi', description: 'Wi-Fi Adapter', pnpDeviceId: 'PCI\\VEN_5678', status: 'Up', physical: true, addresses: ['192.168.2.10', '192.168.1.10'] },
+    { alias: 'Tailscale', description: 'Wintun Userspace Tunnel', pnpDeviceId: 'SWD\\Wintun\\{A1}', status: 'Up', physical: false, addresses: ['100.64.1.2'] },
+    { alias: 'Mesh VPN', description: 'Tailscale Tunnel #2 (Wintun)', pnpDeviceId: 'SWD\\Wintun\\{A2}', status: 'Up', physical: false, addresses: ['100.101.102.103', '192.168.3.10'] },
+    { alias: 'WireGuard', description: 'Wintun Userspace Tunnel', pnpDeviceId: 'SWD\\Wintun\\{A3}', status: 'Up', physical: false, addresses: ['100.70.1.2'] },
+    { alias: 'Tailscale', description: 'Renamed physical card', pnpDeviceId: 'PCI\\VEN_9999', status: 'Up', physical: true, addresses: ['100.80.1.2'] },
+    { alias: 'Tailscale VPN', description: 'Tailscale Tunnel', pnpDeviceId: 'SWD\\Wintun\\{A4}', status: 'Disconnected', physical: false, addresses: ['100.90.1.2'] },
+    { alias: 'Tailscale', description: 'Tailscale Tunnel', pnpDeviceId: 'SWD\\Wintun\\{A5}', status: 'Up', physical: false, addresses: [] },
+    { alias: 'vEthernet', description: 'Hyper-V Virtual Ethernet Adapter', pnpDeviceId: 'VMS_MP', status: 'Up', physical: false, addresses: ['172.18.1.1'] },
   ])
-  assert.deepEqual(result, { lan: ['http://192.168.1.10:4310', 'http://192.168.1.11:4310', 'http://192.168.2.10:4310'], tailscale: ['http://100.101.102.103:4310'], unavailable: false })
+  assert.deepEqual(result, {
+    lan: ['http://100.80.1.2:4310', 'http://192.168.1.10:4310', 'http://192.168.1.11:4310', 'http://192.168.2.10:4310'],
+    tailscale: ['http://100.101.102.103:4310', 'http://100.64.1.2:4310'],
+    unavailable: false,
+  })
 })
 
 test('no Tailscale, unsupported platform and failed Windows metadata queries remain nonfatal', async () => {

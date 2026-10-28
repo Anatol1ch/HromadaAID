@@ -14,7 +14,14 @@ $ipv4 = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop | Where-Object 
 $result = @(Get-NetAdapter -IncludeHidden -ErrorAction Stop | Where-Object { $_.Status -eq 'Up' } | ForEach-Object {
   $adapter = $_
   $addresses = @($ipv4 | Where-Object { $_.InterfaceIndex -eq $adapter.ifIndex } | ForEach-Object { [string]$_.IPAddress })
-  [pscustomobject]@{ description = [string]$adapter.InterfaceDescription; physical = [bool]$adapter.HardwareInterface; addresses = $addresses }
+  [pscustomobject]@{
+    alias = [string]$adapter.Name
+    description = [string]$adapter.InterfaceDescription
+    pnpDeviceId = [string]$adapter.PnPDeviceID
+    status = [string]$adapter.Status
+    physical = [bool]$adapter.HardwareInterface
+    addresses = $addresses
+  }
 })
 [Console]::Out.WriteLine((ConvertTo-Json -InputObject $result -Compress -Depth 4))
 `
@@ -23,8 +30,16 @@ export function parseNetworkAddresses(value: unknown): NetworkAddresses {
   if (!Array.isArray(value)) throw new Error('NETWORK_METADATA_INVALID')
   const lan = new Set<string>(), tailscale = new Set<string>()
   for (const item of value) {
-    if (!item || typeof item !== 'object' || typeof item.description !== 'string' || typeof item.physical !== 'boolean' || !Array.isArray(item.addresses)) continue
-    const identifiedTailscale = /^Tailscale(?: Tunnel)?(?: #\d+)?$/i.test(item.description)
+    if (!item || typeof item !== 'object' || typeof item.physical !== 'boolean' || !Array.isArray(item.addresses)) continue
+    if (typeof item.status !== 'string' || item.status.toLowerCase() !== 'up') continue
+    const alias = typeof item.alias === 'string' ? item.alias.trim() : ''
+    const description = typeof item.description === 'string' ? item.description.trim() : ''
+    const pnpDeviceId = typeof item.pnpDeviceId === 'string' ? item.pnpDeviceId : ''
+    const namedTailscale = /tailscale/i.test(alias) || /tailscale/i.test(description)
+    const wintunDevice = /(?:^|\\)Wintun(?:\\|$)/i.test(pnpDeviceId)
+    // Windows can vary the display name between releases. Accept either the
+    // vendor description or its interface alias plus the Wintun PnP identity.
+    const identifiedTailscale = !item.physical && (/tailscale/i.test(description) || (namedTailscale && wintunDevice))
     for (const address of item.addresses) {
       if (typeof address !== 'string' || isIP(address) !== 4) continue
       const [first, second] = address.split('.').map(Number)
