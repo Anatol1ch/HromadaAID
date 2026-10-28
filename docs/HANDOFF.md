@@ -12,6 +12,10 @@
 - **Stage 9.5 — COMPLETED.** Stable **1.0.0** опубліковано через GitHub Actions.
   Release commit: `d7980aab22ccd5ac6975cfb396d58c2585aae410`. Релізні артефакти:
   Universal Setup, Server ZIP і `release-manifest.json`.
+- Погоджено [Post-1.0.0 backlog](ROADMAP.md#post-1-0-0-backlog): п'ять напрямів
+  зі статусом **PLANNED / NOT STARTED** та орієнтовним групуванням за майбутніми
+  версіями. Новий етап розробки ще не розпочато; Stable 1.0.0 і завершені статуси
+  Stage 9.5–9.6 залишаються чинними.
 - Рішення власника для Stage 9.6: створити одну комплексну інструкцію; включити
   практичні процедури Tailscale і DHCP Reservation, передбачити старі моделі
   TP-Link із класичним вебінтерфейсом; код HromadaAID заради документації не
