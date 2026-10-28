@@ -2,9 +2,9 @@
 
 ## Стан проєкту
 
-- Поточний Stable: **0.1.6**, опублікований у GitHub.
+- Поточний Stable: **0.2.0**, опублікований у GitHub.
 - **Stage 9.1 — Automatic Updates завершено** після приймання основних сценаріїв у Windows 10 x64 VM.
-- Stage 9.1 інтегровано в main. Поточна робоча гілка — feature/tailscale-connectivity, HEAD 1b9c143c210c019e2c42d0276c0ca27df1acaad9 (документаційний commit перед реалізацією Stage 9.2). Зміни Stage 9.2 незакомічені; push/merge/rebase не виконувалися.
+- Stage 9.2 інтегровано в `main`; Stable tag `0.2.0` вказує на `c1319027f2d3edb63f1d33299120260c18e09e6b`. Поточна робоча гілка — `fix/tailscale-adapter-detection`.
 - Релізний commit: `10b0b85b36a9cad84d75259aa6fe2dd90e08b4d4`; annotated tag `0.1.6` лишається на цьому commit. Документаційний checkpoint перед README update був `263c50b74cabf3d1172676bcaa5b738f650559d3`.
 - Історичний VM snapshot Stage 9.1: `HromadaAID 0.1.6 – Stable Baseline`. Він не підтверджує Stage 9.2; новий transport і конфігурація v3 потребують чистого приймання.
 
@@ -33,54 +33,45 @@ Client та Server Manager — окремі Electron-застосунки; API S
 
 Локальний `release/<version>/` — тимчасове сховище артефактів; він ігнорується Git. Після опублікованого та перевіреного релізу власник може видалити локальні збірки. Source scripts, regression tests, fixtures, migrations та recovery/integrity code залишаються під контролем версій.
 
-## Stage 9.2 — реалізовано, очікує VM-приймання
+## Stage 9.2 — очікує завершального оновлення 0.2.0 → 0.2.1 у VM
 
-Стан на 2026-10-28: Prompt 1–4 інтегровано в робочому дереві. Етап **не завершено**.
-Один Fastify/SQLite та IPv4 HTTP 0.0.0.0:4310 доступні через loopback, LAN і
-Tailscale. Client зберігає введену вручну HTTP IPv4/DNS адресу; discovery або
-автоматичного перемикання серверів немає. Manager показує адреси з копіюванням
-лише в огляді; майстер — каталоги → адміністратор → підсумок.
+Stable `0.2.0` опубліковано; користувач підтвердив у Windows VM базове встановлення,
+Windows Service, API, авторизацію та віддалене Tailscale-підключення. Етап **не
+завершено**: лишилася ручна перевірка оновлення встановленої системи до 0.2.1.
 
-Єдина конфігурація — configVersion: 3, programDirectory, databasePath,
-backupDirectory. Старі версії/transport-поля відхиляються без переписування,
-скидання чи підміни SQLite. Listener і порт не налаштовуються. Внутрішнього TLS,
-Tailscale SDK/API та автоматичних Windows Firewall rules немає. LAN HTTP не
-шифрується; Tailscale забезпечує тунель. Зовнішній HTTPS збережено.
-WinSW/LocalService, authentication/RBAC, сесії, backup/restore та загальні
-update/recovery guards залишаються чинними. Деталі — у
-[ARCHITECTURE.md](ARCHITECTURE.md) і [TRANSPORT.md](../server/TRANSPORT.md).
+Транспорт незмінний: один Fastify/SQLite та IPv4 HTTP `0.0.0.0:4310`; Client
+використовує вручну збережену IPv4/DNS адресу; discovery немає. Server Manager
+показує адреси лише в огляді. Єдина конфігурація — v3. TLS для внутрішнього API,
+Tailscale SDK/API та автоматичні Windows Firewall rules відсутні. Зовнішній HTTPS,
+WinSW/LocalService, auth/RBAC, backup/restore і загальні update/recovery guards
+збережені.
 
-### Автоматично перевірено
+### Виправлення Tailscale у 0.2.1
 
-Результати Prompt 1–3: TypeScript/збірки змінених компонентів; один IPv4 listener,
-локальний health і запити до адрес локальних інтерфейсів; зайнятий порт і звільнення
-ресурсів після невдалого bind; строгий config v3 і відмова без змін тестових файлів;
-Client URL/redirect/session/auth/RBAC; збереження адреси після втрати зв'язку;
-Manager inspection, відсутність Tailscale, довірений IPC, service-control, preflight,
-пакетні update/rollback і захист ACL на ізольованих даних. Реальний read-only запит
-Windows визначив один фізичний LAN-адаптер; Tailscale-адаптера в цьому середовищі немає.
-Production ZIP acceptance пропущено: свіжого пакета цього стану не створювали.
+У 0.2.0 Manager покладався на повний збіг `InterfaceDescription` з обмеженим
+переліком назв. Властивості адаптера проблемної VM не збережені, тому це
+обґрунтована причина, а не підтверджене відтворення. 0.2.1 читає Windows alias,
+description, PnP identity, стан і адресу; приймає варіанти назви Tailscale на
+активному не фізичному адаптері та перевіряє IPv4. Сторонній Wintun/CGNAT інтерфейс
+без Tailscale identity не класифікується як Tailscale. Tailscale CLI не запускається;
+API Server і Windows Service не залежать від цих метаданих.
 
-Prompt 4: цільовий огляд інтеграції та констант, синхронізація семи документів,
-практичний VM-чекліст. Прибрано дублювання адрес на сторінці конфігурації Manager
-і застарілі demo-підказки про обов’язковий HTTPS та доступ лише з цього ПК.
-Виконано свіжі server:build і manager:build, три shell/source-тести Manager та
-чотири цільові backup/restore тести — PASS. Останні підтвердили HTTP auth/RBAC,
-захист від пошкодженого/несумісного restore, відмову за нових записів/відсутніх
-доказів, збереження журналів і Backups ACL на ізольованих даних. Попередні
-успішні набори для незміненого коду не повторювалися.
-Переліки залежностей і зовнішній GitHub HTTPS не змінювалися.
+### Автоматичні перевірки та пакети
+
+Server Manager зібрано; мережеві й inspection-тести — 25/25 PASS, включно з типовими
+та альтернативними назвами, відсутністю/неактивністю/IPv4-less Tailscale, стороннім
+100.x адаптером, кількома інтерфейсами й помилкою metadata query. На цьому Windows
+хості read-only query визначив активний Tailscale `100.89.0.34`; це не замінює VM.
+Universal Setup зібрано, NSIS archive integrity та вміст перевірено; Server ZIP після
+розпакування пройшов package integrity/runtime. Пакетні тести — 50/50 PASS.
+Локальні артефакти лежать у `release/0.2.1`.
 
 ### Ще потребує Windows 10 x64 VM
 
-Свіжий Universal NSIS з поточного коду, UAC, три режими встановлення, реальний SCM,
-LocalService/ACL, перезапуск Windows, візуальний огляд, копіювання адрес, LAN і
-Tailscale з іншого доступного вузла, update/recovery та backup/restore через GUI.
-Mock SCM, локальні IP-запити й тести файлів не доводять ці сценарії. Старий
-опублікований Setup 0.1.6 не є кандидатом Stage 9.2; сумісність із ним не перевіряється.
-
-Наступний крок — окремо дозволена підготовка свіжих пакетів, потім
-[stage-9.2-manual-testing.md](stage-9.2-manual-testing.md). Для update/rollback потрібні
-узгоджені тестові версії з HTTP/config v3 та підготовлений сценарій помилки.
-До успішного ручного приймання лишати Stage 9.2 у статусі AWAITING VM ACCEPTANCE.
-Не створювати commit/release або запускати packaging без нового завдання.
+Використати наявну інсталяцію 0.2.0 — чиста інсталяція не замінює цей сценарій.
+Після ручної публікації 0.2.1 перевірити оновлення Client і Manager через Stable
+Setup, API Server через Server ZIP, збереження `server.json`/SQLite/записів, службу,
+Tailscale IPv4 у Manager, копіювання та авторизацію Client через Tailscale. Також
+перевірити реальний SCM/LocalService, UAC і повторний запуск. Оновлення не запускалося.
+Чекліст: [stage-9.2-manual-testing.md](stage-9.2-manual-testing.md), сценарій E7.
+Stage 9.2 лишається AWAITING VM ACCEPTANCE до підтвердження користувачем.

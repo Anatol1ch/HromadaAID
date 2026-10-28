@@ -17,10 +17,10 @@ update до 0.1.6. Перевірено роботу Windows Service й API, а�
 тести не входили до погодженого обсягу приймання. Історичні результати й обмеження
 збережені у [Stage 9.1.3 manual testing](stage-9.1.3-manual-testing.md).
 
-## Stage 9.2 — Tailscale Connectivity — AWAITING VM ACCEPTANCE
+## Stage 9.2 — Tailscale Connectivity — AWAITING 0.2.0 → 0.2.1 VM UPDATE ACCEPTANCE
 
-**Статус: реалізовано в робочій гілці, очікує ручного приймання. Не COMPLETED.**
-Гілка feature/tailscale-connectivity активна; зміни Prompt 1–4 незакомічені.
+**Статус: реалізовано; тестовий кандидат 0.2.1 зібрано локально. Не COMPLETED.**
+Stable 0.2.0 опублікований; кандидат 0.2.1 очікує ручної перевірки оновлення.
 
 - Один Fastify API Server з однією SQLite та IPv4 HTTP listener 0.0.0.0:4310.
 - Одночасні loopback/LAN/Tailscale підключення; HTTP не має внутрішнього TLS.
@@ -29,16 +29,19 @@ update до 0.1.6. Перевірено роботу Windows Service й API, а�
   або автоматичного перемикання серверів. Авторизація, RBAC і сесії збережені.
 - Manager показує адреси з копіюванням лише в огляді та окремо перевіряє SCM/API.
   Майстер має три кроки: каталоги, адміністратор, підсумок.
+- Кандидат 0.2.1 враховує Windows alias/description, PnP identity і стан адаптера
+  для визначення Tailscale IPv4; Tailscale CLI не запускається.
 - Єдина конфігурація v3; старі версії й транспортні поля відхиляються без
   автоматичної міграції, перезапису чи створення іншої SQLite.
 - Немає Tailscale SDK/API, керування tailnet або автоматичних Windows Firewall
   rules. Зовнішній HTTPS, backup/restore та загальний update/recovery збережено.
 
-Цільові автоматичні перевірки виконано; це не замінює реальний NSIS/UAC, службу,
-мережеві підключення й update/rollback у Windows 10 x64 VM. Чекліст і протокол:
-[stage-9.2-manual-testing.md](stage-9.2-manual-testing.md). Для запуску приймання
-потрібні свіжі пакети цього стану коду за окремим запитом на packaging.
-Stage 9.2 завершувати лише після успішного ручного приймання. Фактична реалізація —
+Цільові автоматичні перевірки й локальне пакування 0.2.1 пройшли; це не замінює
+перевірку Tailscale у VM та переходу встановленої 0.2.0 на 0.2.1 через Stable
+Client/Manager і Server ZIP update. Чекліст і протокол:
+[stage-9.2-manual-testing.md](stage-9.2-manual-testing.md). На VM використати
+наявне встановлення 0.2.0, не чисте встановлення. Stage 9.2 завершувати лише після
+успішного ручного приймання. Фактична реалізація —
 [ARCHITECTURE.md](ARCHITECTURE.md), політика — [TRANSPORT.md](../server/TRANSPORT.md).
 
 ## Stage 9.3 — Project Cleanup — PLANNED

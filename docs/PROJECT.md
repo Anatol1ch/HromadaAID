@@ -39,14 +39,14 @@ Server Manager показує loopback, доступні LAN IPv4 та визн�
 
 ## Поточний стан
 
-Останній опублікований Stable Release — **0.1.6**. Client, Server Manager та API
-Server мають версію 0.1.6. Основні автоматичні оновлення компонентів, робота
-Windows Service та API, Client authorization і збереження наявних даних підтверджені
-власником у Windows 10 x64 VM. **Stage 9.1 — Automatic Updates завершено.**
+Останній опублікований Stable Release — **0.2.0**. У Windows VM підтверджені базове
+встановлення Stage 9.2, Windows Service, API та віддалена авторизація через Tailscale.
+**Stage 9.1 — Automatic Updates завершено.** Перехід усіх компонентів з 0.2.0 на
+0.2.1 і збереження серверних даних ще очікують ручної перевірки.
 
-**Stage 9.2: Tailscale Connectivity — реалізовано, очікує Windows VM-приймання.**
-Зміни робочої гілки ще не закомічено й не випущено; опублікований 0.1.6 описує
-попередній Stable. Етап не завершений до ручного приймання за
+**Stage 9.2: Tailscale Connectivity — реалізовано, очікує завершального Windows VM-приймання.**
+Локальний тестовий кандидат 0.2.1 виправляє визначення Tailscale IPv4 у Server Manager.
+Етап не завершений до ручного тесту оновлення за
 [чеклістом Stage 9.2](stage-9.2-manual-testing.md). Поточний checkpoint і межі
 перевірок — у [HANDOFF.md](HANDOFF.md), подальші етапи — у [ROADMAP.md](ROADMAP.md).
 
