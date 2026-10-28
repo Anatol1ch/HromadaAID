@@ -49,15 +49,22 @@ update до 0.1.6. Перевірено роботу Windows Service й API, а�
 
 ## Stage 9.3 — Project Cleanup — COMPLETED
 
-Виправлено шлях тесту `windows:test-installer`, видалено підтверджено
+**Статус: COMPLETED / ACCEPTED.** Виправлено шлях тесту `windows:test-installer`, видалено підтверджено
 невикористаний Client helper резервування, актуалізовано чинні документи для
 Stage 9.2 та HTTP transport, а перед `server:build` додано перевірене очищення
 лише generated `dist-server`. Server payload і staging publication не змінено.
-Stable Release залишається **0.2.1**.
+Автоматичні цільові перевірки успішні; GUI/VM-тести та повний Windows installer
+packaging не проводилися.
 
-Аудитні рекомендації CL-05–08 — фіксація CI toolchain, NSIS compiler, підготовка
-окремих regression checks і release artifact orchestration — перенесено до
-Stage 9.4. SQL/domain modules у `electron/`, які використовує Server, збережено.
+Опублікований Stable залишається **0.2.1**. Зміни Stage 9.3 є у вихідному коді й
+Git-історії, але не входять до пакетів чи release artifacts 0.2.1; окрему збірку
+або реліз не створювали. Їх потрібно включити до наступного релізу після Stage 9.4.
+Перед підготовкою релізу перевірити, що artifacts зібрано з commit, який містить
+Stage 9.3. Наступну версію не призначено.
+
+CL-05–08 — фіксація CI toolchain, NSIS compiler, підготовка окремих regression
+checks і release artifact orchestration — залишаються завданнями Stage 9.4.
+SQL/domain modules у `electron/`, які використовує Server, збережено.
 
 ## Stage 9.4 — CI/CD Automation — PLANNED
 

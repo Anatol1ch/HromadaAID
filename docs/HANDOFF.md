@@ -3,6 +3,11 @@
 ## Стан проєкту
 
 - Поточний Stable: **0.2.1**, опублікований у GitHub.
+- Зміни Stage 9.3 є у вихідному коді та Git-історії, але не входять до вже
+  опублікованих інсталяційних пакетів і release artifacts Stable 0.2.1. Окрему
+  збірку чи реліз для Stage 9.3 не створювали. Їх потрібно включити до наступного
+  релізу після Stage 9.4; перед публікацією перевірити, що артефакти зібрано з
+  commit, який містить Stage 9.3. Номер наступної версії не визначено.
 - **Stage 9.1 — Automatic Updates завершено** після приймання основних сценаріїв у Windows 10 x64 VM.
 - **Stage 9.2 — Tailscale Connectivity завершено** та прийнято власником у Windows VM; Stable tag `0.2.1` вказує на `e159ab5b8536beb74e31ae8a3cee4c7151487932`.
 - Автоматичне оновлення Client, Server Manager та API Server з 0.2.0 до 0.2.1 підтверджене власником. Конфігурація, SQLite й наявні дані збережені; служба та система працюють після оновлення.
@@ -74,6 +79,16 @@ Universal Setup зібрано, NSIS archive integrity та вміст пере�
 етап — **Stage 9.4: CI/CD Automation**. Змінено шлях тесту `windows:test-installer`,
 видалено підтверджено невикористаний Client helper, точково актуалізовано чинні
 документи та додано перевірене очищення generated `dist-server` перед Server build.
-Цільові перевірки Stage 9.3 виконані; Windows VM/manual testing не проводилося.
-Stable залишається **0.2.1**. Рекомендації CL-05–08 перенесено до Stage 9.4.
+Stage 9.3 прийнято як **COMPLETED / ACCEPTED**. `pnpm windows:test-installer`
+пройшов 56/56; пройшли TypeScript checks, Server Manager build, Server build і
+payload preparation/deployment, повторний build із перевіркою видалення stale
+module, перевірка script paths і `git diff --check`. GUI/VM-тести та повний
+Windows installer packaging не проводилися.
+
+Stable залишається **0.2.1**: зміни Stage 9.3 існують у вихідному коді та
+Git-історії, але не входять до вже опублікованих інсталяційних пакетів чи release
+artifacts. Окремої збірки або релізу Stage 9.3 не створювали. Зміни слід включити
+до наступного релізу після Stage 9.4; перед його підготовкою перевірити, що release
+artifacts зібрано з commit, який містить Stage 9.3. Номер наступної версії не
+призначено. CL-05–08 залишаються завданнями Stage 9.4.
 Протокол приймання Stage 9.2: [stage-9.2-manual-testing.md](stage-9.2-manual-testing.md).
