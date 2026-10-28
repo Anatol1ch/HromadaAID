@@ -12,6 +12,9 @@ import { isAnnualAidPlanList } from '../shared/api-contract.ts'
 import { handlers } from './fakes/ipc-security.mjs'
 import { previewDeletion, executeDeletion } from '../electron/deletion-service.ts'
 
+function restoreSyntheticV18(db) {
+ db.exec("DROP TABLE annual_aid_plans; DROP TABLE backup_installations; DROP TABLE user_sessions; DROP TABLE user_roles; DROP TABLE users; DROP TABLE assignment_status_requests; DROP TABLE assignment_save_requests; DROP TABLE decision_assignment_requests; DROP TABLE catalog_order_revisions; ALTER TABLE banks DROP COLUMN updated_at; ALTER TABLE programs DROP COLUMN updated_at; ALTER TABLE aid_types DROP COLUMN updated_at; DELETE FROM schema_migrations WHERE version>=19; PRAGMA user_version=18");
+}
 function fixture(t) {
  const root=mkdtempSync(join(tmpdir(),'hromada-report-test-')),connections=[]
  const open=()=>{const db=openTestDatabase(root);connections.push(db);registerRecordsFixture(db);return db}
@@ -77,13 +80,13 @@ test('Annual plan IPC: zeros, unset, independent years, validation, atomic failu
 
 test('Migration 18→19 aggregates existing plans without modifying originals or assignments',t=>{
  const {db,open}=fixture(t)
- db.exec('DROP TABLE annual_aid_plans; DELETE FROM schema_migrations WHERE version=19; PRAGMA user_version=18')
+ restoreSyntheticV18(db)
  const insert=db.prepare('INSERT INTO annual_plan_entries(id,year,aid_type_id,reference_label,planned_recipient_count,planned_amount_minor,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)')
  insert.run('p1',2026,plan.aidTypeId,'A',3,200,'stamp','stamp');insert.run('p2',2026,plan.aidTypeId,'B',null,300,'stamp','stamp')
  insert.run('p3',2027,plan.aidTypeId,'C',null,0,'stamp','stamp')
  const original=db.prepare('SELECT * FROM annual_plan_entries ORDER BY id').all()
  db.close();const next=open()
- assert.equal(next.prepare('PRAGMA user_version').get().user_version,19)
+ assert.equal(next.prepare('PRAGMA user_version').get().user_version,28)
  assert.deepEqual(next.prepare('SELECT * FROM annual_plan_entries ORDER BY id').all(),original)
  const totals=next.prepare('SELECT year,planned_recipient_count n,planned_amount_minor amount,budget_amount_minor budget FROM annual_aid_plans ORDER BY year').all()
  assert.deepEqual(totals.map(row=>({...row})),[{year:2026,n:3,amount:500,budget:null},{year:2027,n:null,amount:0,budget:null}])
@@ -92,7 +95,7 @@ test('Migration 18→19 aggregates existing plans without modifying originals or
 
 test('Failed migration 19 rolls back its schema and version and leaves the connection unlocked',t=>{
  const {db,root}=fixture(t)
- db.exec('DROP TABLE annual_aid_plans; DELETE FROM schema_migrations WHERE version=19; PRAGMA user_version=18; CREATE TABLE annual_aid_plans(conflict TEXT)')
+ restoreSyntheticV18(db); db.exec('CREATE TABLE annual_aid_plans(conflict TEXT)')
  db.close();assert.throws(()=>openTestDatabase(root),/already exists/)
  const check=new DatabaseSync(join(root,'hromada-aid.sqlite'))
  try {assert.equal(check.prepare('PRAGMA user_version').get().user_version,18);assert.equal(check.prepare('SELECT MAX(version) n FROM schema_migrations').get().n,18);check.exec('BEGIN EXCLUSIVE;ROLLBACK')}finally{check.close()}
@@ -136,10 +139,10 @@ test('Existing confirmed catalog deletion accounts for annual plans and rolls ba
  assert.equal(call('reports:annual-plan-save',plan).ok,true)
  assert(previewDeletion(db,'aidType',plan.aidTypeId).dependencies.some(item=>item.label==='Річні планові показники'&&item.count===1))
  db.exec("CREATE TRIGGER fail_type_delete BEFORE DELETE ON aid_types BEGIN SELECT RAISE(ABORT,'synthetic'); END")
- assert.equal(executeDeletion(db,'aidType',plan.aidTypeId).ok,false)
+ assert.equal(executeDeletion(db,'aidType',plan.aidTypeId,previewDeletion(db,'aidType',plan.aidTypeId).confirmationToken).ok,false)
  assert.deepEqual(planValues(call('reports:annual-plan-list',2026)),[plan])
  db.exec('DROP TRIGGER fail_type_delete')
- assert.equal(executeDeletion(db,'aidType',plan.aidTypeId).ok,true)
+ assert.equal(executeDeletion(db,'aidType',plan.aidTypeId,previewDeletion(db,'aidType',plan.aidTypeId).confirmationToken).ok,true)
  assert.deepEqual(call('reports:annual-plan-list',2026),[])
  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[])
 })

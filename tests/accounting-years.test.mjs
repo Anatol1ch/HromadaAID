@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -27,7 +28,7 @@ function fixture(t) {
     const result=call('decisions:save',{decisionNumber:'1',decisionDate:year+'-01-02',title:''})
     assert.equal(result.ok,true);decisions[year]=result.decision.id
   }
-  const save=(year,status,amount=100,paidOn,decisionId=decisions[year])=>call('assignments:save',{recipientId:'person',decisionId,aidTypeId:'aid-social-treatment',amountMinor:amount,status,paidOn})
+  const save=(year,status,amount=100,paidOn,decisionId=decisions[year])=>call('assignments:save',{recipientId:'person',decisionId,aidTypeId:'aid-social-treatment',amountMinor:amount,status,paidOn},undefined,undefined,randomUUID())
   return {db,call,save,decisions}
 }
 
@@ -58,7 +59,7 @@ test('Real IPC creates decisions and assignments for 2026 and keeps 2027 records
   assert.equal(dashboardSummary(db,2026).totalMinor,200)
   assert.equal(dashboardSummary(db,2027).totalMinor,300)
   assert.equal(call('decisions:list').length,2)
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version,19)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version,28)
 })
 
 test('Individual, group and bulk saves reject cross-year dates atomically using the actual decision',t=>{
@@ -67,17 +68,17 @@ test('Individual, group and bulk saves reject cross-year dates atomically using 
   const b=save(2026,'В роботі').assignment
   const before=JSON.stringify(db.prepare('SELECT * FROM assignments ORDER BY id').all())
   const input={recipientId:'person',decisionId:decisions[2026],decisionDate:'2027-01-02',aidTypeId:'aid-social-treatment',amountMinor:100,status:'Виплачено',paidOn:'2027-01-03'}
-  const individual=call('assignments:save',input,a.id)
+  const individual=call('assignments:save',input,a.id,a.updatedAt)
   assert.equal(individual.ok,false);assert.match(individual.message,/2026/)
   assert.equal(call('assignments:save',input).ok,false)
-  const batch=changeAssignmentStatuses(db,{assignmentIds:[a.id,b.id],year:2026,status:'Виплачено',paidOn:'2027-01-03'})
+  const batch=changeAssignmentStatuses(db,{assignmentIds:[a.id,b.id],year:2026,status:'Виплачено',paidOn:'2027-01-03'},randomUUID())
   assert.equal(batch.ok,false);assert.equal(batch.message,individual.message)
   assert.equal(call('decisions:add-assignments',decisions[2026],[{recipientId:'person',aidTypeId:'aid-social-treatment',amountMinor:100,status:'Призначено'},{recipientId:'person',aidTypeId:'aid-social-treatment',amountMinor:100,status:'Виплачено',paidOn:'2027-01-03'}]).ok,false)
   assert.equal(JSON.stringify(db.prepare('SELECT * FROM assignments ORDER BY id').all()),before)
   const count=call('decisions:list').length
   assert.equal(call('assignments:save',{...input,decisionId:undefined,decisionNumber:'temporary',decisionDate:'2026-12-31'}).ok,false)
   assert.equal(call('decisions:list').length,count,'auto-created decision rolled back')
-  assert.equal(changeAssignmentStatuses(db,{assignmentIds:[a.id,b.id],year:2026,status:'Виплачено',paidOn:'2026-12-31'}).ok,true)
+  assert.equal(changeAssignmentStatuses(db,{assignmentIds:[a.id,b.id],year:2026,status:'Виплачено',paidOn:'2026-12-31'},randomUUID()).ok,true)
   assert.equal(call('decisions:save',{decisionNumber:'1',decisionDate:'2027-02-01',title:''},decisions[2026]).ok,false)
   assert.equal(call('decisions:get',decisions[2026]).decisionDate,'2026-01-02')
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM payouts').get().n,0)

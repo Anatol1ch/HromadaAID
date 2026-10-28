@@ -4,9 +4,10 @@ import { copyAddress, formatAddress, validateAddress, type AddressParts } from '
 import DictionaryTable, { DictionarySearch, DictionaryToolbar } from './components/DictionaryTable'
 import AddressEditor from './components/AddressEditor'
 import FormattedInput from './components/FormattedInput'
-import { fieldFormatError, fieldFormatHints, isFormattedField } from '../electron/field-formats'
+import { fieldFormatError, fieldFormatHints, isFormattedField, validUkrainianIban } from '../electron/field-formats'
 import { assignmentStatusColor } from '../electron/assignment-model'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { AlertTriangle, Check, Copy, X, Eye, MapPin, Pencil, Plus, UserRound, Trash2 } from 'lucide-react'
 import type { AssignmentRecord, BankRecord, DeletePreview, DuplicateMatch, RecipientInput, RecipientRecord, RecipientSaveResult, RecipientSummary } from '../electron/api-contract'
 import { bankRepository } from './services/bankRepository'
@@ -174,6 +175,7 @@ export function RecipientFormModal({ initial = emptyRecipient, editingId, expect
   const initialFormRef = useRef(JSON.stringify(initial))
   const formRef = useRef<HTMLFormElement>(null)
   const [fieldErrors, setFieldErrors] = useState<RecipientErrors>({})
+  const [ibanCheck, setIbanCheck] = useState<'' | 'valid' | 'invalid'>('')
   const [banks, setBanks] = useState<BankRecord[]>([])
   const [banksLoading, setBanksLoading] = useState(true)
   const [bankError, setBankError] = useState('')
@@ -205,6 +207,7 @@ export function RecipientFormModal({ initial = emptyRecipient, editingId, expect
     setForm(next)
     setDuplicate(null)
     setError('')
+    if (key === 'bankAccount') setIbanCheck('')
     if (fieldErrors[key]) {
       const validation = validateRecipientInput(next)
       setFieldErrors((current) => ({ ...current, [key]: validation.errors[key] }))
@@ -266,6 +269,7 @@ export function RecipientFormModal({ initial = emptyRecipient, editingId, expect
   const textField = (key: RecipientTextField, options: { type?: string; autoComplete?: string; inputMode?: 'text' | 'numeric' | 'tel' } = {}) => <TextField
     field={key} {...recipientTextFields[key]} value={form[key]} error={fieldErrors[key]} disabled={saving}
     onChange={(value) => updateField(key, value)} {...options}/>
+  const checkIban = () => setIbanCheck(validUkrainianIban(form.bankAccount.replace(/\s/g, '')) ? 'valid' : 'invalid')
   return <>
     <Modal title={editingId ? 'Редагування картки' : 'Нова картка отримувача'} description="Заповніть відомості про отримувача матеріальної допомоги." onClose={closeForm} dirty={!saving && dirty} busy={saving} size="large" className="recipient-card-modal">
       <form ref={formRef} className="recipient-card-form" noValidate onSubmit={(event) => { event.preventDefault(); void save() }}>
@@ -291,7 +295,11 @@ export function RecipientFormModal({ initial = emptyRecipient, editingId, expect
           {textField('email', { autoComplete: 'email' })}
         </div></fieldset>
         <fieldset className="recipient-fieldset"><legend>Банківські реквізити</legend><div className="recipient-form-grid">
-          {textField('bankAccount')}
+          <div className="recipient-iban-field"><TextField
+            field="bankAccount" {...recipientTextFields.bankAccount} value={form.bankAccount} error={fieldErrors.bankAccount} disabled={saving}
+            onChange={(value) => updateField('bankAccount', value)} action={<button type="button" className="secondary-button assignment-create-button" title="Перевірити IBAN" aria-label="Перевірити IBAN" disabled={saving || !form.bankAccount.trim()} onClick={checkIban}><Check size={18}/></button>}/>
+            {ibanCheck && <span className={ibanCheck === 'valid' ? 'recipient-field-hint recipient-iban-success' : 'recipient-field-error'} role="status">{ibanCheck === 'valid' ? 'Формат і контрольна сума IBAN коректні' : 'Некоректний IBAN. Перевірте номер рахунку'}</span>}
+          </div>
           <div className="recipient-field" data-recipient-field={!selectedBankId ? 'bankDetailsId' : undefined}><span aria-hidden="true">Найменування банку <RequiredMark/></span><div className="recipient-bank-picker"><Select label="Найменування банку" required searchable disabled={saving || banksLoading} value={selectedBankId} error={!selectedBankId ? fieldErrors.bankDetailsId : undefined} placeholder={banksLoading ? 'Завантаження…' : 'Оберіть банк'} options={banks.map(bank => ({ value: bank.id, label: bank.name, description: bank.details.length + ' наборів реквізитів', searchText: bankSearchText(bank) }))} onChange={id => { if (id === selectedBankId) return; const bank = banks.find(item => item.id === id); setBankChoice(id); updateField('bankDetailsId', onlyBankDetail(bank)) }}/><button type="button" className="secondary-button assignment-create-button" aria-label="Створити новий банк" title="Створити новий банк" disabled={saving || banksLoading} onClick={() => setShowBankForm(true)}><Plus size={18}/></button></div></div>
           <div className="recipient-field recipient-bank-detail-picker" data-recipient-field="bankDetailsId"><span aria-hidden="true">Банківські реквізити <RequiredMark/></span><Select label="Банківські реквізити" required searchable value={form.bankDetailsId} disabled={saving || !selectedBank || selectedBank.details.length === 1} error={selectedBankId ? fieldErrors.bankDetailsId : undefined} placeholder={selectedBank ? 'Оберіть пару МФО та ЄДРПОУ' : 'Спочатку оберіть банк'} options={(selectedBank?.details ?? []).map(detail => ({ value: detail.id, label: 'МФО ' + detail.mfo + ' · ЄДРПОУ ' + detail.edrpou }))} onChange={id => updateField('bankDetailsId', id)}/></div>
           {selectedDetail && <dl className="recipient-bank-values"><div><dt>Код МФО банку</dt><dd>{selectedDetail.mfo}</dd></div><div><dt>Код банку за ЄДРПОУ</dt><dd>{selectedDetail.edrpou}</dd></div></dl>}
@@ -313,23 +321,24 @@ export function RecipientFormModal({ initial = emptyRecipient, editingId, expect
 
 function RequiredMark() { return <span className="recipient-required-mark" aria-hidden="true">*</span> }
 
-function TextField({ field, label, value, onChange, maxLength, required, error, disabled, type = 'text', autoComplete, inputMode }: {
-  field: RecipientTextField; label: string; value: string; onChange: (value: string) => void; maxLength: number; required: boolean; error?: string; disabled: boolean; type?: string; autoComplete?: string; inputMode?: 'text' | 'numeric' | 'tel'
+function TextField({ field, label, value, onChange, maxLength, required, error, disabled, type = 'text', autoComplete, inputMode, action }: {
+  field: RecipientTextField; label: string; value: string; onChange: (value: string) => void; maxLength: number; required: boolean; error?: string; disabled: boolean; type?: string; autoComplete?: string; inputMode?: 'text' | 'numeric' | 'tel'; action?: ReactNode
 }) {
   const id = useId()
   const [touched, setTouched] = useState(false)
   const errorId = 'recipient-error-' + id
   const hintId = 'recipient-hint-' + id
   const labelId = 'recipient-label-' + id
+  const controlId = 'recipient-input-' + id
   const formatted = isFormattedField(field)
   const message = error || (touched && formatted ? fieldFormatError(field, value) : '')
   const hint = formatted ? fieldFormatHints[field] : ''
-  const props = { name: field, type, value, maxLength, required, disabled, 'aria-labelledby': labelId, 'aria-invalid': Boolean(message), 'aria-describedby': [hint ? hintId : '', message ? errorId : ''].filter(Boolean).join(' ') || undefined, autoComplete, inputMode, onBlur: () => setTouched(true), onChange }
-  return <label className="recipient-field" data-recipient-field={field}><span id={labelId}>{label}{required && <> <RequiredMark/></>}</span>
-    {formatted ? <FormattedInput {...props} kind={field}/> : <input {...props} onChange={event => onChange(event.target.value)}/>}
-    {hint && <span className="recipient-field-hint" id={hintId}>{hint}</span>}
-    {message && <span id={errorId} className="recipient-field-error" role="alert">{message}</span>}
-  </label>
+  const props = { id: controlId, name: field, type, value, maxLength, required, disabled, 'aria-labelledby': labelId, 'aria-invalid': Boolean(message), 'aria-describedby': [hint ? hintId : '', message ? errorId : ''].filter(Boolean).join(' ') || undefined, autoComplete, inputMode, onBlur: () => setTouched(true), onChange }
+  const input = action ? <FormattedInput {...props} kind={field as 'bankAccount'}/> : formatted ? <FormattedInput {...props} kind={field}/> : <input {...props} onChange={event => onChange(event.target.value)}/>
+  const labelContent = <><span id={labelId}>{label}{required && <> <RequiredMark/></>}</span></>
+  return action
+    ? <div className="recipient-field" data-recipient-field={field}><label id={labelId} htmlFor={controlId}>{labelContent}</label><div className="recipient-iban-input-row">{input}{action}</div>{hint && <span className="recipient-field-hint" id={hintId}>{hint}</span>}{message && <span id={errorId} className="recipient-field-error" role="alert">{message}</span>}</div>
+    : <label className="recipient-field" data-recipient-field={field}>{labelContent}{input}{hint && <span className="recipient-field-hint" id={hintId}>{hint}</span>}{message && <span id={errorId} className="recipient-field-error" role="alert">{message}</span>}</label>
 }
 function DuplicateNotice({ result, onView, onCreateSeparate, saving, onUseExisting }: {
   result: Extract<RecipientSaveResult, { ok: false }>; onView: (id: string) => void; onCreateSeparate: () => void; saving: boolean; onUseExisting?: (id: string) => void

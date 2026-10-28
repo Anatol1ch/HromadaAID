@@ -20,12 +20,16 @@ export default function BankFormModal({ initial, onClose, onSaved }: { initial?:
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState<BankErrors>({})
+  const [validated, setValidated] = useState(false)
+  const [touchedFields, setTouchedFields] = useState<Set<string>>(() => new Set())
   const [removing, setRemoving] = useState<DetailDraft | null>(null)
   const dirty = JSON.stringify({ name, details }) !== baseline.current
   const close = () => { if (!savingRef.current) onClose() }
   const updateDetail = (key: string, field: 'mfo' | 'edrpou', value: string) => {
     setDetails(current => current.map(detail => detail.key === key ? { ...detail, [field]: value } : detail))
-    setErrors({}); setError('')
+    const index = details.findIndex(detail => detail.key === key)
+    setErrors(current => { const next = { ...current }; delete next[`details.${index}.${field}`]; return next })
+    setError('')
   }
   const requestRemoval = (detail: DetailDraft) => {
     const used = initial?.details.find(item => item.id === detail.id)?.recipientCount ?? 0
@@ -36,6 +40,7 @@ export default function BankFormModal({ initial, onClose, onSaved }: { initial?:
   const save = async () => {
     if (savingRef.current) return
     const validation = validateBankInput({ name, details })
+    setValidated(true)
     setErrors(validation.errors); setError('')
     if (!validation.ok) {
       setError(validation.message)
@@ -51,11 +56,16 @@ export default function BankFormModal({ initial, onClose, onSaved }: { initial?:
     } catch { setError('Не вдалося зберегти банк. Введені дані залишилися у формі.') }
     finally { savingRef.current = false; setSaving(false) }
   }
-  const field = (key: string, label: string, value: string, maxLength: number, change: (value: string) => void) => <label className="recipient-field" data-bank-field={key}>
+  const field = (key: string, label: string, value: string, maxLength: number, change: (value: string) => void) => {
+    const isMfo = key.endsWith('.mfo'), isEdrpou = key.endsWith('.edrpou')
+    const formatError = isMfo && value && !/^[0-9]{6}$/.test(value) ? 'МФО має містити рівно 6 цифр' : isEdrpou && value && !/^[0-9]{8}$/.test(value) ? 'ЄДРПОУ має містити рівно 8 цифр' : ''
+    const message = errors[key] ?? (validated || touchedFields.has(key) ? formatError : '')
+    return <label className="recipient-field" data-bank-field={key}>
     <span>{label} <span className="recipient-required-mark" aria-hidden="true">*</span></span>
-    <input required disabled={saving} maxLength={maxLength} value={value} aria-invalid={!!errors[key]} aria-describedby={errors[key] ? `bank-error-${key}` : undefined} onChange={event => change(event.target.value)}/>
-    {errors[key] && <span id={`bank-error-${key}`} className="recipient-field-error">{errors[key]}</span>}
+    <input required disabled={saving} maxLength={maxLength} value={value} aria-invalid={!!message} aria-describedby={message ? `bank-error-${key}` : undefined} onBlur={() => setTouchedFields(current => new Set(current).add(key))} onChange={event => change(event.target.value)}/>
+    {message && <span id={`bank-error-${key}`} className="recipient-field-error">{message}</span>}
   </label>
+  }
   return <>
     <Modal title={initial ? 'Редагування банку' : 'Новий банк'} description="Вкажіть найменування банку та пов’язані пари МФО і ЄДРПОУ." size="large" className="recipient-card-modal" busy={saving} dirty={dirty} onClose={close}>
       <form className="recipient-card-form bank-form" ref={formRef} noValidate onSubmit={event => { event.preventDefault(); void save() }}>

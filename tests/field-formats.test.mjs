@@ -36,6 +36,12 @@ test('Ukrainian IBAN is format-only; standalone MOD 97 remains available', () =>
   assert.equal(normalizeField('bankAccount','ua 62 000000 0000000000000000001'),'UA620000000000000000000000001')
   for(const value of ['UA62000000000000000000000001','UA6200000000000000000000000001','UA62000000000000000000000000x','DE620000000000000000000000001']) assert.notEqual(fieldFormatError('bankAccount',value),'',value)
 })
+
+test('Optional IBAN check accepts spaced canonical input and validates Ukrainian format and MOD 97', () => {
+  const spaced = 'UA 62 000000 0000000000000000001'
+  assert.equal(validUkrainianIban(normalizeField('bankAccount', spaced)), true)
+  for (const value of ['DE620000000000000000000000001', 'UA62000000000000000000000001', 'UA62000000000000000000000000X', 'UA000000000000000000000000001']) assert.equal(validUkrainianIban(normalizeField('bankAccount', value)), false, value)
+})
 test('Masks display prefixes without changing an empty model and preserve invalid legacy values visibly', () => {
   assert.equal(displayMask('phone',''),'+380');assert.equal(displayMask('bankAccount',''),'UA')
   assert.equal(displayMask('phone','+380501234567'),'+380 50 123 45 67')

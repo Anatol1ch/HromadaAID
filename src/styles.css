@@ -445,6 +445,11 @@ table:where(.register-card table, .registry-table, .recipient-history-table, .do
 .assignment-section-title:not(:first-child) { margin-top: var(--space-1); }
 .assignment-field-control { display: grid; grid-template-columns: minmax(0, 1fr) 43px; gap: var(--space-2); align-items: stretch; }
 .assignment-create-button { width: 43px; height: auto; min-height: var(--control-height-legacy); padding: 0; color: #32704a; border-color: var(--border-accent); }
+.recipient-iban-input-row { display: flex; align-items: stretch; gap: 8px; }
+.recipient-iban-input-row > input { min-width: 0; flex: 1; }
+.recipient-iban-input-row .assignment-create-button { flex: 0 0 43px; }
+.recipient-iban-success { color: var(--color-text-success, #32704a); }
+.recipient-iban-field > .recipient-field-hint, .recipient-iban-field > .recipient-field-error { display: block; margin-top: 6px; }
 .assignment-create-button:hover:not([aria-busy="true"]):not([aria-disabled="true"]):not(:disabled) { background: #edf5ef; color: #25663d; border-color: #93b49e; }
 .assignment-form-actions { flex-wrap: wrap; }
 .assignment-form-actions > div { flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }

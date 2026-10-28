@@ -12,12 +12,16 @@ export function validateBankInput(value: unknown): { ok: true; input: BankInput;
   if (!Array.isArray(source.details) || !source.details.length) errors.details = 'Додайте щонайменше один повний набір реквізитів.'
   else source.details.forEach((row: unknown, index: number) => {
     const item = row && typeof row === 'object' ? row as Record<string, unknown> : {}
-    const mfo = typeof item.mfo === 'string' ? item.mfo.trim() : ''
-    const edrpou = typeof item.edrpou === 'string' ? item.edrpou.trim() : ''
+    const mfoValue = typeof item.mfo === 'string' ? item.mfo : ''
+    const edrpouValue = typeof item.edrpou === 'string' ? item.edrpou : ''
+    const mfo = mfoValue.trim()
+    const edrpou = edrpouValue.trim()
     if (!mfo || mfo.length > 32) errors[`details.${index}.mfo`] = !mfo ? 'Вкажіть код МФО.' : 'Код МФО має містити не більше 32 символів.'
+    else if (!/^[0-9]{6}$/.test(mfoValue)) errors[`details.${index}.mfo`] = 'МФО має містити рівно 6 цифр'
     if (!edrpou || edrpou.length > 32) errors[`details.${index}.edrpou`] = !edrpou ? 'Вкажіть код банку за ЄДРПОУ.' : 'Код ЄДРПОУ має містити не більше 32 символів.'
+    else if (!/^[0-9]{8}$/.test(edrpouValue)) errors[`details.${index}.edrpou`] = 'ЄДРПОУ має містити рівно 8 цифр'
     const pair = JSON.stringify([mfo, edrpou])
-    if (pairs.has(pair)) errors[`details.${index}.mfo`] = 'Така пара МФО та ЄДРПОУ вже є в цьому банку.'
+    if (pairs.has(pair) && !errors[`details.${index}.mfo`]) errors[`details.${index}.mfo`] = 'Така пара МФО та ЄДРПОУ вже є в цьому банку.'
     pairs.add(pair)
     if (item.id !== undefined && (typeof item.id !== 'string' || !item.id || item.id.length > 100 || ids.has(item.id))) {
       errors[`details.${index}.mfo`] = 'Некоректний ідентифікатор набору реквізитів. Оновіть картку банку.'

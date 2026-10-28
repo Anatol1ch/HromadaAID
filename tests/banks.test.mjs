@@ -85,13 +85,32 @@ test('Bank validation rejects missing, partial, duplicate and non-text details w
   }
 })
 
+test('Bank MFO and EDRPOU formats are enforced for every detail on create and edit before SQLite changes', t => {
+  const { db, call, bank } = fixture(t)
+  const valid = { mfo: '000001', edrpou: '00000001' }
+  const created = bank([valid, { mfo: '123456', edrpou: '12345678' }])
+  for (const [field, values] of Object.entries({
+    mfo: ['12345', '1234567', '12A456', '12 456', '12-456', ' 000001 '],
+    edrpou: ['1234567', '123456789', '1234A678', '1234 678', '1234-678', ' 00000001 '],
+  })) for (const value of values) {
+    const detail = { ...valid, [field]: value }
+    assert.equal(call('banks:save', { name: 'Некоректний банк', details: [detail] }).ok, false, `${field}: ${value}`)
+    const current = call('banks:get', created.id)
+    const changed = current.details.map((item, index) => index === 0 ? { id: item.id, ...detail } : { id: item.id, mfo: item.mfo, edrpou: item.edrpou })
+    assert.equal(call('banks:save', { name: 'Не зберегти зміни', details: changed }, created.id, current.updatedAt).ok, false, `${field} edit: ${value}`)
+    assert.deepEqual(call('banks:get', created.id), current, `SQLite changed after ${field}: ${value}`)
+  }
+  assert.equal(call('banks:save', { name: 'Нуль на початку', details: [valid] }).ok, true)
+  assert.equal(call('banks:save', { name: 'Кілька наборів', details: [valid, { mfo: '654321', edrpou: '87654321' }] }).ok, true)
+})
+
 test('Saved banks survive reopening and deleted banks are never seeded back', t => {
   const { db, bank, open } = fixture(t)
   const created = bank([pair, { mfo: '000002', edrpou: '00000002' }])
   db.close()
   const reopened = open()
   assert.deepEqual(getBank(reopened, created.id), created)
-  assert.equal(removeBank(reopened, created.id).ok, true)
+  assert.equal(removeBank(reopened, created.id, created.updatedAt).ok, true)
   reopened.close()
   const again = open()
   assert.equal(getBank(again, created.id), null)
@@ -128,7 +147,7 @@ test('Recipient IPC requires an existing set; bank edits propagate through JOIN 
   assert.equal(call('banks:get', created.id).recipientCount, 1)
   assert.equal(call('banks:details', created.id)[1].recipientCount, 1)
   const edit = { name: 'Перейменований вигаданий банк', details: created.details.map(detail => ({ ...detail, ...(detail.id === input.bankDetailsId ? { mfo: '000009', edrpou: '00000009' } : {}) })) }
-  assert.equal(call('banks:save', edit, created.id).ok, true)
+  assert.equal(call('banks:save', edit, created.id, call('banks:get', created.id).updatedAt).ok, true)
   const reopened = call('recipients:get', saved.recipient.id)
   assert.equal(reopened.bankName, edit.name); assert.equal(reopened.bankMfo, '000009'); assert.equal(reopened.bankEdrpou, '00000009')
   assert.equal(reopened.bankDetailsId, input.bankDetailsId); assert.equal(reopened.bankAccount, input.bankAccount)
@@ -141,16 +160,16 @@ test('Used bank and used pair cannot be deleted through IPC or SQL; unused remov
   const { db, call, bank } = fixture(t)
   const used = bank([pair, { mfo: '000002', edrpou: '00000002' }])
   assert.equal(call('recipients:save', person(used.details[0].id)).ok, true)
-  assert.equal(call('banks:remove', used.id).ok, false)
-  assert.equal(call('banks:save', { name: 'Нова назва', details: [used.details[1]] }, used.id).ok, false)
+  assert.equal(call('banks:remove', used.id, used.updatedAt).ok, false)
+  assert.equal(call('banks:save', { name: 'Нова назва', details: [used.details[1]] }, used.id, call('banks:get', used.id).updatedAt).ok, false)
   assert.equal(call('banks:get', used.id).name, used.name)
   assert.throws(() => db.prepare('DELETE FROM bank_details WHERE id=?').run(used.details[0].id), /FOREIGN KEY/)
   assert.throws(() => db.prepare('DELETE FROM banks WHERE id=?').run(used.id), /FOREIGN KEY/)
-  assert.equal(call('banks:save', { name: used.name, details: [used.details[0]] }, used.id).ok, true)
+  assert.equal(call('banks:save', { name: used.name, details: [used.details[0]] }, used.id, call('banks:get', used.id).updatedAt).ok, true)
   assert.equal(call('banks:details', used.id).length, 1)
-  assert.equal(call('banks:save', { name: used.name, details: [] }, used.id).ok, false)
+  assert.equal(call('banks:save', { name: used.name, details: [] }, used.id, call('banks:get', used.id).updatedAt).ok, false)
   const unused = bank([pair], 'Невикористовуваний банк')
-  assert.equal(call('banks:remove', unused.id).ok, true)
+  assert.equal(call('banks:remove', unused.id, unused.updatedAt).ok, true)
   assert.equal(call('banks:get', unused.id), null)
   assert.equal(db.prepare('SELECT count(*) AS n FROM bank_details WHERE bank_id=?').get(unused.id).n, 0)
 })
@@ -159,16 +178,16 @@ test('Creation and editing roll back every change on a failed detail; foreign ID
   const { db, call, bank } = fixture(t)
   const first = bank([pair, { mfo: '000002', edrpou: '00000002' }])
   const other = bank([pair], 'Інший банк')
-  assert.equal(call('banks:save', { name: first.name, details: [other.details[0]] }, first.id).ok, false)
-  assert.equal(call('banks:save', { name: first.name, details: [first.details[0], first.details[0]] }, first.id).ok, false)
-  db.exec("CREATE TRIGGER reject_test_pair BEFORE INSERT ON bank_details WHEN NEW.mfo='BLOCK' BEGIN SELECT RAISE(ABORT,'synthetic'); END;")
+  assert.equal(call('banks:save', { name: first.name, details: [other.details[0]] }, first.id, call('banks:get', first.id).updatedAt).ok, false)
+  assert.equal(call('banks:save', { name: first.name, details: [first.details[0], first.details[0]] }, first.id, call('banks:get', first.id).updatedAt).ok, false)
+  db.exec("CREATE TRIGGER reject_test_pair BEFORE INSERT ON bank_details WHEN NEW.mfo='999999' BEGIN SELECT RAISE(ABORT,'synthetic'); END;")
   const snapshot = JSON.stringify(call('banks:list'))
-  assert.equal(call('banks:save', { name: 'Не зберегти', details: [pair, { mfo: 'BLOCK', edrpou: '00000003' }] }).ok, false)
+  assert.equal(call('banks:save', { name: 'Не зберегти', details: [pair, { mfo: '999999', edrpou: '00000003' }] }).ok, false)
   assert.equal(JSON.stringify(call('banks:list')), snapshot)
-  assert.equal(call('banks:save', { name: 'Не перейменувати', details: [{ ...first.details[0], mfo: '123456' }, { mfo: 'BLOCK', edrpou: '00000003' }] }, first.id).ok, false)
+  assert.equal(call('banks:save', { name: 'Не перейменувати', details: [{ ...first.details[0], mfo: '123456' }, { mfo: '999999', edrpou: '00000003' }] }, first.id, call('banks:get', first.id).updatedAt).ok, false)
   assert.equal(JSON.stringify(call('banks:list')), snapshot)
   const swapped = first.details.map((detail, index) => ({ ...detail, mfo: first.details[1 - index].mfo, edrpou: first.details[1 - index].edrpou }))
-  assert.equal(call('banks:save', { name: first.name, details: swapped }, first.id).ok, true)
+  assert.equal(call('banks:save', { name: first.name, details: swapped }, first.id, call('banks:get', first.id).updatedAt).ok, true)
   assert.equal(call('banks:get', first.id).details[0].mfo, first.details[1].mfo)
 })
 
@@ -176,7 +195,7 @@ test('A failure while deleting the bank rolls back removal of all its detail set
   const { db, call, bank } = fixture(t)
   const created = bank([pair, { mfo: '000002', edrpou: '00000002' }])
   db.exec("CREATE TRIGGER reject_bank_delete BEFORE DELETE ON banks BEGIN SELECT RAISE(ABORT,'synthetic delete failure'); END;")
-  assert.equal(call('banks:remove', created.id).ok, false)
+  assert.equal(call('banks:remove', created.id, created.updatedAt).ok, false)
   assert.equal(call('banks:get', created.id).details.length, 2)
   assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0)
 })
@@ -199,12 +218,12 @@ test('Document source resolves bank details, preserves zeros, year/status filter
   assert.equal(readStatementRows(db, ['a'], '2028').length, 0)
 })
 
-test('Migration 15 → 19 preserves full legacy sets, linked recipients, zeros and data after reopening', t => {
+test('Migration 15 → 28 preserves full legacy sets, linked recipients, zeros and data after reopening', t => {
   const { db, open } = fixture(t, true)
   for (const id of ['one', 'two']) db.prepare('INSERT INTO recipients(id,last_name,first_name,bank_name,bank_mfo,bank_edrpou,bank_account,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)').run(id, 'Вигаданий', id, 'Синтетичний банк', '000001', '00000001', 'UA00001', stamp, stamp)
   db.close()
   const current = open()
-  assert.equal(current.prepare('PRAGMA user_version').get().user_version, 19)
+  assert.equal(current.prepare('PRAGMA user_version').get().user_version, 28)
   assert.equal(current.prepare('SELECT count(*) AS n FROM banks').get().n, 1)
   assert.equal(current.prepare('SELECT count(*) AS n FROM bank_details').get().n, 1)
   const rows = current.prepare('SELECT r.id,r.bank_account,r.created_at,d.mfo,d.edrpou,b.name FROM recipients r JOIN bank_details d ON d.id=r.bank_details_id JOIN banks b ON b.id=d.bank_id').all()

@@ -43,7 +43,7 @@ test('Recipient IPC creates, reads and edits all fields without losing text iden
   const person = call('recipients:get', created.recipient.id)
   for (const [key, value] of Object.entries(complete)) assert.deepEqual(person[key], value, key)
   const updated = { ...complete, passport: 'ТТ000002', rnokpp: '0000000002', registeredAddressParts: testAddress({ building: '12А' }), registeredAddress: formatAddress(testAddress({ building: '12А' })), addressParts: testAddress({ building: '15/2' }), address: formatAddress(testAddress({ building: '15/2' })), bankAccount: 'UA350000000000000000000000002', isVpo: true, sex: 'Жінка' }
-  assert.equal(call('recipients:save', updated, person.id).ok, true)
+  assert.equal(call('recipients:save', updated, person.id, false, person.updatedAt).ok, true)
   const reopened = call('recipients:get', person.id)
   for (const [key, value] of Object.entries(updated)) assert.deepEqual(reopened[key], value, key)
   assert.equal(call('recipients:list').length, 1)
@@ -64,7 +64,7 @@ test('IPC enforces field formats on create and edit; rejects malformed values wi
   const bad = { passport: ['AB123456', 'АВ12345', '12345678'], rnokpp: ['123', '000000000x'], phone: ['+38050', '+48123456789'], email: ['a@@b.org', 'a@b', 'a@b..org', 'a b@c.org', ' a@b.org'], bankAccount: ['UA62000000000000000000000001', 'DE620000000000000000000000001', 'UA62000000000000000000000000x'] }
   for (const [field, values] of Object.entries(bad)) for (const value of values) {
     for (const id of [undefined, saved.id]) {
-      const result = call('recipients:save', {...complete,[field]:value}, id, true)
+      const result = call('recipients:save', {...complete,[field]:value}, id, true, saved.updatedAt)
       assert.equal(result.reason,'validation',field+': '+value)
     }
   }
@@ -80,7 +80,7 @@ test('IPC stores uppercase passport, canonical phone and IBAN, and treats a bare
   assert.equal(result.recipient.passport,'АВ123456')
   assert.equal(result.recipient.phone,'+380501234567')
   assert.equal(result.recipient.bankAccount,complete.bankAccount)
-  assert.equal(call('recipients:save',{...complete,phone:'+380'},result.recipient.id).recipient.phone,null)
+  assert.equal(call('recipients:save',{...complete,phone:'+380'},result.recipient.id, false, result.recipient.updatedAt).recipient.phone,null)
 })
 
 test('IPC temporarily accepts a correctly shaped IBAN irrespective of MOD 97 on create and edit', t => {
@@ -89,7 +89,7 @@ test('IPC temporarily accepts a correctly shaped IBAN irrespective of MOD 97 on 
   const created=call('recipients:save',{...complete,bankAccount:account})
   assert.equal(created.ok,true)
   assert.equal(created.recipient.bankAccount,account)
-  const updated=call('recipients:save',{...complete,bankAccount:'UA000000000000000000000000002'},created.recipient.id)
+  const updated=call('recipients:save',{...complete,bankAccount:'UA000000000000000000000000002'},created.recipient.id, false, created.recipient.updatedAt)
   assert.equal(updated.ok,true)
   assert.equal(call('recipients:get',created.recipient.id).bankAccount,'UA000000000000000000000000002')
 })
@@ -102,7 +102,7 @@ test('Every required field rejects blank, whitespace and missing values for crea
       const input = { ...complete, [key]: value }
       assert.equal(validateRecipientInput(input).ok, false, key)
       for (const id of [undefined, saved.id]) {
-        const result = call('recipients:save', input, id, true)
+        const result = call('recipients:save', input, id, true, saved.updatedAt)
         assert.equal(result.reason, 'validation', `${key}: ${String(value)}`)
       }
     }
@@ -141,7 +141,7 @@ test('Legacy incomplete card opens unchanged; next save requires completion and 
   const aid = db.prepare('SELECT id FROM aid_types LIMIT 1').get()
   db.prepare('INSERT INTO assignments(id,recipient_id,decision_id,aid_type_id,amount_minor,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run('assignment', old.id, 'decision', aid.id, 100, 'Призначено', stamp, stamp)
   const assignmentBefore = db.prepare('SELECT * FROM assignments WHERE id=?').get('assignment')
-  assert.equal(call('recipients:save', complete, old.id).ok, true)
+  assert.equal(call('recipients:save', complete, old.id, false, old.updatedAt).ok, true)
   assert.deepEqual(db.prepare('SELECT * FROM assignments WHERE id=?').get('assignment'), assignmentBefore)
   assert.equal(call('recipients:get', old.id).createdAt, stamp)
 })
@@ -155,11 +155,12 @@ test('Shared form layout and data bindings match both registry and nested creati
     ts.forEachChild(node, visit)
   }
   visit(ast)
-  assert.deepEqual(fields, ['lastName', 'firstName', 'patronymic', 'passport', 'rnokpp', 'phone', 'email', 'bankAccount'])
+  assert.deepEqual(fields, ['lastName', 'firstName', 'patronymic', 'passport', 'rnokpp', 'phone', 'email'])
+  assert.match(source, /field="bankAccount"/)
   assert.match(source, /value=\{form\[key\]\}/)
   assert.match(source, /updateField\(key, value\)/)
   assert.match(source, /validateRecipientInput\(form\)/)
-  assert.match(source, /recipientRepository\.save\(validation\.input, editingId, confirmSameName\)/)
+  assert.match(source, /recipientRepository\.save\(validation\.input, editingId, confirmSameName, expectedUpdatedAt\)/)
   assert.match(source, /initial\)\)/)
   assert.match(source, /sex: recipient\.sex \?\? ''/)
   assert.match(source, /isVpo: recipient\.isVpo/)
