@@ -380,7 +380,7 @@ test('server production dependencies deploy only in a disposable isolated worksp
 
 test('database status preserves child stderr in safe installer diagnostics', async () => {
   const serviceInstaller = await readFile(new URL('../packaging/install-server-service.ps1', import.meta.url), 'utf8')
-  const match = serviceInstaller.match(/function Get-DatabaseStatus\([\s\S]*?\n}\n/)
+  const match = serviceInstaller.match(/function Get-DatabaseStatus\([\s\S]*?\r?\n}\r?\n/)
   assert.ok(match, 'Get-DatabaseStatus should exist')
   assert.match(match[0], /--status 2>&1/)
   assert.match(match[0], /\$LASTEXITCODE/)
