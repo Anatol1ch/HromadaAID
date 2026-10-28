@@ -62,11 +62,15 @@ Git-історії, але не входять до пакетів чи release 
 Перед підготовкою релізу перевірити, що artifacts зібрано з commit, який містить
 Stage 9.3. Для наступного релізу обрано 0.2.2; він ще не опублікований.
 
-CL-05–08 — фіксація CI toolchain, NSIS compiler, підготовка окремих regression
-checks і release artifact orchestration — залишаються завданнями Stage 9.4.
+| Cleanup audit item | Результат Stage 9.4 |
+| --- | --- |
+| CL-05 — зафіксувати CI toolchain | **COMPLETED** — Node.js 24.22.1, pnpm 11.25.0 |
+| CL-06 — стабілізувати NSIS packaging у CI | **COMPLETED** — Windows x64 packaging через GitHub Actions, Stable build успішний |
+| CL-07 — цільові regression checks | **COMPLETED** — 12 цільових перевірок пройшли |
+| CL-08 — release artifact orchestration | **COMPLETED** — Setup, Server ZIP, manifest і автоматична Stable publication |
 SQL/domain modules у `electron/`, які використовує Server, збережено.
 
-## Stage 9.4 — CI/CD Automation — PLANNED
+## Stage 9.4 — CI/CD Automation — COMPLETED / ACCEPTED
 
 Автоматизувати цільові перевірки, Windows x64 build та підготовку релізу через
 GitHub Actions, не змінюючи архітектуру оновлень, release provider чи SemVer policy.
@@ -82,36 +86,21 @@ Code signing не є обов’язковою умовою цього етап�
   виконуються до merge, поза release workflow.
 - Пріоритет тестів: authentication/RBAC, database integrity, migrations, financial
   calculations, update/recovery, release integrity та packaging correctness.
-- Не створювати надмірний GUI automation suite для сценаріїв, які надійно
-  перевіряються вручну.
+- GitHub Actions виконує Windows x64 packaging і публікацію Stable Releases.
 
-Step 1 реалізовано: `pnpm release:package`, toolchain pinning, Server ZIP із
-installer payload і перевірка чинними integrity/updater mechanisms. Цільові
-автоматичні перевірки пройшли; повний Windows release build ще не перевірено.
-Step 2 реалізовано локально: один build workflow на windows-2025, push у main /
-workflow_dispatch, frozen install, release packaging, manifest verification та
-один Actions artifact із retention 30 днів. Статичні перевірки пройшли;
-реальний hosted build ще не виконувався.
+Реалізовано один workflow `.github/workflows/release.yml`: push у `main` запускає
+Windows x64 build, `pnpm release:package`, integrity/manifest verification,
+artifact upload і Stable publication. `workflow_dispatch` виконує build без
+публікації. Наявна Stable SemVer не перебудовується й не публікується повторно.
+Build job має `contents: read`, окремий publication job — `contents: write`.
 
-Step 3 реалізовано локально: той самий workflow автоматично публікує Stable після
-push у main лише для новішої SemVer без наявного tag/Release. Повторна версія
-пропускається до build; workflow_dispatch — лише build. Окремий publication job
-із contents: write отримує готовий artifact, створює vX.Y.Z на triggering SHA,
-Draft із GitHub notes та публікує лише після перевірки всіх трьох assets.
-Upload/verification failure залишає Draft; повторний запуск не перезаписує tag
-чи Release. Цільові тести із підставним API пройшли. Перший реальний запуск на
-Windows runner і перевірка фактичної публікації залишаються необхідними.
+Успішний реліз **v0.2.2** зібрано та опубліковано через Actions. Власник підтвердив
+Windows VM acceptance за всіма п’ятьма пунктами. Усі 12 цільових перевірок пройшли.
+Stable Release і assets: [v0.2.2](https://github.com/Anatol1ch/HromadaAID/releases/tag/v0.2.2);
+Actions run: [40688787157](https://github.com/Anatol1ch/HromadaAID/actions/runs/40688787157);
+release commit: `62fff52d2ff0929adc502b77a490bfbd229057c2`.
 
-До першого автоматичного релізу v0.2.2 підготовлено версії Client/Server/Manager
-та українські release notes. Він включає Stage 9.3 і всю локальну реалізацію
-Stage 9.4. Commit/push, hosted build/publication та Windows VM acceptance ще
-не виконані; Stage 9.4 не позначено COMPLETED.
-
-Для запуску v0.2.2 власник дозволив commit і push у main. Publication використовує
-версійні українські notes, з автоматичною генерацією лише за відсутності файла.
-Фактичний результат першого hosted run та VM acceptance ще потрібно підтвердити.
-
-## Stage 9.5 — Production Release 1.0.0 — PLANNED
+## Stage 9.5 — Production Release 1.0.0 — NEXT / PLANNED
 
 Підготувати та опублікувати перший production-ready Stable Release **1.0.0** після:
 

@@ -125,7 +125,16 @@ metadata, GitHub Releases API, HTTPS-перевірку redirect host, manifest 
 `package-integrity.json`; зовнішній release manifest не дублює його. Команда
 `node packaging/release-manifest.mjs --create <directory> <version>` створює й
 локально перевіряє metadata за фактичними файлами, `--verify <directory>` звіряє
-наявний manifest. Скрипт не публікує GitHub Release.
+наявний manifest. Stable packaging/publication виконує стандартний GitHub Actions
+workflow `.github/workflows/release.yml` за схемою:
+
+`Push у main → Windows build → Release packaging → Integrity verification → Draft Release → Stable publication`
+
+Єдиний workflow публікує лише нову Stable SemVer; перевірка наявних Releases і
+тегів не допускає повторної публікації. Build job має `contents: read`, окремий
+publication job — `contents: write`. Збережено чинні Universal Setup, Server ZIP і
+release manifest contracts; локальні packaging scripts лишаються для розробки й
+діагностики. Ручна Windows release build через Codex не потрібна.
 
 `pnpm release:package` викликає чинний `windows:installer`, потім
 `scripts/package-release.mjs`. Toolchain: Node.js 24.22.1 (`.node-version`,

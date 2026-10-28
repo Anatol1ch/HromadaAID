@@ -2,7 +2,7 @@
 
 ## Стан проєкту
 
-- Поточний Stable: **0.2.1**, опублікований у GitHub.
+- Останній Stable: **v0.2.2**, опублікований через GitHub Actions.
 - Зміни Stage 9.3 є у вихідному коді та Git-історії, але не входять до вже
   опублікованих інсталяційних пакетів і release artifacts Stable 0.2.1. Окрему
   збірку чи реліз для Stage 9.3 не створювали. Їх потрібно включити до наступного
@@ -74,10 +74,9 @@ Universal Setup зібрано, NSIS archive integrity та вміст пере�
 розпакування пройшов package integrity/runtime. Пакетні тести — 50/50 PASS.
 Локальні артефакти лежать у `release/0.2.1`.
 
-### Наступний крок
+### Stage 9.3 — COMPLETED / ACCEPTED
 
-За [ROADMAP.md](ROADMAP.md) **Stage 9.3: Project Cleanup завершено**; наступний
-етап — **Stage 9.4: CI/CD Automation**. Змінено шлях тесту `windows:test-installer`,
+За [ROADMAP.md](ROADMAP.md) Stage 9.3 включено до release v0.2.2. Змінено шлях тесту `windows:test-installer`,
 видалено підтверджено невикористаний Client helper, точково актуалізовано чинні
 документи та додано перевірене очищення generated `dist-server` перед Server build.
 Stage 9.3 прийнято як **COMPLETED / ACCEPTED**. `pnpm windows:test-installer`
@@ -86,12 +85,7 @@ payload preparation/deployment, повторний build із перевірко
 module, перевірка script paths і `git diff --check`. GUI/VM-тести та повний
 Windows installer packaging не проводилися.
 
-Stable залишається **0.2.1**: зміни Stage 9.3 існують у вихідному коді та
-Git-історії, але не входять до вже опублікованих інсталяційних пакетів чи release
-artifacts. Окремої збірки або релізу Stage 9.3 не створювали. Зміни слід включити
-до наступного релізу після Stage 9.4; перед його підготовкою перевірити, що release
-artifacts зібрано з commit, який містить Stage 9.3. Наступна версія — 0.2.2;
-локальну реалізацію Stage 9.4 описано нижче.
+Stable 0.2.1 не включав Stage 9.3; її зміни увійшли до v0.2.2.
 Протокол приймання Stage 9.2: [stage-9.2-manual-testing.md](stage-9.2-manual-testing.md).
 
 ## Stage 9.4 — Step 1: Release Packaging Preparation
@@ -153,7 +147,7 @@ assets, перевіряє назви/розміри/state (і SHA-256 digest, �
 синтаксичні перевірки workflow. Реальних GitHub API mutations, hosted run,
 commit/push/tag/Release у цьому завданні не було. Перший реальний Windows runner
 ще має підтвердити build, NSIS, artifact transfer та GITHUB_TOKEN publication.
-Stage 9.4 не вважати прийнятим до реального виконання й перевірки результатів.
+Stage 9.4 прийнято після реального виконання й перевірки результатів.
 
 ## Підготовка v0.2.2
 
@@ -166,25 +160,30 @@ b286a30, 739e80d та 7b7311d. Зміни Stage 9.4 і preparation ще неза
 Universal Setup і release manifest отримують цю версію з наявних build scripts;
 сторонні залежності й lockfile не змінено. Українські notes підготовлено в
 `docs/release-notes/0.2.2.md`; publication використовує цей файл як body.
-Під час read-only перевірки GitHub Release/tag для 0.2.2 і v0.2.2 відсутні.
-Повний Windows packaging локально не запускається; першу збірку й публікацію
-має виконати Actions після окремо погоджених commit/push. Потрібне подальше VM
-приймання оновлення 0.2.1 → 0.2.2. Жоден реліз preparation не публікує.
+Stable Release v0.2.2 опублікований. Actions run 40688787157 успішно виконав
+Windows build і publication. Власник підтвердив усі п’ять пунктів VM acceptance
+оновлення 0.2.1 → 0.2.2. Stage 9.4 — COMPLETE / ACCEPTED.
 
 Перевірки preparation: Manager build (включно з TypeScript) — PASS;
 windows:test-installer — 56/56; release/ZIP/publication tests — 13/13.
 Окремо пройшли assertions узгодженості 0.2.2, незмінності dependencies/lockfile,
 workflow permissions/pins, eligibility проти підтвердженого remote snapshot та
 назв/manifest 0.2.2 на синтетичних файлах. `git diff --check` — PASS.
-Workflow не змінювався; hosted run та фактичні release artifacts не перевірені.
+Workflow `.github/workflows/release.yml`: push у `main` із новою Stable SemVer
+запускає build і publication; `workflow_dispatch` виконує лише build. Toolchain:
+Node.js 24.22.1, pnpm 11.25.0, Windows x64. Комплект формує
+`pnpm release:package`; Actions перевіряє та публікує артефакти.
 
-## Запуск першого автоматичного релізу v0.2.2
+## Реліз v0.2.2
 
-Власник дозволив один commit із Stage 9.4 та preparation 0.2.2 і push у main.
+Release commit Stage 9.4 та v0.2.2: `62fff52d2ff0929adc502b77a490bfbd229057c2`.
 Stage 9.3 вже інтегрований в історію. Перед push remote main збігався з локальним
 HEAD; tags/Releases 0.2.2 і v0.2.2 були відсутні. Publication бере body із
 `docs/release-notes/<version>.md`; лише відсутній файл вмикає автоматичні GitHub
 notes. Порожній/нечитабельний файл зупиняє publication до створення tag.
 Цільові перевірки publication виконуються локально, без Windows packaging.
-Результат реального Actions run потрібно перевірити після push; Stage 9.4
-залишається неприйнятим до реального build/publication і VM acceptance.
+Реальний Actions build/publication та Windows VM acceptance успішні; Stage 9.4 завершено.
+
+## Наступний етап
+
+Stage 9.5 — Production Release 1.0.0 — запланований і ще не розпочатий.
