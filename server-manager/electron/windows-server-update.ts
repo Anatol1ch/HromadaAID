@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { cp, lstat, mkdir, readFile, rm, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { inspectEnvironment } from './inspection-engine.js'
+import { inspectEnvironment, parseServerConfiguration } from './inspection-engine.js'
 import { createWindowsInspectionAdapters } from './windows-inspection.js'
 import type { ServerUpdateAdapters, ServerUpdateEnvironment } from './server-update.js'
 import type { ServerUpdateStage } from './server-update-contract.js'
@@ -189,11 +189,9 @@ export function createWindowsServerUpdateAdapters(options: { installerScriptPath
       try {
         const copied = await verifyUpdatePackage(activeStage)
         if (copied.version !== verified.version) throw new Error('Версія після копіювання не збігається.')
-        const config = JSON.parse(await readFile(join(environment.dataDirectory, 'server.json'), 'utf8')) as { programDirectory?: unknown }
+        const config = parseServerConfiguration(await readFile(join(environment.dataDirectory, 'server.json'), 'utf8'))
         if (typeof config.programDirectory !== 'string' || resolve(config.programDirectory).toLocaleLowerCase('en-US') !== resolve(environment.programDirectory).toLocaleLowerCase('en-US')) throw new Error('Наявна конфігурація сервера несумісна; конфігурацію не змінено.')
-        // Existing server.json is authoritative. Do not pass its host or port
-        // through first-install loopback validation; prepare-server-install
-        // preserves the existing config and uses these options only for a new one.
+        // Preserve server.json; the packaged helper validates the current schema before changes.
         const script = `import {createHash} from 'node:crypto';import {readFile} from 'node:fs/promises';import {join} from 'node:path';import {pathToFileURL} from 'node:url';const [root,programDirectory,dataDirectory,backupDirectory]=process.argv.slice(1);const options={mode:'server',programDirectory,dataDirectory,backupDirectory,packageRoot:root};const {prepareServerInstall}=await import(pathToFileURL(join(root,'installer/prepare-server-install.mjs')).href);const {renderWinSWConfig}=await import(pathToFileURL(join(root,'installer/windows-installer-config.mjs')).href);prepareServerInstall(options,root);const xml=renderWinSWConfig(await readFile(join(root,'service/HromadaAIDService.xml.template'),'utf8'),options);console.log(createHash('sha256').update(xml,'utf8').digest('hex'));`
         const result = await run(join(activeStage, 'runtime', 'node.exe'), ['--input-type=module', '--eval', script, activeStage, environment.programDirectory, environment.dataDirectory, environment.backupDirectory], join(activeStage, 'app'))
         await verifyUpdatePackage(activeStage, { serviceXmlSha256: result.stdout.trim() })

@@ -133,7 +133,7 @@ async function stagedFixture(t, source = 'standard_locations') {
     },
   })
   const ready = async () => { const result = await inspect(); await markInitialSetupReadiness(result, verify); return result }
-  const request = { programDirectory, dataDirectory, backupDirectory, host: '127.0.0.1', port: 4310, administrator: { displayName: 'Synthetic', username: 'synthetic', password: 'synthetic', confirmation: 'synthetic' } }
+  const request = { programDirectory, dataDirectory, backupDirectory, administrator: { displayName: 'Synthetic', username: 'synthetic', password: 'synthetic', confirmation: 'synthetic' } }
   return { stage, programDirectory, dataDirectory, backupDirectory, adapter, inspect, ready, verify, request, verifications: () => verifications }
 }
 

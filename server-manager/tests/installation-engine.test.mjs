@@ -9,7 +9,6 @@ function fixture({ installation = 'not_installed', users = 0, marker = true, fai
   let serviceInstalled = false
   const request = {
     programDirectory: 'D:\\HromadaAID', dataDirectory: 'D:\\HromadaAID-Data', backupDirectory: 'E:\\HromadaAID-Backups',
-    host: '127.0.0.1', port: 4310,
     administrator: { displayName: 'Синтетична адміністраторка', username: 'synthetic-admin', password: 'Synthetic passphrase', confirmation: 'Synthetic passphrase' },
   }
   const step = name => async (...values) => {

@@ -4,6 +4,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { InspectionAdapters, InstallationLocator, ServiceMetadata } from './inspection-engine.js'
 import { inspectionDiagnostic } from './inspection-engine.js'
+import { readNetworkAddresses } from './network-addresses.js'
 
 const execFileAsync = promisify(execFile)
 export const serviceMetadataScript = String.raw`
@@ -203,6 +204,7 @@ export function createWindowsInspectionAdapters(): InspectionAdapters {
       return readFile(path, 'utf8')
     },
     probeApi,
+    networkAddresses: readNetworkAddresses,
     now: () => new Date(),
   }
 }

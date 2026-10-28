@@ -130,7 +130,7 @@ export function createWindowsInstallationAdapters(): ServerInstallAdapters {
     },
     prepareConfiguration: async request => {
       const root = join(request.programDirectory, 'Server.next')
-      await callNode(root, [join(root, 'installer', 'prepare-server-install.mjs'), '--program-dir', request.programDirectory, '--data-dir', request.dataDirectory, '--backup-dir', request.backupDirectory, '--package-root', root, '--host', request.host, '--port', String(request.port)], join(root, 'app'))
+      await callNode(root, [join(root, 'installer', 'prepare-server-install.mjs'), '--program-dir', request.programDirectory, '--data-dir', request.dataDirectory, '--backup-dir', request.backupDirectory, '--package-root', root], join(root, 'app'))
     },
     recordLocator: async request => {
       const script = join(payloadRoot(), 'installer', 'write-installation-locator.ps1')

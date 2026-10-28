@@ -25,12 +25,12 @@ const pass = 'synthetic pass 😀'
 try {
   await mkdir(userData, { recursive: true })
   assert.throws(() => validateServerBaseUrl(''), /адресу/i)
-  assert.throws(() => validateServerBaseUrl('http://server.example'), /HTTPS/i)
+  assert.throws(() => validateServerBaseUrl('http://server.example'), /4310/i)
   assert.throws(() => validateServerBaseUrl('https://user:pass@example.org'), /базову адресу/i)
   assert.throws(() => validateServerBaseUrl('https://example.org/api'), /базову адресу/i)
   assert.throws(() => validateServerBaseUrl('https://example.org/?secret=x'), /базову адресу/i)
   assert.equal(validateServerBaseUrl('http://127.0.0.1:4310/').origin, 'http://127.0.0.1:4310')
-  assert.equal(validateServerBaseUrl('http://[::1]:4310').origin, 'http://[::1]:4310')
+  assert.equal(validateServerBaseUrl('http://server.tailnet.ts.net:4310').hostname, 'server.tailnet.ts.net')
   assert.match(readElectronRuntimeConfig({}).configurationError, /адресу сервера/)
   assert.equal(readElectronRuntimeConfig({}).apiUrl, undefined)
   const environmentConfig = readElectronRuntimeConfig({ HROMADAAID_API_URL: 'http://127.0.0.1:4310' }, { config: { apiUrl: 'https://saved.example' } })
@@ -52,9 +52,9 @@ try {
   const secondServerAuthHeaders = []
   app2.addHook('onRequest', async request => { secondServerAuthHeaders.push(request.headers.authorization) })
   app1.get('/connection/delayed-401', async (_request, reply) => { signalDelayed(); await delayedGate; return reply.status(401).send({ message: 'synthetic' }) })
-  await Promise.all([app1.listen({ host: '127.0.0.1', port: 0 }), app2.listen({ host: '127.0.0.1', port: 0 })])
+  await Promise.all([app1.listen({ host: '127.0.0.1', port: 4310 }), app2.listen({ host: '127.0.0.2', port: 4310 })])
   const base1 = new URL(`http://127.0.0.1:${app1.server.address().port}`)
-  const base2 = new URL(`http://127.0.0.1:${app2.server.address().port}`)
+  const base2 = new URL(`http://127.0.0.2:${app2.server.address().port}`)
   const checked = await checkServerAddress(base1.origin)
   assert.deepEqual(checked, { ok: true, apiUrl: base1.origin, status: 'available', message: 'Сервер доступний.' })
   await saveServerAddress(userData, base1.origin)
@@ -67,14 +67,14 @@ try {
     response.writeHead(200, { 'content-type': 'application/json' })
     response.end(JSON.stringify({ status: 'ok', service: 'hromada-aid-api' }))
   })
-  await new Promise(resolve => healthProbe.listen(0, '127.0.0.1', resolve))
-  const probeAddress = new URL(`http://127.0.0.1:${healthProbe.address().port}`)
+  await new Promise(resolve => healthProbe.listen(4310, '127.0.0.3', resolve))
+  const probeAddress = new URL(`http://127.0.0.3:${healthProbe.address().port}`)
   assert.equal((await checkServerAddress(probeAddress.origin)).ok, true)
   assert.equal(healthAuthorization, undefined)
   await new Promise(resolve => healthProbe.close(resolve))
   wrongProtocol = createServer((_request, response) => { response.writeHead(200, { 'content-type': 'application/json' }); response.end('{"status":"ok","service":"other"}') })
-  await new Promise(resolve => wrongProtocol.listen(0, '127.0.0.1', resolve))
-  const wrongAddress = new URL(`http://127.0.0.1:${wrongProtocol.address().port}`)
+  await new Promise(resolve => wrongProtocol.listen(4310, '127.0.0.3', resolve))
+  const wrongAddress = new URL(`http://127.0.0.3:${wrongProtocol.address().port}`)
   assert.equal((await checkServerAddress(wrongAddress.origin)).ok, false)
   await new Promise(resolve => wrongProtocol.close(resolve))
 
@@ -86,7 +86,7 @@ try {
   const staleRequest = http.getJson('/connection/delayed-401')
   await entered
 
-  const unavailable = await switchRemoteServer(userData, 'http://127.0.0.1:1', http, session, () => { throw new Error('unavailable target cannot activate') })
+  const unavailable = await switchRemoteServer(userData, 'http://127.0.0.4:4310', http, session, () => { throw new Error('unavailable target cannot activate') })
   assert.equal(unavailable.ok, false)
   assert.equal(session.currentState.status, 'authenticated')
   assert.equal(readSavedConnectionConfig(userData).config.apiUrl, base1.origin)
@@ -110,13 +110,13 @@ try {
   console.log('PASS server switch revokes old session, persists across restart, does not send old token to new origin, and ignores stale 401')
 
   closedPort = createServer()
-  await new Promise(resolve => closedPort.listen(0, '127.0.0.1', resolve))
-  const unavailableAddress = `http://127.0.0.1:${closedPort.address().port}`
+  await new Promise(resolve => closedPort.listen(4310, '127.0.0.3', resolve))
+  const unavailableAddress = `http://127.0.0.3:${closedPort.address().port}`
   await new Promise(resolve => closedPort.close(resolve))
   assert.equal((await checkServerAddress(unavailableAddress, 100)).ok, false)
   timeoutServer = createServer(() => {})
-  await new Promise(resolve => timeoutServer.listen(0, '127.0.0.1', resolve))
-  const timeoutAddress = `http://127.0.0.1:${timeoutServer.address().port}`
+  await new Promise(resolve => timeoutServer.listen(4310, '127.0.0.3', resolve))
+  const timeoutAddress = `http://127.0.0.3:${timeoutServer.address().port}`
   const timeout = await checkServerAddress(timeoutAddress, 50)
   assert.equal(timeout.ok, false)
   assert.match(timeout.message, /встановлений час/i)

@@ -36,8 +36,8 @@ export async function runServerInstallation(
     if (current.installation.status !== 'not_installed' && !resuming) {
       throw Object.assign(new Error('Знайдено наявну або неповну інсталяцію. Перевірте її стан у розділі «Огляд»; чисте встановлення не розпочато.'), { code: 'INSTALLATION_ALREADY_PRESENT' })
     }
-    if (!request || !request.programDirectory || !request.dataDirectory || !request.backupDirectory || !['127.0.0.1', '::1'].includes(request.host) || !Number.isInteger(request.port) || request.port < 1024 || request.port > 65535) {
-      throw Object.assign(new Error('Перевірте каталоги та локальну адресу сервера.'), { code: 'INSTALL_OPTIONS_INVALID' })
+    if (!request || !request.programDirectory || !request.dataDirectory || !request.backupDirectory) {
+      throw Object.assign(new Error('Перевірте каталоги сервера.'), { code: 'INSTALL_OPTIONS_INVALID' })
     }
 
     stage = 'preflight'

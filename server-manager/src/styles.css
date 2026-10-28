@@ -140,6 +140,8 @@
 .sm-setting-rows dt { display: flex; gap: 10px; align-items: center; }
 .sm-setting-rows dt svg { flex: none; color: var(--color-text-secondary); }
 .sm-setting-rows dd { margin: 0; }
+.sm-connection-address { display: flex; align-items: center; gap: 8px; }
+.sm-connection-address code { min-width: 0; overflow-wrap: anywhere; user-select: text; }
 .sm-operation-message { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 18px; padding: 12px; color: var(--color-text-control); background: var(--surface-panel); border-radius: var(--radius-control); font-size: 13px; }
 .sm-operation-message svg { flex: none; margin-top: 1px; color: var(--accent-green); }
 .sm-operation-message.is-error { background: var(--feedback-error-bg); color: var(--feedback-error-text); }

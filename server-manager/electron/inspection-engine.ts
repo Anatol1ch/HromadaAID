@@ -1,8 +1,10 @@
 import { win32 } from 'node:path'
-import { isIP } from 'node:net'
+import type { NetworkAddresses } from './inspection-types.js'
 import type { CheckStatus, InspectionDiagnostic, InspectionCheck, InspectionSnapshot, InstallationStatus, InspectedConfiguration, ServiceStatus } from './inspection-types.js'
 
 export const HROMADAAID_SERVICE_NAME = 'HromadaAIDApi'
+export const LOCAL_API_ORIGIN = 'http://127.0.0.1:4310'
+export const LOCAL_HEALTH_URL = `${LOCAL_API_ORIGIN}/health`
 export const INSPECTION_TIMEOUT_MS = 4_000
 export type ServiceMetadata = { installed: boolean; state?: string; startMode?: string; startName?: string; binaryPath?: string; metadataUnavailable?: boolean; error?: 'access_denied' | 'query_failed'; diagnostics?: InspectionDiagnostic[] }
 export type InstallationLocator =
@@ -17,37 +19,24 @@ export type InspectionAdapters = {
   exists(path: string): Promise<boolean>
   readText(path: string): Promise<string>
   probeApi(url: string, timeoutMs: number): Promise<{ kind: 'response'; status: number; redirected: boolean; body: unknown } | { kind: 'timeout' } | { kind: 'network_error' } | { kind: 'invalid_response' }>
+  networkAddresses?(): Promise<NetworkAddresses>
   now(): Date
 }
 
-type SafeConfig = { configVersion: 1 | 2; mode: 'local' | 'network'; programDirectory: string; host: string; port: number; databasePath: string; backupDirectory: string; tls?: { certificatePath: string; privateKeyPath: string; certificateChainPath?: string } }
+type SafeConfig = { configVersion: 3; programDirectory: string; databasePath: string; backupDirectory: string }
 
 function absoluteWindowsPath(value: unknown): value is string {
   return typeof value === 'string' && value.trim() === value && !/[\u0000-\u001f\u007f]/.test(value) && /^[A-Za-z]:[\\/]/.test(value) && win32.isAbsolute(value)
 }
-function parseConfig(text: string): SafeConfig {
+export function parseServerConfiguration(text: string): SafeConfig {
   let value: unknown
   try { value = JSON.parse(text) } catch { throw new Error('config_invalid_json') }
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('config_invalid_shape')
   const record = value as Record<string, unknown>
-  const allowed = record.configVersion === 1
-    ? ['configVersion', 'programDirectory', 'host', 'port', 'databasePath', 'backupDirectory']
-    : record.configVersion === 2
-      ? ['configVersion', 'programDirectory', 'mode', 'host', 'port', 'databasePath', 'backupDirectory', 'tls']
-      : null
-  if (!allowed || Object.keys(record).some(key => !allowed.includes(key))) throw new Error('config_unsupported')
-  const mode = record.configVersion === 1 ? 'local' : record.mode
-  if ((mode !== 'local' && mode !== 'network') || !absoluteWindowsPath(record.programDirectory) || !absoluteWindowsPath(record.databasePath) || !absoluteWindowsPath(record.backupDirectory) || typeof record.host !== 'string' || !record.host || /[\s\u0000-\u001f]/.test(record.host) || !Number.isInteger(record.port) || (record.port as number) < 1024 || (record.port as number) > 65535) throw new Error('config_invalid_fields')
-  if (record.configVersion === 2 && record.tls !== undefined && (!record.tls || typeof record.tls !== 'object' || Array.isArray(record.tls) || Object.keys(record.tls as object).some(key => !['certificatePath', 'privateKeyPath', 'certificateChainPath'].includes(key)))) throw new Error('config_unsupported')
-  let tls: SafeConfig['tls']
-  if (mode === 'local' && record.tls !== undefined) throw new Error('config_invalid_fields')
-  if (mode === 'network') {
-    if (record.configVersion !== 2 || !record.tls || typeof record.tls !== 'object' || Array.isArray(record.tls)) throw new Error('config_invalid_tls')
-    const tlsRecord = record.tls as Record<string, unknown>
-    if (!absoluteWindowsPath(tlsRecord.certificatePath) || !absoluteWindowsPath(tlsRecord.privateKeyPath) || (tlsRecord.certificateChainPath !== undefined && !absoluteWindowsPath(tlsRecord.certificateChainPath))) throw new Error('config_invalid_tls')
-    tls = { certificatePath: tlsRecord.certificatePath, privateKeyPath: tlsRecord.privateKeyPath, ...(typeof tlsRecord.certificateChainPath === 'string' ? { certificateChainPath: tlsRecord.certificateChainPath } : {}) }
-  }
-  return { configVersion: record.configVersion as 1 | 2, mode, programDirectory: record.programDirectory, host: record.host, port: record.port as number, databasePath: record.databasePath, backupDirectory: record.backupDirectory, ...(tls ? { tls } : {}) }
+  const allowed = ['configVersion', 'programDirectory', 'databasePath', 'backupDirectory']
+  if (record.configVersion !== 3 || Object.keys(record).some(key => !allowed.includes(key))) throw new Error('config_unsupported')
+  if (!absoluteWindowsPath(record.programDirectory) || !absoluteWindowsPath(record.databasePath) || !absoluteWindowsPath(record.backupDirectory)) throw new Error('config_invalid_fields')
+  return { configVersion: record.configVersion, programDirectory: record.programDirectory, databasePath: record.databasePath, backupDirectory: record.backupDirectory }
 }
 function decodeXml(value: string): string { return value.replaceAll('&quot;', '"').replaceAll('&apos;', "'").replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&').trim() }
 function xmlValue(xml: string, tag: string): string | null {
@@ -71,21 +60,6 @@ function normalize(value: string): string { return win32.resolve(value).replace(
 function pathsOverlap(left: string, right: string): boolean {
   const a = normalize(left), b = normalize(right)
   return a === b || a.startsWith(`${b}\\`) || b.startsWith(`${a}\\`)
-}
-function isLoopback(host: string): boolean {
-  const value = host.toLowerCase()
-  return value === '::1' || value === '::ffff:127.0.0.1' || (isIP(value) === 4 && value.startsWith('127.'))
-}
-function isNetworkIp(host: string): boolean {
-  return isIP(host) !== 0
-}
-function validApiHost(config: SafeConfig): boolean {
-  if (config.mode === 'local') return isLoopback(config.host)
-  return !isLoopback(config.host) && !config.host.toLowerCase().startsWith('::ffff:') && config.host !== '0.0.0.0' && config.host !== '::' && isNetworkIp(config.host)
-}
-function healthUrl(config: SafeConfig): string {
-  const host = config.host.includes(':') && !config.host.startsWith('[') ? `[${config.host}]` : config.host
-  return `${config.mode === 'network' ? 'https' : 'http'}://${host}:${config.port}/health`
 }
 function componentError(error: unknown): 'missing' | 'access' | 'invalid' | 'unknown' {
   const code = (error as NodeJS.ErrnoException)?.code
@@ -112,6 +86,7 @@ function check(id: InspectionCheck['id'], title: string, status: CheckStatus, ti
 
 /** Read-only inspection. All operating-system and file access is supplied by narrow adapters. */
 export async function inspectEnvironment(adapters: InspectionAdapters): Promise<InspectionSnapshot> {
+  const addresses = adapters.networkAddresses?.().catch(() => ({ lan: [], tailscale: [], unavailable: true }))
   const time = adapters.now().toISOString()
   const configuration: InspectedConfiguration = { programDirectory: null, dataDirectory: null, backupDirectory: null, databasePath: null, apiAddress: null, host: null, port: null, transport: null, serverVersion: null, serviceName: HROMADAAID_SERVICE_NAME, serviceAccount: null, startMode: null, logDirectory: null }
   const checks: InspectionCheck[] = []
@@ -314,24 +289,17 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
 
   if (configPath) {
     try {
-      const candidate = parseConfig(await adapters.readText(configPath))
+      const candidate = parseServerConfiguration(await adapters.readText(configPath))
       configState = 'ok'
       configuration.dataDirectory = win32.dirname(configPath)
       configuration.backupDirectory = candidate.backupDirectory
       configuration.databasePath = candidate.databasePath
-      configuration.host = candidate.host
-      configuration.port = candidate.port
-      configuration.transport = candidate.mode === 'network' ? 'HTTPS' : 'HTTP'
+      configuration.host = '0.0.0.0'
+      configuration.port = 4310
+      configuration.transport = 'HTTP'
       if (configuration.programDirectory && normalize(candidate.programDirectory) !== normalize(configuration.programDirectory)) throw new Error('config_program_path_mismatch')
-      const hostOkay = validApiHost(candidate)
-      if (!hostOkay) throw new Error('config_invalid_network_host')
-      if (candidate.tls) {
-        const tlsFiles = [candidate.tls.certificatePath, candidate.tls.privateKeyPath, ...(candidate.tls.certificateChainPath ? [candidate.tls.certificateChainPath] : [])]
-        const tlsPresent = await Promise.all(tlsFiles.map(path => adapters.exists(path)))
-        if (tlsPresent.some(present => !present)) throw new Error('config_tls_file_missing')
-      }
       configuration.programDirectory ??= candidate.programDirectory
-      configuration.apiAddress = healthUrl(candidate).replace(/\/health$/, '')
+      configuration.apiAddress = LOCAL_API_ORIGIN
       config = candidate
     } catch (error) {
       configState = componentError(error)
@@ -431,7 +399,7 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
   const independentlyLocated = discovery.confidence === 'corroborated' && ['installer_registry', 'standard_locations'].includes(discovery.source) && !locatorError && !locatorUntrusted && !defaultDiscoveryFailed
   if (config && (service.installed || (service.error && independentlyLocated))) {
     try {
-      const response = await adapters.probeApi(healthUrl(config), INSPECTION_TIMEOUT_MS)
+      const response = await adapters.probeApi(LOCAL_HEALTH_URL, INSPECTION_TIMEOUT_MS)
       if (response.kind === 'timeout') api = { status: 'unavailable', message: 'API не відповів у межах тайм-ауту.', contractVersion: null }
       else if (response.kind === 'network_error') api = { status: 'unavailable', message: 'Не вдалося встановити з’єднання з налаштованим API.', contractVersion: null }
       else if (response.kind === 'invalid_response' || response.redirected) api = { status: 'invalid_response', message: 'API повернув перенаправлення або некоректну відповідь health endpoint.', contractVersion: null }
@@ -445,5 +413,5 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
     } catch { api = { status: 'unavailable', message: 'Перевірка API завершилася технічною помилкою.', contractVersion: null } }
   }
   checks.push(check('api', 'Health endpoint API', api.status === 'available' ? 'passed' : api.status === 'not_configured' ? 'not_checked' : api.status === 'unavailable' ? 'warning' : 'failed', time, api.message, api.contractVersion === null ? undefined : `apiContractVersion=${api.contractVersion}`))
-  return { checkedAt: time, installation: { status: installationStatus, message: installationMessage }, service: { status: serviceStatus, message: serviceMessage }, api, configuration, discovery, checks }
+  return { checkedAt: time, installation: { status: installationStatus, message: installationMessage }, service: { status: serviceStatus, message: serviceMessage }, api, configuration, discovery, checks, networkAddresses: await addresses }
 }

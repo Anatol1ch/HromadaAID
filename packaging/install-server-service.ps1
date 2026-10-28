@@ -11,6 +11,7 @@ $ErrorActionPreference = 'Stop'
 $utf8Output = [Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8Output
 $serviceName = 'HromadaAIDApi'
+$apiHealthUrl = 'http://127.0.0.1:4310/health'
 $serviceSid = $null
 $stagedServer = Join-Path $ProgramDirectory 'Server.next'
 $activeServer = Join-Path $ProgramDirectory 'Server'
@@ -25,6 +26,7 @@ $newServiceRegistered = $false
 $hadOldPackage = [IO.Directory]::Exists($activeServer)
 $initialInstallRetry = $false
 $wasServiceRunning = $false
+$configurationValidated = $false
 $oldSchemaMaximum = 0
 $journal = $null
 $script:InstallStage = 'arguments'
@@ -92,6 +94,16 @@ function Test-AbsoluteLocalPath([string]$Path) {
     return $false
   }
 }
+function Assert-ServerConfiguration($Settings) {
+  $allowed = @('configVersion', 'programDirectory', 'databasePath', 'backupDirectory')
+  if ($Settings -isnot [pscustomobject] -or $Settings.configVersion -isnot [int] -or $Settings.configVersion -ne 3 -or @($Settings.PSObject.Properties | Where-Object { $allowed -cnotcontains $_.Name }).Count) {
+    throw 'Несумісна конфігурація server.json: потрібна configVersion: 3 без транспортних параметрів. Файл і дані не змінено.'
+  }
+  foreach ($name in @('programDirectory', 'databasePath', 'backupDirectory')) {
+    $value = $Settings.$name
+    if ($value -isnot [string] -or $value.Trim() -cne $value -or $value -match '[\x00-\x1f\x7f]' -or -not (Test-AbsoluteLocalPath $value)) { throw 'server.json містить некоректні абсолютні шляхи; файл і дані не змінено.' }
+  }
+}
 function Get-ServiceSid([string]$Name) {
   $scPath = Join-Path $env:SystemRoot 'System32\sc.exe'
   $output = & $scPath showsid $Name 2>&1
@@ -155,12 +167,6 @@ function Configure-ServiceAccess {
   Grant-ServiceAccess $activeServer 'RX' $inheritance
   Protect-ServiceFile $config
   Grant-LocalServiceConfigRead
-  if ($settings.tls) {
-    $tlsCertificate = [IO.Path]::GetFullPath([string]$settings.tls.certificatePath)
-    $tlsPrivateKey = [IO.Path]::GetFullPath([string]$settings.tls.privateKeyPath)
-    if ([IO.File]::Exists($tlsCertificate)) { Protect-ServiceFile $tlsCertificate }
-    if ([IO.File]::Exists($tlsPrivateKey)) { Protect-ServiceFile $tlsPrivateKey }
-  }
   if ([IO.File]::Exists($key)) { Protect-ServiceFile $key }
 }
 function Assert-ServiceAcl([string]$Path, [string]$Sid, [Security.AccessControl.FileSystemRights]$Rights) {
@@ -191,9 +197,7 @@ function Assert-ServiceAccess {
   foreach ($path in @($databaseRoot, (Join-Path $DataDirectory 'Logs'), $BackupDirectory)) { Assert-ServiceAcl $path $script:serviceSid $modify }
   Assert-ServiceAcl ([string]$settings.databasePath) $script:serviceSid $modify
   Assert-ServiceAcl $activeServer $script:serviceSid $execute
-  $protectedFiles = @($key)
-  if ($settings.tls) { $protectedFiles += @([string]$settings.tls.certificatePath, [string]$settings.tls.privateKeyPath) }
-  foreach ($path in $protectedFiles) { Assert-ServiceAcl $path $script:serviceSid $read }
+  Assert-ServiceAcl $key $script:serviceSid $read
 }
 function Invoke-PackageTransaction([string]$PackageRoot, [string]$Action, [string[]]$AdditionalArguments = @(), [string]$NodeExecutable = '') {
   $node = if ($NodeExecutable) { $NodeExecutable } else { Join-Path $PackageRoot 'runtime\node.exe' }
@@ -248,15 +252,9 @@ function Register-Service([string]$Wrapper) {
   $script:LastChildExitCode = $null
   $script:serviceSid = Get-ServiceSid $serviceName
 }
-function Get-HealthUrl($Settings) {
-  $hostName = [string]$Settings.host
-  if ($hostName.Contains(':') -and -not $hostName.StartsWith('[')) { $hostName = "[$hostName]" }
-  $scheme = if ($Settings.mode -eq 'network') { 'https' } else { 'http' }
-  return "${scheme}://${hostName}:$([int]$Settings.port)/health"
-}
 function Test-HromadaServiceHealth([string]$Url, [bool]$AllowMaintenance = $true) {
   try {
-    $response = Invoke-WebRequest -Uri $Url -Method Get -TimeoutSec 3 -UseBasicParsing
+    $response = Invoke-WebRequest -Uri $Url -Method Get -TimeoutSec 3 -UseBasicParsing -MaximumRedirection 0
     $body = $response.Content | ConvertFrom-Json
     return ([int]$response.StatusCode -eq 200 -and $body.service -eq 'hromada-aid-api' -and $body.status -eq 'ok')
   } catch {
@@ -276,7 +274,7 @@ function Wait-ServiceHealthy([string]$Url, [int]$TimeoutSeconds = 60, [bool]$All
     $service = Get-Service -Name $serviceName -ErrorAction Stop
     if ($service.Status -eq 'Running' -and (Test-HromadaServiceHealth $Url $AllowMaintenance)) { return }
   } while ([DateTime]::UtcNow -lt $deadline)
-  throw "Служба або Fastify не пройшли перевірку доступності за $TimeoutSeconds секунд. Перевірте порт, TLS, конфігурацію та журнали сервера."
+  throw "Служба або Fastify не пройшли перевірку доступності за $TimeoutSeconds секунд. Перевірте порт 4310, конфігурацію та журнали сервера."
 }
 function Get-StablePackageVersion([string]$PackageRoot) {
   $manifestPath = Join-Path (Join-Path $PackageRoot 'app') 'package.json'
@@ -339,7 +337,7 @@ function Start-RecoveredPackage {
   Assert-ServiceAccess
   $service = Get-Service -Name $serviceName -ErrorAction Stop
   if ($service.Status -ne 'Running') { Invoke-Checked $wrapper @('start') 'Не вдалося запустити відновлений пакет.' }
-  Wait-ServiceHealthy (Get-HealthUrl $settings) 60 $false
+  Wait-ServiceHealthy $apiHealthUrl 60 $false
   if ([IO.File]::Exists("$database.maintenance.json") -or [IO.File]::Exists("$database.restore-journal.json")) { throw 'Під час recovery зʼявилося незавершене відновлення SQLite; пакети збережено.' }
 }
 
@@ -357,6 +355,7 @@ if ($RecoverUpdate) {
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Запустіть Server Manager від імені адміністратора для відновлення служби.' }
     foreach ($path in @($ProgramDirectory, $DataDirectory, $BackupDirectory)) { if (-not (Test-AbsoluteLocalPath $path)) { throw 'Recovery потребує підтверджених локальних каталогів.' } }
     $settings = Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json
+    Assert-ServerConfiguration $settings
     if ([IO.Path]::GetFullPath([string]$settings.programDirectory) -ine [IO.Path]::GetFullPath($ProgramDirectory) -or [IO.Path]::GetFullPath([string]$settings.backupDirectory) -ine [IO.Path]::GetFullPath($BackupDirectory)) { throw 'Конфігурація не відповідає каталогам recovery.' }
     $database = [IO.Path]::GetFullPath([string]$settings.databasePath)
     $databaseRoot = [IO.Path]::GetDirectoryName($database)
@@ -441,6 +440,10 @@ try {
   $exitCode = $LASTEXITCODE
   if ($exitCode -ne 0) { $script:LastChildExitCode = $exitCode; throw 'Новий серверний пакет неповний або пошкоджений; встановлену версію не перемикали.' }
   $script:LastChildExitCode = $null
+  Set-InstallStage 'validate-configuration-and-existing-data'
+  $settings = Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json
+  Assert-ServerConfiguration $settings
+  $configurationValidated = $true
   if ([IO.File]::Exists($journalPath)) {
     try { $priorJournal = Get-Content -LiteralPath $journalPath -Raw -Encoding UTF8 | ConvertFrom-Json }
     catch { throw 'Журнал попереднього встановлення пошкоджений; автоматичне оновлення зупинено.' }
@@ -457,7 +460,7 @@ try {
   Set-InstallStage 'validate-resume-state'
   Set-InstallStage 'validate-configuration-and-existing-data'
   $settings = Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json
-  if ($settings.configVersion -notin @(1, 2)) { throw 'Версія server.json несумісна із встановленою версією HromadaAID.' }
+  Assert-ServerConfiguration $settings
   $database = [IO.Path]::GetFullPath([string]$settings.databasePath)
   if ([IO.Path]::GetFullPath([string]$settings.backupDirectory) -ine [IO.Path]::GetFullPath($BackupDirectory)) { throw 'Каталог резервних копій не відповідає server.json.' }
   $databaseRoot = Split-Path -Parent $database
@@ -475,7 +478,7 @@ try {
   $preflight = Join-Path $stagedServer 'app\dist\server\src\installer-preflight.js'
   & $newNode $preflight --config $config
   $exitCode = $LASTEXITCODE
-  if ($exitCode -ne 0) { $script:LastChildExitCode = $exitCode; throw 'Конфігурація сервера, TLS або каталоги не пройшли перевірку.' }
+  if ($exitCode -ne 0) { $script:LastChildExitCode = $exitCode; throw 'Конфігурація сервера або каталоги не пройшли перевірку.' }
   $script:LastChildExitCode = $null
   $newSchemaMaximum = Get-SupportedSchemaMaximum $stagedServer
   if ($hadOldPackage) {
@@ -501,12 +504,6 @@ try {
     Set-AclChecked (Join-Path $DataDirectory 'Logs') @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
     Set-AclChecked $BackupDirectory @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
     Set-ReadOnlyServiceFile $config
-    if ($settings.tls) {
-      $tlsCertificate = [IO.Path]::GetFullPath([string]$settings.tls.certificatePath)
-      $tlsPrivateKey = [IO.Path]::GetFullPath([string]$settings.tls.privateKeyPath)
-      if ([IO.File]::Exists($tlsCertificate)) { Save-Acl $tlsCertificate; Set-ReadOnlyServiceFile $tlsCertificate }
-      if ([IO.File]::Exists($tlsPrivateKey)) { Save-Acl $tlsPrivateKey; Set-ReadOnlyServiceFile $tlsPrivateKey }
-    }
   }
 
   Set-InstallStage 'initialize-data'
@@ -600,14 +597,14 @@ try {
   Set-InstallStage 'grant-service-acl'
   Configure-ServiceAccess
   $settings = Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json
-  $healthUrl = Get-HealthUrl $settings
+  Assert-ServerConfiguration $settings
   Set-InstallStage 'verify-service-acl'
   Assert-ServiceAccess
   Set-InstallStage 'start-service'
   Invoke-Checked $wrapper @('start') 'Windows Service не запустилася.'
   Set-InstallStage 'health-check'
   Invoke-PackageTransaction $activeServer 'health-check'
-  Wait-ServiceHealthy $healthUrl
+  Wait-ServiceHealthy $apiHealthUrl
   Invoke-PackageTransaction $activeServer 'healthy'
   try { if ([IO.File]::Exists($pendingAdminPath)) { Remove-Item -LiteralPath $pendingAdminPath -Force } } catch { [Console]::Error.WriteLine('Не вдалося прибрати маркер першого налаштування; сервер пройшов health-перевірку.') }
   try {
@@ -620,6 +617,10 @@ try {
   $caught = $_
   $failure = Protect-InstallDiagnosticText ([string]$caught.Exception.Message)
   Write-InstallFailureDiagnostic $caught
+  if (-not $configurationValidated) {
+    [Console]::Error.WriteLine("Встановлення зупинено до змін служби, конфігурації та даних: $failure")
+    exit 1
+  }
   $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
   # A validation failure must never take a healthy installed service offline.
   # Only stop a replacement/rollback service after transaction files exist.
@@ -636,7 +637,7 @@ try {
       if ($wasServiceRunning) {
         $currentService = Get-Service -Name $serviceName -ErrorAction Stop
         if ($currentService.Status -ne 'Running') { Invoke-Checked $oldWrapper @('start') 'Не вдалося повторно запустити встановлену службу.' }
-        Wait-ServiceHealthy (Get-HealthUrl (Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json))
+        Wait-ServiceHealthy $apiHealthUrl
       }
       if ([IO.File]::Exists($journalPath)) { Invoke-PackageTransaction $stagedServer 'discard-prepared' }
       [Console]::Out.WriteLine('HROMADAAID_UPDATE_OUTCOME|preserved-before-switch')
@@ -660,7 +661,7 @@ try {
         Register-Service $rollbackWrapper
         if ($wasServiceRunning) {
           Invoke-Checked $rollbackWrapper @('start') 'Не вдалося запустити попередній пакет після відкату.'
-          Wait-ServiceHealthy (Get-HealthUrl (Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json))
+          Wait-ServiceHealthy $apiHealthUrl
         }
         $rollbackToolRoot = if ([IO.Directory]::Exists($failedServer)) { $failedServer } elseif ([IO.Directory]::Exists($stagedServer)) { $stagedServer } else { $activeServer }
         # Windows cannot delete Server.failed while its node.exe is running.

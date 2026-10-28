@@ -163,7 +163,7 @@ if (!hasSingleInstanceLock) {
       }
       const connectionLocked = () => Boolean(process.env.HROMADAAID_API_URL?.trim())
       const connectionState = (): ServerConnectionState => ({
-        apiUrl: runtimeConfig?.source === 'invalid' ? null : runtimeConfig?.apiUrl?.origin ?? savedApiUrl,
+        apiUrl: runtimeConfig?.source === 'invalid' && runtimeConfig.lockedReason ? null : runtimeConfig?.apiUrl?.origin ?? savedApiUrl,
         active: Boolean(runtimeConfig?.apiUrl),
         source: savedApiUrl && runtimeConfig?.source === 'none' ? 'saved' : runtimeConfig?.source ?? 'none',
         editable: !connectionLocked(),

@@ -1,108 +1,79 @@
 import assert from 'node:assert/strict'
-import { createServer as createHttpServer } from 'node:http'
-import { createServer as createHttpsServer } from 'node:https'
-import { spawn } from 'node:child_process'
+import { createServer } from 'node:http'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { join } from 'node:path'
 import test from 'node:test'
-import { enforceTlsCertificateValidation, readSavedConnectionConfig, safeTransportErrorMessage, validateServerBaseUrl } from './runtime-config.js'
+import { enforceTlsCertificateValidation, readElectronRuntimeConfig, readSavedConnectionConfig, safeTransportErrorMessage, validateServerBaseUrl } from './runtime-config.js'
+import { checkServerAddress } from './connection-config.js'
+import { HttpClient } from './http-client.js'
 
-const fixture = (name: string) => readFileSync(resolve(process.cwd(), 'server', 'test-fixtures', name))
-
-test('server address validation permits HTTPS anywhere and HTTP only on loopback', () => {
-  for (const address of ['http://localhost:4310', 'https://192.168.10.20:4310', 'https://api.council.test:4310', 'https://100.101.102.103:4310', 'https://api.example-tailnet.ts.net:4310']) {
+test('HTTP endpoints accept IPv4 and DNS names on the fixed port, without private-range restrictions', () => {
+  for (const address of ['http://127.0.0.1:4310', 'http://localhost:4310', 'http://192.168.10.20:4310', 'http://192.0.2.15:4310', 'http://100.101.102.103:4310', 'http://server:4310', 'http://api.example-tailnet.ts.net:4310']) {
     assert.equal(validateServerBaseUrl(address).origin, new URL(address).origin)
   }
-  assert.throws(() => validateServerBaseUrl('http://100.101.102.103:4310'), /HTTPS/)
-  assert.equal(validateServerBaseUrl('http://127.0.0.1:4310').protocol, 'http:')
-  assert.equal(validateServerBaseUrl('http://[::1]:4310').protocol, 'http:')
-  assert.equal(validateServerBaseUrl('https://192.0.2.15:4310').protocol, 'https:')
-  assert.throws(() => validateServerBaseUrl('http://192.0.2.15:4310'), /Для віддаленого сервера потрібен HTTPS/)
-  assert.throws(() => validateServerBaseUrl('http://user:pass@127.0.0.1:4310'), /Для віддаленого сервера потрібен HTTPS/)
+  for (const address of ['', 'http://server', 'http://server:4321', 'https://server:4310', 'file:///server', 'javascript:alert(1)', 'http://user:pass@server:4310', 'http://@server:4310', 'http://server:4310/api', 'http://server:4310/api/..', 'http://server:4310/?x=1', 'http://server:4310/#fragment', 'http://server:4310/?', 'http://[::1]:4310', 'http://0.0.0.0:4310', 'http://bad..name:4310', 'http://-bad:4310', 'http://ser\nver:4310', 'http://server\\other:4310', 'http://999.1.1.1:4310']) {
+    assert.throws(() => validateServerBaseUrl(address), Error, address)
+  }
 })
 
-test('server-plus-client package default is used only when no per-user address exists', () => {
+test('saved HTTP survives restart; unsupported HTTPS is rejected without rewriting or fallback', () => {
   const root = mkdtempSync(join(tmpdir(), 'hromada-client-default-'))
   const userData = join(root, 'user'), resources = join(root, 'resources')
   const packaged = join(resources, 'server-connection.json')
+  const saved = join(userData, 'server-connection.json')
   try {
-    mkdirSync(userData, { recursive: true })
-    mkdirSync(resources, { recursive: true })
+    mkdirSync(userData, { recursive: true }); mkdirSync(resources, { recursive: true })
     writeFileSync(packaged, JSON.stringify({ version: 1, apiUrl: 'http://127.0.0.1:4310' }))
     assert.equal(readSavedConnectionConfig(userData, packaged).config?.apiUrl, 'http://127.0.0.1:4310')
-    writeFileSync(join(userData, 'server-connection.json'), JSON.stringify({ version: 1, apiUrl: 'https://server.example.test' }))
-    assert.equal(readSavedConnectionConfig(userData, packaged).config?.apiUrl, 'https://server.example.test')
+    writeFileSync(saved, JSON.stringify({ version: 1, apiUrl: 'http://server.tailnet.ts.net:4310' }))
+    assert.equal(readElectronRuntimeConfig({}, readSavedConnectionConfig(userData, packaged)).apiUrl?.origin, 'http://server.tailnet.ts.net:4310')
+    const legacy = JSON.stringify({ version: 1, apiUrl: 'https://server.example.test:8443' })
+    writeFileSync(saved, legacy)
+    const restored = readSavedConnectionConfig(userData, packaged)
+    assert.equal(restored.config, undefined)
+    assert.match(restored.error ?? '', /некоректна/)
+    const runtime = readElectronRuntimeConfig({}, restored)
+    assert.equal(runtime.source, 'invalid')
+    assert.equal(runtime.apiUrl, undefined)
+    assert.match(runtime.configurationError ?? '', /некоректна/)
+    assert.equal(readFileSync(saved, 'utf8'), legacy)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
-test('TLS and redirect failures become safe user-facing messages', () => {
-  assert.match(safeTransportErrorMessage(Object.assign(new Error('fetch failed'), { cause: Object.assign(new Error('certificate error'), { code: 'ERR_TLS_CERT_ALTNAME_INVALID' }) })) ?? '', /сертифікат сервера недовірений/)
+test('redirect failures have actionable messages and global TLS verification stays enabled', () => {
   assert.match(safeTransportErrorMessage(Object.assign(new Error('fetch failed'), { cause: new Error('unexpected redirect') })) ?? '', /перенаправив запит/)
-})
-
-test('client overrides an inherited setting that would disable TLS verification', () => {
   const previous = process.env.NODE_TLS_REJECT_UNAUTHORIZED
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-  try {
-    enforceTlsCertificateValidation()
-    assert.equal(process.env.NODE_TLS_REJECT_UNAUTHORIZED, '1')
-  } finally {
+  try { enforceTlsCertificateValidation(); assert.equal(process.env.NODE_TLS_REJECT_UNAUTHORIZED, '1') }
+  finally {
     if (previous === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED
     else process.env.NODE_TLS_REJECT_UNAUTHORIZED = previous
   }
 })
 
-test('Node fetch rejects untrusted TLS, hostname mismatch and HTTPS-to-HTTP redirects', async () => {
-  const cert = fixture('tls-test-cert.pem'), key = fixture('tls-test-key.pem')
-  const counters = { insecureTarget: 0 }
-  const insecureTarget = createHttpServer((_request, reply) => { counters.insecureTarget += 1; reply.end(JSON.stringify({ status: 'ok', service: 'hromada-aid-api' })) })
-  await new Promise<void>(resolveListen => insecureTarget.listen(0, '127.0.0.1', resolveListen))
-  const insecurePort = (insecureTarget.address() as import('node:net').AddressInfo).port
-  const healthy = createHttpsServer({ cert, key }, (_request, reply) => reply.end(JSON.stringify({ status: 'ok', service: 'hromada-aid-api' })))
-  const redirect = createHttpsServer({ cert, key }, (_request, reply) => { reply.writeHead(302, { location: `http://127.0.0.1:${insecurePort}/health` }); reply.end() })
-  await Promise.all([healthy, redirect].map(server => new Promise<void>(resolveListen => server.listen(0, '127.0.0.1', resolveListen))))
-  const healthyPort = (healthy.address() as import('node:net').AddressInfo).port
-  const redirectPort = (redirect.address() as import('node:net').AddressInfo).port
-  const moduleUrl = pathToFileURL(resolve(process.cwd(), 'dist-electron', 'electron', 'connection-config.js')).href
-  const script = `import { checkServerAddress } from ${JSON.stringify(moduleUrl)};
-    import { enforceTlsCertificateValidation } from ${JSON.stringify(pathToFileURL(resolve(process.cwd(), 'dist-electron', 'electron', 'runtime-config.js')).href)};
-    enforceTlsCertificateValidation();
-    const [good, mismatch, downgrade] = await Promise.all([
-      checkServerAddress('https://localhost:${healthyPort}'),
-      checkServerAddress('https://127.0.0.1:${healthyPort}'),
-      checkServerAddress('https://localhost:${redirectPort}')
-    ]);
-    console.log(JSON.stringify({good, mismatch, downgrade}));`
-  const run = (trustTestCert: boolean) => new Promise<{ code: number | null; stdout: string; stderr: string }>((resolveRun, reject) => {
-    const env: NodeJS.ProcessEnv = { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: '0' }
-    delete env.NODE_EXTRA_CA_CERTS
-    if (trustTestCert) env.NODE_EXTRA_CA_CERTS = resolve(process.cwd(), 'server', 'test-fixtures', 'tls-test-cert.pem')
-    const child = spawn(process.execPath, ['--input-type=module', '-e', script], { cwd: process.cwd(), env, stdio: ['ignore', 'pipe', 'pipe'] })
-    let stdout = '', stderr = ''
-    child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk })
-    child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk })
-    child.once('error', reject)
-    child.once('close', code => resolveRun({ code, stdout, stderr }))
-  })
+test('HTTP health, login and bearer requests reject redirects; API paths cannot escape their origin', async () => {
+  let targetRequests = 0
+  const target = createServer((_request, reply) => { targetRequests++; reply.end('{}') })
+  const redirect = createServer((_request, reply) => { reply.writeHead(307, { location: 'http://127.0.0.2:4310/other' }); reply.end() })
+  const listen = (server: ReturnType<typeof createServer>, host: string) => new Promise<void>((resolve, reject) => server.once('error', reject).listen(4310, host, resolve))
   try {
-    const untrusted = await run(false)
-    assert.equal(untrusted.code, 0, untrusted.stderr)
-    const untrustedResult = JSON.parse(untrusted.stdout.trim()) as { good: { ok: boolean; message: string } }
-    assert.equal(untrustedResult.good.ok, false)
-    assert.match(untrustedResult.good.message, /сертифікат сервера недовірений/)
-
-    const trusted = await run(true)
-    assert.equal(trusted.code, 0, trusted.stderr)
-    const result = JSON.parse(trusted.stdout.trim()) as { good: { ok: boolean }; mismatch: { ok: boolean; message: string }; downgrade: { ok: boolean; message: string } }
-    assert.equal(result.good.ok, true)
-    assert.equal(result.mismatch.ok, false)
-    assert.match(result.mismatch.message, /сертифікат сервера недовірений/)
-    assert.equal(result.downgrade.ok, false)
-    assert.match(result.downgrade.message, /перенаправив запит/)
-    assert.equal(counters.insecureTarget, 0, 'redirect target must never receive the health request')
+    await listen(target, '127.0.0.2')
+    await listen(redirect, '127.0.0.1')
+    const health = await checkServerAddress('http://127.0.0.1:4310')
+    assert.equal(health.ok, false)
+    assert.match(health.message, /перенаправив запит/)
+    const http = new HttpClient(new URL('http://127.0.0.1:4310'), 1_000, { getAccessToken: () => 'synthetic-session' })
+    await assert.rejects(http.postJson('/auth/login', { username: 'synthetic', password: 'synthetic-only' }, undefined, { authorize: false }), /перенаправив запит/)
+    await assert.rejects(http.getJson('/api/catalogs'), /перенаправив запит/)
+    for (const path of ['//127.0.0.2:4310/api/catalogs', '/\\127.0.0.2:4310/api/catalogs']) {
+      await assert.rejects(http.getJson(path), /іншого сервера/)
+    }
+    assert.equal(targetRequests, 0, 'credentials and bearer tokens must never reach the other origin')
   } finally {
-    await Promise.all([healthy, redirect, insecureTarget].map(server => new Promise<void>(resolveClose => server.close(() => resolveClose()))))
+    for (const server of [redirect, target]) {
+      server.closeAllConnections()
+      if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()))
+    }
   }
 })

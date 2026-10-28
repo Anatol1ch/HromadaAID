@@ -6,8 +6,6 @@ export type ServerInstallRequest = {
   programDirectory: string
   dataDirectory: string
   backupDirectory: string
-  host: '127.0.0.1' | '::1'
-  port: number
   administrator: { displayName: string; username: string; password: string; confirmation: string }
 }
 

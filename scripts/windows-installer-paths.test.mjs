@@ -695,7 +695,7 @@ test('server activation preserves the old package through health verification an
   const installer = await readFile(new URL('../packaging/install-server-service.ps1', import.meta.url), 'utf8')
   const transaction = await readFile(new URL('../packaging/server-package-transaction.mjs', import.meta.url), 'utf8')
   const activation = installer.indexOf("Invoke-PackageTransaction $stagedServer 'activate'")
-  const health = installer.indexOf('Wait-ServiceHealthy $healthUrl')
+  const health = installer.indexOf('Wait-ServiceHealthy $apiHealthUrl', activation)
   const commit = installer.indexOf("Invoke-PackageTransaction $activeServer 'healthy'")
   const cleanup = transaction.indexOf("rmSync(join(program, 'Server.previous')")
   assert.ok(activation >= 0 && health > activation && commit > health && cleanup > 0)
@@ -722,7 +722,8 @@ test('paths with Unicode and spaces render explicit installed config and WinSW a
   const paths = base(root)
   try {
   const config = JSON.parse(renderInstalledServerConfig(paths))
-  assert.equal(config.host, '127.0.0.1')
+  assert.equal(config.configVersion, 3)
+  assert.deepEqual(Object.keys(config).sort(), ['backupDirectory', 'configVersion', 'databasePath', 'programDirectory'])
   assert.equal(config.databasePath, win32.join(paths.dataDirectory, 'Database', 'hromada-aid.sqlite'))
   const template = readFileSync(new URL('../server/windows-service/HromadaAIDService.xml.template', import.meta.url), 'utf8')
   const xml = renderWinSWConfig(template, paths)
@@ -748,7 +749,7 @@ test('an existing server config must match the selected persistent paths', () =>
   try {
     const data = join(root, 'data'), program = join(root, 'program'), backups = join(root, 'backups')
     mkdirSync(data); mkdirSync(program); mkdirSync(backups)
-    writeFileSync(join(data, 'server.json'), JSON.stringify({ databasePath: join(data, 'hromada-aid.sqlite'), backupDirectory: join(root, 'other-backups') }))
+    writeFileSync(join(data, 'server.json'), JSON.stringify({ configVersion: 3, programDirectory: program, databasePath: join(data, 'hromada-aid.sqlite'), backupDirectory: join(root, 'other-backups') }))
     assert.throws(() => validateInstallerOptions({ mode: 'server', programDirectory: program, dataDirectory: data, backupDirectory: backups }), /залиште попередні шляхи/)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
@@ -761,7 +762,7 @@ test('existing database and DPAPI key must be present together and legacy databa
     const databasePath = join(dataDirectory, 'hromada-aid.sqlite')
     const configPath = join(dataDirectory, 'server.json')
     writeFileSync(databasePath, 'synthetic database marker')
-    writeFileSync(configPath, JSON.stringify({ configVersion: 2, mode: 'local', programDirectory, host: '127.0.0.1', port: 4310, databasePath, backupDirectory }))
+    writeFileSync(configPath, JSON.stringify({ configVersion: 3, programDirectory, databasePath, backupDirectory }))
     const paths = { mode: 'server', programDirectory, dataDirectory, backupDirectory }
     assert.throws(() => validateInstallerOptions(paths), /повний комплект/)
     writeFileSync(join(backupDirectory, '.hromadaaid-backup-key.dpapi'), 'synthetic protected key marker')

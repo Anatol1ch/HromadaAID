@@ -88,7 +88,7 @@ test('production legacy and component packages update and roll back using bundle
       const password = 'Synthetic update fixture password'
       run(node, [join(app, 'dist', 'server', 'src', 'create-admin.js'), '--database', databasePath, '--installer-stdin'], app, JSON.stringify({ displayName: 'Тестовий адміністратор', username: 'test-admin', password, confirmation: password }) + '\n')
       await writeFile(keyPath, 'synthetic protected-key sentinel, no real DPAPI key')
-      await writeFile(configPath, JSON.stringify({ configVersion: 2, mode: 'local', programDirectory, databasePath, backupDirectory, host: '127.0.0.1', port: 4310 }))
+      await writeFile(configPath, JSON.stringify({ configVersion: 3, programDirectory, databasePath, backupDirectory }))
       const { prepareServerInstall } = await import(pathToFileURL(join(active, 'installer', 'prepare-server-install.mjs')).href)
       prepareServerInstall({ mode: 'server', programDirectory, dataDirectory, backupDirectory, packageRoot: active }, active)
       const preserved = await Promise.all([databasePath, configPath, keyPath].map(path => readFile(path)))

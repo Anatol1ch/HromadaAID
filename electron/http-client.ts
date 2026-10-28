@@ -67,6 +67,8 @@ export class HttpClient {
     if (!path.startsWith('/')) throw new HttpClientError('Шлях HTTP API має починатися з «/».')
     const requestGeneration = this.generation
     const baseUrl = this.configuredBaseUrl()
+    const requestUrl = new URL(path, baseUrl)
+    if (requestUrl.origin !== baseUrl.origin) throw new HttpClientError('HTTP API не може надсилати запити до іншого сервера.')
     const authorize = options?.authorize !== false
     const token = authorize ? (options?.accessToken ?? this.options.getAccessToken?.()) : undefined
     if (authorize && !token) throw new HttpClientError('Потрібна чинна сесія.', 401)
@@ -74,7 +76,7 @@ export class HttpClient {
     const diagnosePasswordChange = path === '/auth/change-password' && !!process.env.HROMADA_AID_TEST_DATA_DIR
     if (diagnosePasswordChange) console.info(`[HromadaAID test] POST ${baseUrl.origin}/auth/change-password: sending`)
     try {
-      response = await fetch(new URL(path, baseUrl), {
+      response = await fetch(requestUrl, {
         method,
         redirect: 'error',
         headers: {

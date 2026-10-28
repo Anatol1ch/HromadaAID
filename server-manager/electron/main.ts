@@ -1,5 +1,6 @@
 import { createOperationCloseGuard } from './operation-close-guard.js'
-import { app, BrowserWindow, dialog, ipcMain, screen, session } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, screen, session } from 'electron'
+import { createAddressCopyHandler, readNetworkAddresses } from './network-addresses.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import { lstat, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
@@ -272,6 +273,7 @@ async function openWindow() {
 if (!app.requestSingleInstanceLock()) app.quit()
 else {
   const inspectRequest = createInspectionRequestHandler(inspectWithUpdateReadiness, isTrustedRenderer, failedInspection)
+  ipcMain.handle('manager:copy-server-address', createAddressCopyHandler(isTrustedRenderer, readNetworkAddresses, text => clipboard.writeText(text)))
   ipcMain.handle('manager:inspect-environment', event => inspectRequest(event))
   ipcMain.handle('manager:release-update-state', event => { if (!isTrustedRenderer(event) || !releaseUpdater) throw new Error('UNTRUSTED_RENDERER'); return releaseUpdater.getState() })
   ipcMain.handle('manager:check-release-updates', async event => {
@@ -552,7 +554,7 @@ else {
     if (recoveryInspectionInProgress || activeInstallId || serviceOperationInProgress || updatePreparationInProgress || activeUpdateId || preparedServerUpdate || backupOperationInProgress) throw new Error('INSTALLATION_ALREADY_RUNNING')
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('INSTALL_OPTIONS_INVALID')
     const request = input as ServerInstallRequest
-    if (Object.keys(request).some(key => !['programDirectory', 'dataDirectory', 'backupDirectory', 'host', 'port', 'administrator'].includes(key)) ||
+    if (Object.keys(request).some(key => !['programDirectory', 'dataDirectory', 'backupDirectory', 'administrator'].includes(key)) ||
       !['programDirectory', 'dataDirectory', 'backupDirectory'].every(key => typeof (request as unknown as Record<string, unknown>)[key] === 'string') ||
       !request.administrator || typeof request.administrator !== 'object' ||
       !['displayName', 'username', 'password', 'confirmation'].every(key => typeof (request.administrator as unknown as Record<string, unknown>)[key] === 'string') ||

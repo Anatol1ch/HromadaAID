@@ -1,5 +1,4 @@
-import Fastify, { type FastifyInstance, type FastifyHttpsOptions } from 'fastify'
-import type { Server as HttpsServer } from 'node:https'
+import Fastify, { type FastifyInstance } from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
 import { bankDetails, getBank, listBanks, removeBank, saveBank } from '../../electron/bank-store.js'
 import { getDecision, listAssignments, listDecisions, listRecipientAssignmentHistory } from '../../electron/assignment-data.js'
@@ -44,8 +43,8 @@ function requestsPaidStatus(value: unknown): boolean {
   return isRecord(value) && value.status === 'Виплачено'
 }
 
-export function createApp(database: DatabaseSync, administration?: BackupAdministration, https?: FastifyHttpsOptions<HttpsServer>['https']): FastifyInstance {
-  const app: FastifyInstance = https ? Fastify({ logger: true, https }) as unknown as FastifyInstance : Fastify({ logger: true })
+export function createApp(database: DatabaseSync, administration?: BackupAdministration): FastifyInstance {
+  const app = Fastify({ logger: true })
   administration?.install(app)
   const loginRateLimiter = new LoginRateLimiter()
 

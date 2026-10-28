@@ -16,7 +16,7 @@ const data = 'D:\\Дані HromadaAID'
 const backups = 'E:\\Копії HromadaAID'
 const configPath = `${data}\\server.json`
 const wrapper = `${server}\\service\\HromadaAIDService.exe`
-const config = { configVersion: 2, mode: 'local', programDirectory: program, host: '127.0.0.1', port: 4310, databasePath: `${data}\\Database\\hromada-aid.sqlite`, backupDirectory: backups }
+const config = { configVersion: 3, programDirectory: program, databasePath: `${data}\\Database\\hromada-aid.sqlite`, backupDirectory: backups }
 const serviceXml = `<service><id>HromadaAIDApi</id><executable>${server}\\runtime\\node.exe</executable><arguments>"${server}\\app\\dist\\server\\src\\installed.js" --config "${configPath}"</arguments><workingdirectory>${server}\\app</workingdirectory><logpath>${data}\\Logs</logpath></service>`
 
 function fixture({ service = { installed: true, state: 'Running', startMode: 'Auto', startName: 'NT AUTHORITY\\LocalService', binaryPath: `"${wrapper}"` }, locator = { status: 'missing' }, configText = JSON.stringify(config), api = { kind: 'response', status: 200, redirected: false, body: { status: 'ok', service: 'hromada-aid-api', apiContractVersion: 1 } }, files = null, now = new Date('2026-10-24T10:30:00.000Z') } = {}) {
@@ -227,22 +227,18 @@ test('fails closed for missing, malformed and unsupported configuration without 
   assert.equal((await inspectEnvironment(withSecret)).configuration.apiAddress, null)
 })
 
-test('rejects unsafe HTTP network configuration and malformed health responses', async () => {
-  const networkConfig = { ...config, mode: 'network', host: '192.0.2.10', tls: { certificatePath: 'C:\\TLS\\cert.pem', privateKeyPath: 'C:\\TLS\\private.pem' } }
-  const configNetwork = fixture({ configText: JSON.stringify(networkConfig) })
-  const networkResult = await inspectEnvironment(configNetwork.adapter)
-  assert.equal(networkResult.configuration.transport, 'HTTPS')
-  assert.equal(configNetwork.trace.lastUrl, 'https://192.0.2.10:4310/health')
-  const noTls = fixture({ configText: JSON.stringify({ ...config, mode: 'network', host: '192.0.2.10' }) }).adapter
-  const noTlsResult = await inspectEnvironment(noTls)
-  assert.equal(noTlsResult.checks.find(item => item.id === 'configuration').status, 'failed')
-  assert.equal(noTlsResult.api.status, 'not_configured')
-  const insecureLocal = fixture({ configText: JSON.stringify({ ...config, host: '192.0.2.10' }) })
-  const insecureResult = await inspectEnvironment(insecureLocal.adapter)
-  assert.equal(insecureResult.checks.find(item => item.id === 'configuration').status, 'failed')
-  assert.equal(insecureResult.api.status, 'not_configured')
-  const hostnameLocal = fixture({ configText: JSON.stringify({ ...config, host: 'localhost' }) })
-  assert.equal((await inspectEnvironment(hostnameLocal.adapter)).api.status, 'not_configured')
+test('incompatible config versions and obsolete transport fields block API probing', async () => {
+  for (const obsolete of [
+    { configVersion: 1 }, { configVersion: 2 }, { configVersion: '3' },
+    { mode: 'network' }, { host: '192.0.2.10' }, { port: 4310 }, { tls: {} },
+  ]) {
+    const f = fixture({ configText: JSON.stringify({ ...config, ...obsolete }) })
+    const result = await inspectEnvironment(f.adapter)
+    assert.equal(result.checks.find(item => item.id === 'configuration').status, 'failed')
+    assert.equal(result.configuration.apiAddress, null)
+    assert.equal(result.api.status, 'not_configured')
+    assert.equal(f.trace.lastUrl, undefined)
+  }
 
   const malformed = fixture({ api: { kind: 'response', status: 200, redirected: false, body: { status: 'ok' } } }).adapter
   assert.equal((await inspectEnvironment(malformed)).api.status, 'invalid_response')
@@ -250,6 +246,15 @@ test('rejects unsafe HTTP network configuration and malformed health responses',
   assert.equal((await inspectEnvironment(redirect)).api.status, 'invalid_response')
   const timeout = fixture({ api: { kind: 'timeout' } }).adapter
   assert.equal((await inspectEnvironment(timeout)).api.status, 'unavailable')
+})
+
+test('unavailable address metadata does not change service or API checks', async () => {
+  const f = fixture()
+  f.adapter.networkAddresses = async () => { throw new Error('metadata unavailable') }
+  const result = await inspectEnvironment(f.adapter)
+  assert.equal(result.service.status, 'running')
+  assert.equal(result.api.status, 'available')
+  assert.deepEqual(result.networkAddresses, { lan: [], tailscale: [], unavailable: true })
 })
 
 test('configuration and package access errors remain visible as checks, and no database contents are read', async () => {

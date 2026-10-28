@@ -44,7 +44,6 @@ export async function verifyInitialInstallCandidate(request: ServerInstallReques
   // path owns the staged package; data locations may change while no install
   // has been initialized, provided both old and selected targets are empty.
   if (!same(current.configuration.programDirectory, request.programDirectory)) return false
-  if ((current.configuration.host !== null && current.configuration.host !== request.host) || (current.configuration.port !== null && current.configuration.port !== request.port)) return false
   // Missing data/backup directories are normal before first setup; errors and links are not.
   for (const path of [request.programDirectory, request.dataDirectory, request.backupDirectory]) {
     for (let parent = path; dirname(parent) !== parent; parent = dirname(parent)) await directoryExists(parent)
@@ -80,7 +79,6 @@ export async function markInitialSetupReadiness(snapshot: InspectionSnapshot, ve
   try {
     const verified = await verify({
       programDirectory: config.programDirectory!, dataDirectory: config.dataDirectory!, backupDirectory: config.backupDirectory!,
-      host: config.host === '::1' ? '::1' : '127.0.0.1', port: config.port ?? 4310,
       administrator: { displayName: '', username: '', password: '', confirmation: '' },
     })
     if (verified) {

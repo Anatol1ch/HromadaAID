@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('hromadaManager', Object.freeze({
+  copyServerAddress: address => ipcRenderer.invoke('manager:copy-server-address', address),
   releaseUpdateState: () => ipcRenderer.invoke('manager:release-update-state'),
   checkReleaseUpdates: () => ipcRenderer.invoke('manager:check-release-updates'),
   downloadManagerUpdate: () => ipcRenderer.invoke('manager:download-manager-update'),

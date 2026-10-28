@@ -7,7 +7,7 @@ function parseArguments(args) {
   const values = new Map()
   for (let index = 0; index < args.length; index += 2) {
     const key = args[index], value = args[index + 1]
-    if (!key?.startsWith('--') || !value || values.has(key)) throw new Error('Очікуються --program-dir, --data-dir і --backup-dir з окремими значеннями.')
+    if (!['--program-dir', '--data-dir', '--backup-dir', '--package-root'].includes(key) || !value || values.has(key)) throw new Error('Очікуються --program-dir, --data-dir, --backup-dir та необов’язковий --package-root з окремими значеннями.')
     values.set(key, value)
   }
   for (const key of ['--program-dir', '--data-dir', '--backup-dir']) if (!values.has(key)) throw new Error(`Не задано параметр ${key}.`)
@@ -17,8 +17,6 @@ function parseArguments(args) {
     dataDirectory: values.get('--data-dir'),
     backupDirectory: values.get('--backup-dir'),
     packageRoot: values.get('--package-root'),
-    ...(values.has('--host') ? { host: values.get('--host') } : {}),
-    ...(values.has('--port') ? { port: Number(values.get('--port')) } : {}),
   }
 }
 
@@ -51,7 +49,7 @@ export function prepareServerInstall(options, root = resolve(dirname(fileURLToPa
   mkdirSync(valid.backupDirectory, { recursive: true })
   mkdirSync(join(valid.dataDirectory, 'Database'), { recursive: true })
   mkdirSync(join(valid.dataDirectory, 'Logs'), { recursive: true })
-  const config = existed ? readFileSync(serverConfigPath, 'utf8') : renderInstalledServerConfig({ ...valid, host: options.host, port: options.port })
+  const config = existed ? readFileSync(serverConfigPath, 'utf8') : renderInstalledServerConfig(valid)
   if (!existed) {
     let descriptor
     try { descriptor = openSync(serverConfigPath, 'wx', 0o600) }

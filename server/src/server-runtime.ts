@@ -5,14 +5,15 @@ import { BackupArchives } from './backup-archives.js'
 import { openInstalledServerDatabase, openServerDatabase } from './database.js'
 import { acquireDatabaseOwnership } from './restore-safety.js'
 import { BackupAdministration, assertNoPendingRestore } from './backup-admin.js'
-import { readInstalledTlsOptions, type InstalledServerConfig, type ServerConfig } from './config.js'
+import type { ServerConfig } from './config.js'
 import { lstatSync } from 'node:fs'
 import { createGracefulShutdown } from './server-lifecycle.js'
 
 export type RunningServer = { stop(signal: string): Promise<void> }
+export const SERVER_HOST = '0.0.0.0'
+export const SERVER_PORT = 4310
 
-export async function startServer(config: ServerConfig | InstalledServerConfig, installed: boolean): Promise<RunningServer> {
-  const https = installed ? readInstalledTlsOptions(config as InstalledServerConfig) : undefined
+export async function startServer(config: ServerConfig, installed: boolean): Promise<RunningServer> {
   assertNoPendingRestore(config.databasePath)
   let key: Buffer | undefined
   let releaseOwnership: (() => void) | undefined
@@ -33,7 +34,7 @@ export async function startServer(config: ServerConfig | InstalledServerConfig, 
     const logger = { error: (message: string) => app?.log.error(message), warn: (message: string) => app?.log.warn(message) }
     const service = new SqliteBackupService(database, config.backupDirectory, logger, !installed)
     const administration = new BackupAdministration(config.databasePath, archives, service, async () => { await scheduler?.stop() }, !installed)
-    app = createApp(database, administration, https)
+    app = createApp(database, administration)
     const shutdown = createGracefulShutdown([
       { name: 'HTTP-запити Fastify', close: () => app?.close() },
       { name: 'планувальник резервування', close: () => scheduler?.stop() },
@@ -61,10 +62,10 @@ export async function startServer(config: ServerConfig | InstalledServerConfig, 
       process.off('SIGINT', onSigint)
       process.off('SIGTERM', onSigterm)
     }
-    await app.listen({ host: config.host, port: config.port })
+    await app.listen({ host: SERVER_HOST, port: SERVER_PORT })
     if (!key) logger.warn('Ключ розподіленого резервування не налаштовано. Локальні SQLite-копії працюють незалежно.')
     scheduler = startDailyBackupScheduler(service, logger, { onBackupCreated: () => { if (key) void archives?.list().catch(() => logger.error('Не вдалося підготувати зашифровані резервні архіви.')) } })
-    app.log.info({ host: config.host, port: config.port }, 'HromadaAID API готовий')
+    app.log.info({ host: SERVER_HOST, port: SERVER_PORT, protocol: 'HTTP' }, 'HromadaAID API готовий')
     return { stop }
   } catch (error) {
     detachSignalHandlers()
@@ -75,6 +76,9 @@ export async function startServer(config: ServerConfig | InstalledServerConfig, 
     try { database?.close() } catch { /* startup is already failing */ }
     try { releaseOwnership?.() } catch { /* startup is already failing */ }
     key?.fill(0)
+    if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+      throw new Error(`Порт ${SERVER_PORT} зайнятий. HTTP API на ${SERVER_HOST}:${SERVER_PORT} не запущено; звільніть порт і повторіть запуск.`, { cause: error })
+    }
     throw error
   }
 }

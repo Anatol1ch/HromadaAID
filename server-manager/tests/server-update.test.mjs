@@ -241,7 +241,7 @@ test('production ZIP survives repeat verification and real Server.next preparati
   await mkdir(join(dataDirectory, 'Database'), { recursive: true }); await mkdir(backupDirectory, { recursive: true })
   const databasePath = join(dataDirectory, 'Database', 'hromada-aid.sqlite'), configPath = join(dataDirectory, 'server.json'), keyPath = join(backupDirectory, '.hromadaaid-backup-key.dpapi')
   await writeFile(databasePath, 'isolated synthetic database sentinel'); await writeFile(keyPath, 'isolated key sentinel')
-  await writeFile(configPath, JSON.stringify({ configVersion: 2, mode: 'local', host: '127.0.0.1', port: 4310, programDirectory, databasePath, backupDirectory }))
+  await writeFile(configPath, JSON.stringify({ configVersion: 3, programDirectory, databasePath, backupDirectory }))
   const before = await Promise.all([databasePath, configPath, keyPath].map(path => readFile(path)))
   const environment = { programDirectory, dataDirectory, backupDirectory, databasePath, serverVersion: '0.1.0', apiContractVersion: 1, serviceStatus: 'running' }
   const archiveCount = (await readdir(extracted, { recursive: true, withFileTypes: true })).filter(item => item.isFile()).length
@@ -381,9 +381,9 @@ test('existing service installer stops only after validations and keeps failures
   assert.match(adapter, /'-FromServerManager',\s*'-UpdateOnly'/)
 })
 
-test('existing configuration remains authoritative during package preparation, including network host and port', async () => {
+test('package preparation preserves persistent configuration and passes no transport options', async () => {
   const source = await readFile(join(process.cwd(), 'server-manager/electron/windows-server-update.ts'), 'utf8')
-  assert.match(source, /Existing server\.json is authoritative/)
+  assert.match(source, /prepareServerInstall\(options,root\)/)
   assert.doesNotMatch(source, /'--host'\s*,\s*config\.host| '--port'\s*,\s*String\(config\.port\)/)
 })
 

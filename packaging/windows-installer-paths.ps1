@@ -87,7 +87,8 @@ public static class HromadaAidInstallerPath {
 
 function Stop-WithMessage([string]$message, [string]$reason = 'validation-failed', [int]$hresult = 0) {
   $code = 1
-  if ($message -match 'недостатньо місця') { $code = 3; $reason = 'insufficient-space' }
+  if ($reason -eq 'config-incompatible') { $code = 5 }
+  elseif ($message -match 'недостатньо місця') { $code = 3; $reason = 'insufficient-space' }
   elseif ($message -match 'NTFS') { $code = 4; $reason = 'volume-not-local-ntfs' }
   elseif ($message -match 'server\.json|базу HromadaAID|DPAPI-ключ|резервних архівів|резервних копій уже є архіви') { $code = 5; $reason = 'existing-data-conflict' }
   elseif ($message -match 'перекриватися|поза каталогом програми|каталозі програмних файлів') { $code = 6; $reason = 'overlapping-directories' }
@@ -228,8 +229,16 @@ if ($Mode -in @('server', 'server-client')) {
     Stop-WithMessage 'У вибраному каталозі знайдено базу HromadaAID без server.json. Потрібна явна перевірка наявних даних.'
   }
   if ([IO.File]::Exists($config)) {
-    try { $existing = Get-Content -LiteralPath $config -Raw | ConvertFrom-Json }
+    try { $existing = Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json }
     catch { Stop-WithMessage 'Наявний server.json некоректний; він не буде перезаписаний.' }
+    $allowed = @('configVersion', 'programDirectory', 'databasePath', 'backupDirectory')
+    if ($existing -isnot [pscustomobject] -or $existing.configVersion -isnot [int] -or $existing.configVersion -ne 3 -or @($existing.PSObject.Properties | Where-Object { $allowed -cnotcontains $_.Name }).Count) {
+      Stop-WithMessage 'Несумісна конфігурація server.json: потрібна configVersion: 3 без транспортних параметрів. Файл і дані не змінено.' 'config-incompatible'
+    }
+    foreach ($name in @('programDirectory', 'databasePath', 'backupDirectory')) {
+      $value = $existing.$name
+      if ($value -isnot [string] -or $value.Trim() -cne $value -or $value -match '[\x00-\x1f\x7f]' -or $value -notmatch '^[A-Za-z]:[\\/]') { Stop-WithMessage 'server.json містить некоректні абсолютні шляхи; файл і дані не змінено.' }
+    }
     $expectedDatabase = [IO.Path]::GetFullPath($database)
     $expectedBackup = [IO.Path]::GetFullPath($BackupDirectory)
     $existingDatabase = [IO.Path]::GetFullPath([string]$existing.databasePath)

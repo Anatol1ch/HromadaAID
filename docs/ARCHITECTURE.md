@@ -24,36 +24,50 @@ Server використовує Node.js `node:sqlite`; Fastify й Argon2 — й�
 
 ## Встановлений сервер і транспорт
 
-- Windows x64, WinSW, служба `HromadaAIDApi`, LocalService та окремий service SID.
-- Програмні файли за замовчуванням: `C:\Program Files\HromadaAID`; дані:
-  `%ProgramData%\HromadaAID\Data`; копії: `%ProgramData%\HromadaAID\Backups`.
-- `Data/server.json`, нова SQLite `Data/Database/hromada-aid.sqlite`, журнали
-  `Data/Logs`. Сумісні старі шляхи з конфігурації зберігаються.
-- Дані й архіви — окремі локальні фіксовані NTFS-каталоги; файлові експорт/імпорт
+- Windows x64, WinSW, одна служба HromadaAIDApi під LocalService та окремий service SID.
+- Програмні файли за замовчуванням: C:\Program Files\HromadaAID; дані:
+  %ProgramData%\HromadaAID\Data; копії: %ProgramData%\HromadaAID\Backups.
+- Data/server.json, SQLite Data/Database/hromada-aid.sqlite, журнали Data/Logs.
+  Дані й архіви — окремі локальні фіксовані NTFS-каталоги; файлові експорт/імпорт
   архівів через Manager можуть працювати із зовнішніми доступними носіями.
-- Типовий local endpoint: `http://127.0.0.1:4310`. `mode=local` у конфігурації
-  сервера означає loopback HTTP, а не автономний SQLite-режим Client.
-- **Поточна реалізація:** мережевий режим вимагає конкретного інтерфейсу й
-  довіреного TLS; wildcard bind заборонений. Деталі чинної поведінки:
-  [server/TRANSPORT.md](../server/TRANSPORT.md).
-- Стан служби через штатний системний `sc.exe` і стан `/health` перевіряються
-  окремо. SCM-помилка не означає відсутності служби; Running не доводить готовності API.
+- Один Fastify instance, одна серверна SQLite й один IPv4 HTTP listener
+  0.0.0.0:4310. Адреса й порт зафіксовані в server/src/server-runtime.ts.
+  Другого listener немає; зайнятий порт зупиняє запуск із діагностикою.
+- Loopback http://127.0.0.1:4310, LAN і Tailscale одночасно ведуть до цього
+  сервера. Wildcard bind не залежить від конкретної адреси адаптера; поява
+  Tailscale після старту або зміна LAN IP не потребують повторного bind.
+- Внутрішнього TLS немає. LAN HTTP не шифрує запити; Tailscale надає шифрований
+  тунель. Сервер не залежить від Tailscale або інтернету. Зовнішній HTTPS для
+  GitHub Releases та завантажень збережено.
 
-### Ціль Stage 9.2 — ще не реалізовано
+### Конфігурація та клієнти Stage 9.2
 
-Погоджена майбутня транспортна політика: один API Server і одна база мають бути
-доступними Client одночасно через loopback HTTP, LAN HTTP і HTTP усередині
-Tailscale. Loopback обмежений локальним комп’ютером; звичайний LAN HTTP не має
-прикладного транспортного шифрування; шифрований тунель між вузлами tailnet
-забезпечує Tailscale. Authentication, RBAC, server-side authorization та інші
-чинні механізми доступу зберігаються. Ціль стосується лише внутрішнього API й не
-змінює HTTPS для GitHub Releases та інших зовнішніх сервісів.
+Єдина схема server.json — configVersion: 3, programDirectory, databasePath,
+backupDirectory. Transport-полів немає. Server parser, Manager inspection,
+installer generator і PowerShell preflight відхиляють невідому версію/поля,
+зокрема колишні mode/host/port/tls, без міграції або скидання даних. Шлях Logs
+належить WinSW XML. Приклад: [installed-config.example.json](../server/installed-config.example.json).
 
-Tailscale є зовнішнім мережевим інструментом: SDK, автоматичне встановлення,
-керування tailnet і окремі TLS-сертифікати не плануються. Архітектуру одночасного
-прослуховування інтерфейсів визначити під час Stage 9.2; конкретний bind/listener
-не зафіксований. До реалізації чинний TLS transport лишається без змін. Під час
-Stage 9.2 оновити [server/TRANSPORT.md](../server/TRANSPORT.md) після зміни коду.
+Client вручну отримує HTTP URL з IPv4 або DNS-ім'ям і портом 4310. Адреса
+зберігається в userData/server-connection.json; повторні спроби використовують
+той самий сервер. Зміна адреси проходить health-check без credentials, завершує
+стару сесію та потребує входу до нового origin. Redirects заборонені; API-шлях
+не може змінювати origin запиту. Автоматичного пошуку й перемикання серверів немає.
+Authentication, Argon2id, RBAC, sessions та server-side authorization збережено.
+
+Manager перевіряє SCM та http://127.0.0.1:4310/health окремо. Running не доводить
+готовності API. Той самий локальний health URL використовують install/update/recovery.
+Майстер має три кроки: каталоги, адміністратор, підсумок; адрес на завершенні немає.
+На основному екрані є loopback і адреси з копіюванням: LAN — активні фізичні IPv4
+адаптери Windows, Tailscale — підтверджений опис адаптера разом з відповідною IPv4.
+CGNAT-адреса або назва інтерфейсу самі по собі не визначають Tailscale. Якщо адаптер
+не визначено, адресу вводять у Client вручну. Збір метаданих обмежено тайм-аутом,
+його помилка не змінює результати SCM/API.
+
+Tailscale SDK/API, встановлення/керування tailnet, discovery і автоматичних правил
+Windows Firewall немає. Мережевий доступ залежить від зовнішніх firewall rules,
+маршрутизації й політик tailnet. Деталі: [TRANSPORT.md](../server/TRANSPORT.md).
+Stage 9.2 реалізовано, але завершення очікує [Windows VM-приймання](stage-9.2-manual-testing.md).
 
 ## Резервування та restore
 
@@ -76,8 +90,8 @@ staging, але не перебудовує ACL кореня Backups під ко
 ## Оновлення та recovery
 
 Ручний ZIP проходить захищене розпакування, обидва маніфести, хеші, API/schema
-сумісність і SemVer-політику: лише новіша стабільна версія. Installed legacy-пакет
-із одним integrity manifest підтримується без вигаданих метаданих.
+сумісність і SemVer-політику: лише новіша стабільна версія. Перевірка integrity
+існуючого пакета збережена; підтримки старого транспорту чи server.json v1/v2 немає.
 
 Транзакція використовує `Server.next`, `Server`, `Server.previous`, `Server.failed`
 і `Data/.hromadaaid-update-state.json`. Старий пакет зберігається до підтвердження
@@ -193,9 +207,9 @@ ClientSelected. Звичайний режим використовує вибр�
 користувацькі ярлики зберігаються. API ZIP updater ярликами не керує. Єдиний
 Installed Apps запис і склад компонентів зберігає NSIS metadata section.
 
-### Welcome та UI оновлень у 0.1.4
+### Welcome та UI встановлення й оновлень
 
-Звичайний запуск Universal Setup проходить Welcome → Components; welcome
+Звичайний запуск Universal Setup проходить Welcome → вибір одного з трьох режимів → каталог програми; welcome
 класифікує лише достовірний стан інсталяції, не визначаючи наперед намір змінити
 склад компонентів. `/CLIENTUPDATE=1` і `/MANAGERUPDATE=1` показують власний update
 welcome та штатно пропускають Components. Обидва режими залишаються незалежними; API

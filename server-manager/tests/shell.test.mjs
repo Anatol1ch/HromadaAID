@@ -13,7 +13,7 @@ test('six synthetic scenarios keep service/API independent and provide safe oper
   assert.notEqual(scenarios.running.api, scenarios.unavailable.api)
   assert.equal(scenarios.missing.installed, false)
   assert.equal(scenarios.interrupted.operation.retry.allowed, false)
-  assert.equal(scenarios.configuration.operation.errorCode, 'DEMO_TLS_REQUIRED')
+  assert.equal(scenarios.configuration.operation.errorCode, 'DEMO_CONFIG_INVALID')
   for (const scenario of Object.values(scenarios)) {
     assert.match(scenario.operation.operationId, /^demo-/)
     assert.equal(typeof scenario.operation.requiresElevation, 'boolean')

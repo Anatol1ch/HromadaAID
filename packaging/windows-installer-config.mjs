@@ -32,6 +32,7 @@ function normalizedDirectory(path, label) {
 /** Validates installer choices without opening or creating a SQLite database. */
 export function validateInstallerOptions(options, { inspectVolume } = {}) {
   if (!options || !['client', 'server', 'server-client'].includes(options.mode)) throw new Error('Виберіть режим: клієнт, сервер або сервер + клієнт.')
+  if (['host', 'port', 'tls'].some(key => Object.hasOwn(options, key))) throw new Error('Мережеві параметри встановлення не підтримуються: API використовує фіксований HTTP transport.')
   const hasServer = options.mode !== 'client'
   const paths = { programDirectory: normalizedDirectory(options.programDirectory, 'програма') }
   if (hasServer) {
@@ -64,6 +65,9 @@ export function validateInstallerOptions(options, { inspectVolume } = {}) {
       if (!statSync(existingConfig).isFile()) throw new Error('server.json має бути звичайним файлом.')
       let current
       try { current = JSON.parse(readFileSync(existingConfig, 'utf8')) } catch { throw new Error('Наявний server.json некоректний; його не буде перезаписано.') }
+      const configKeys = ['configVersion', 'programDirectory', 'databasePath', 'backupDirectory']
+      if (!current || Array.isArray(current) || current.configVersion !== 3 || Object.keys(current).some(key => !configKeys.includes(key))) throw new Error('Несумісна конфігурація server.json: потрібна configVersion: 3 без транспортних параметрів. Файл і дані не змінено.')
+      if (!configKeys.slice(1).every(key => typeof current[key] === 'string' && current[key].trim() === current[key] && /^[A-Za-z]:[\\/]/.test(current[key]) && !/[\u0000-\u001f\u007f]/.test(current[key]) && win32.isAbsolute(current[key]))) throw new Error('Наявний server.json містить некоректні абсолютні шляхи; файл і дані не змінено.')
       if (typeof current.databasePath !== 'string' || typeof current.backupDirectory !== 'string') throw new Error('Наявний server.json не містить очікуваних шляхів; перевірте його вручну.')
       const samePath = (a, b) => win32.resolve(a).toLocaleLowerCase('en-US') === win32.resolve(b).toLocaleLowerCase('en-US')
       const databaseInsideSelectedData = samePath(current.databasePath, existingDatabase) || samePath(current.databasePath, freshDatabase)
@@ -93,15 +97,9 @@ function xmlEscape(value) {
 export function renderInstalledServerConfig(options) {
   const valid = validateInstallerOptions(options)
   if (valid.mode === 'client') throw new Error('Режим «Клієнт» не створює конфігурацію сервера.')
-  const host = options.host ?? '127.0.0.1'
-  const port = options.port ?? 4310
-  if (!['127.0.0.1', '::1'].includes(host) || !Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Для первинного встановлення дозволено локальну адресу loopback і порт від 1024 до 65535.')
   return JSON.stringify({
-    configVersion: 2,
-    mode: 'local',
+    configVersion: 3,
     programDirectory: valid.programDirectory,
-    host,
-    port,
     databasePath: join(valid.dataDirectory, 'Database', 'hromada-aid.sqlite'),
     backupDirectory: valid.backupDirectory,
   }, null, 2) + '\n'

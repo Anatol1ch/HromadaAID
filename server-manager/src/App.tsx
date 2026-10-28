@@ -7,6 +7,7 @@ import type { ServiceControlOperation } from '../electron/service-control'
 import type { ServerUpdatePreview, ServerUpdateProgress, ServerUpdateResult } from '../electron/server-update-contract'
 import type { ReleaseUpdateState, ServerReleaseState } from '../electron/server-update-contract'
 import InstallWizard from './InstallWizard'
+import ServerAddresses from './ServerAddresses'
 import { apiDisplay, diagnosticLevel, initialSetupAction, inspectionFeedback, installationDisplay, notCheckedState, serviceDisplay, type PresentationTone } from './inspection-presentation'
 import managerIcon from '../../assets/hromadaaid-server-manager.svg'
 import BackupManagement from './BackupManagement'
@@ -92,7 +93,7 @@ function RealContent({ section, inspection, checking, serviceOperation, controlS
     ['Каталог резервних копій', config?.backupDirectory ?? null, 'configuration'],
   ] as const
   const settings = [
-    ['Адреса API', config?.apiAddress ?? null, 'configuration'], ['Порт', config?.port === null || config?.port === undefined ? null : String(config.port), 'configuration'],
+    ['Порт', config?.port === null || config?.port === undefined ? null : String(config.port), 'configuration'],
     ['Транспорт', config?.transport ?? null, 'configuration'], ['Файл SQLite', config?.databasePath ?? null, 'configuration'], ['Журнали WinSW', config?.logDirectory ?? null, 'service'],
     ['Обліковий запис служби', config?.serviceAccount ?? null, 'service'], ['Тип запуску', config?.startMode ?? null, 'service'],
   ] as const
@@ -137,6 +138,7 @@ function RealContent({ section, inspection, checking, serviceOperation, controlS
       {serviceCanControl && <div className="sm-service-toolbar"><div><strong>Керування сервером</strong><p>Під час зупинки чи перезапуску підключення користувачів тимчасово перериваються.</p></div><div className="sm-service-actions" aria-label="Керування сервером">{snapshot.service.status === 'stopped' ? <button className="primary-button" type="button" disabled={Boolean(serviceOperation) || checking || updateBusy || backupBusy || Boolean(updatePreview)} onClick={() => controlService('start')}><Play size={15} aria-hidden="true"/>Запустити сервер</button> : <><button className="secondary-button" type="button" disabled={Boolean(serviceOperation) || checking || updateBusy || backupBusy || Boolean(updatePreview)} onClick={() => controlService('stop')}><Square size={14} aria-hidden="true"/>Зупинити сервер</button><button className="secondary-button" type="button" disabled={Boolean(serviceOperation) || checking || updateBusy || backupBusy || Boolean(updatePreview)} onClick={() => controlService('restart')}><RotateCw size={15} aria-hidden="true"/>Перезапустити</button></>}</div></div>}
       <div className="sm-health-footer"><span><Clock3 size={16} aria-hidden="true"/>Остання перевірка: {snapshot ? new Date(snapshot.checkedAt).toLocaleString('uk-UA') : 'Не виконувалась'}</span><Status tone={overall.tone}>{install.label}</Status></div>
     </section>
+    <ServerAddresses addresses={snapshot?.networkAddresses}/>
     <details className="dashboard-panel sm-disclosure"><summary>Технічні відомості та останні перевірки</summary><dl className="sm-details sm-summary-rows">{([['Адреса API', config?.apiAddress ?? null], ['API Contract', snapshot?.api.contractVersion?.toString() ?? null], ...directoryRows.map(([label, path]) => [label, path] as const)] as const).map(([label, item]) => <div key={label}><dt>{label}</dt><dd>{item ?? 'Не визначено'}</dd></div>)}</dl><EventTable events={events} caption="Останні результати перевірки серверного середовища"/></details>
 
   </>
@@ -327,7 +329,7 @@ export default function App() {
   const events: DemoEvent[] = [
     { id: operation.operationId, time: checkedAt, title: operation.status === 'failed' ? 'Демонстраційна перевірка не завершена' : 'Демонстраційна перевірка завершена', detail: operation.status === 'failed' ? operation.message : 'Системні ресурси не опитувались.', level: operation.status === 'failed' ? 'error' : 'success', code: operation.errorCode ?? 'DEMO_OK' },
     { id: 'demo-package-001', time: DEMO_CHECKED_AT, title: 'Серверний пакет відповідає маніфесту', detail: 'Версія 0.1.0 (тестова).', level: 'info', code: 'DEMO_PACKAGE_VALID' },
-    { id: 'demo-transport-001', time: DEMO_CHECKED_AT, title: 'Параметри перевірені', detail: 'Локальний HTTP, доступ лише з цього комп’ютера.', level: 'info', code: 'DEMO_LOOPBACK' },
+    { id: 'demo-transport-001', time: DEMO_CHECKED_AT, title: 'Параметри перевірені', detail: 'HTTP на фіксованому порту 4310; loopback, LAN і Tailscale.', level: 'info', code: 'DEMO_HTTP' },
   ]
   const version = scenario.installed ? '0.1.0 · тестова' : 'Не визначена'
   const serviceTone = scenario.service === 'Працює' ? 'success' : scenario.service === 'Зупинена' ? 'warning' : 'info'
@@ -372,7 +374,7 @@ export default function App() {
             <div className="sm-health-footer"><span><Clock3 size={16} aria-hidden="true"/>Остання демоперевірка: {checkedAt}</span><Status tone={scenario.tone}>Тестовий стан</Status></div>
           </section>
           <div className="sm-two-columns">
-            <Panel title="Конфігурація" icon={<Settings2 size={21} aria-hidden="true"/>} example action={viewButton('configuration')}><dl className="sm-details sm-summary-rows"><div><dt>Адреса API</dt><dd>http://127.0.0.1:3000</dd></div><div><dt>Каталог програми</dt><dd>{demoPaths.program}</dd></div><div><dt>Серверні дані</dt><dd>{demoPaths.data}</dd></div><div><dt>Резервні копії</dt><dd>{demoPaths.backups}</dd></div></dl></Panel>
+            <Panel title="Конфігурація" icon={<Settings2 size={21} aria-hidden="true"/>} example action={viewButton('configuration')}><dl className="sm-details sm-summary-rows"><div><dt>Адреса API</dt><dd>http://127.0.0.1:4310</dd></div><div><dt>Каталог програми</dt><dd>{demoPaths.program}</dd></div><div><dt>Серверні дані</dt><dd>{demoPaths.data}</dd></div><div><dt>Резервні копії</dt><dd>{demoPaths.backups}</dd></div></dl></Panel>
             <Panel title="Оновлення" icon={<Download size={21} aria-hidden="true"/>} example action={viewButton('updates')}><p className="sm-card-lead">Доступна нова версія сервера</p><dl className="sm-details sm-summary-rows"><div><dt>Встановлена версія</dt><dd>{version}</dd></div><div><dt>Доступна версія</dt><dd>0.1.1</dd></div></dl><p className="sm-card-note">Приклад. Перевірка релізів і завантаження ще не підключені.</p></Panel>
           </div>
           <Panel title="Останні діагностичні події" icon={<Activity size={21} aria-hidden="true"/>} action={<button className="sm-link" type="button" onClick={() => setSection('diagnostics')}>Усі події<ArrowRight size={16} aria-hidden="true"/></button>}><EventTable events={events} compact/></Panel>
@@ -381,8 +383,8 @@ export default function App() {
 
         {section === 'configuration' && <>
           <Panel title="Каталоги" icon={<Folder size={21} aria-hidden="true"/>} example><dl className="sm-directory-list">{([['Каталог програми', demoPaths.program, 'Виконувані файли та ресурси сервера.'], ['Каталог даних', demoPaths.data, 'SQLite, конфігурація, журнали й захищені службові файли.'], ['Каталог резервних копій', demoPaths.backups, 'Незалежний каталог архівів .hraid.']] as const).map(([label, path, hint]) => <div key={label}><span className="sm-card-icon"><Folder size={21} aria-hidden="true"/></span><div><dt>{label}</dt><small>{hint}</small></div><dd>{path}</dd></div>)}</dl></Panel>
-          <Panel title="Параметри підключення" icon={<Settings2 size={21} aria-hidden="true"/>} example><dl className="sm-details sm-setting-rows"><div><dt><Server size={17} aria-hidden="true"/>Адреса і порт</dt><dd>127.0.0.1:3000</dd></div><div><dt><ShieldCheck size={17} aria-hidden="true"/>Транспорт</dt><dd>HTTP · лише цей комп’ютер</dd></div><div><dt><Cog size={17} aria-hidden="true"/>Назва служби</dt><dd>HromadaAIDApi</dd></div><div><dt><ShieldCheck size={17} aria-hidden="true"/>Обліковий запис</dt><dd>LocalService</dd></div></dl></Panel>
-          <Alert variant="info">Показано тестові параметри. Редагування недоступне. Для мережевого доступу потрібен HTTPS; зміна каталогу не переміщуватиме дані автоматично.</Alert>
+          <Panel title="Параметри сервера" icon={<Settings2 size={21} aria-hidden="true"/>} example><dl className="sm-details sm-setting-rows"><div><dt><ShieldCheck size={17} aria-hidden="true"/>Транспорт</dt><dd>HTTP · IPv4, порт 4310</dd></div><div><dt><Cog size={17} aria-hidden="true"/>Назва служби</dt><dd>HromadaAIDApi</dd></div><div><dt><ShieldCheck size={17} aria-hidden="true"/>Обліковий запис</dt><dd>LocalService</dd></div></dl></Panel>
+          <Alert variant="info">Показано тестові параметри. Редагування недоступне. API використовує HTTP на порту 4310; мережевий доступ залежить від Windows Firewall і маршрутизації. Зміна каталогу не переміщуватиме дані автоматично.</Alert>
           <div className="sm-future-action"><button type="button" className="secondary-button" disabled>Змінити конфігурацію</button><span>Значення не зчитуються з комп’ютера й не зберігаються.</span></div>
         </>}
 
