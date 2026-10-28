@@ -80,8 +80,8 @@ WinSW, LocalService, service SID, ACL даних/ключів, DPAPI, integrity 
 і мережевого кроку немає. На завершенні показуються стани служби/API й версія;
 адреси з копіюванням доступні лише в основному розділі «Стан сервера» Manager.
 
-Stage 9.2 реалізовано, але етап очікує ручного приймання й не є COMPLETED.
-Чекліст: [stage-9.2-manual-testing.md](../docs/stage-9.2-manual-testing.md). Для нього
-потрібні свіжі пакети цього стану коду за окремим запитом на packaging. Реальні
-NSIS/UAC, Windows Service, Firewall, Tailscale-адаптер, update/rollback і підключення
-з іншого вузла ще потребують Windows 10 x64 VM; візуальна перевірка залишається ручною.
+Stage 9.2 завершено та прийнято власником у Windows VM на Stable 0.2.1.
+Протокол і підтверджені результати наведено в
+[stage-9.2-manual-testing.md](../docs/stage-9.2-manual-testing.md). Автоматичні
+перевірки поточного коду та результати VM-приймання — окремі види доказів.
+Поточний стан проєкту описано в [HANDOFF.md](../docs/HANDOFF.md).

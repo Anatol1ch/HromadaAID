@@ -1,16 +1,16 @@
 # Windows Service deployment notes
 
-This is an install-time template only. It does not register, start, stop, or modify a Windows service. The future installer must replace `__PROGRAM_DIRECTORY__` and `__DATA_DIRECTORY__` with the selected absolute paths, XML-escape them, write the rendered XML beside a renamed WinSW executable, and then call that executable's `install` command. It must start the service only after paths, ACLs, configuration, database, and backup key have been validated. Do not run the template as-is.
+This is the service definition template used by the installer. It does not itself register, start, stop, or modify a Windows service. The installer replaces `__PROGRAM_DIRECTORY__` and `__DATA_DIRECTORY__` with selected absolute paths, XML-escapes them, writes the rendered XML beside the renamed WinSW executable, and invokes its `install` command after validating paths, ACLs, configuration, database, and backup key. Do not run the template as-is.
 
 ## Service host choice
 
-Use the stable WinSW 2.12.0 release, pinned and hash-verified by the future installer, as a small SCM wrapper around the already-built server entry point. The current Electron NSIS packaging only packages the desktop client; WiX can register SCM services but cannot make this Node.js entry point speak the Windows service protocol on its own. WinSW supplies SCM status, start/stop/restart commands, child-process supervision, bounded recovery actions, stdout/stderr capture, and size-based log rotation. Its stop path sends Ctrl+C and waits before its documented forced-stop fallback, which allows Node to receive SIGINT and run the graceful shutdown implemented in `server-runtime.ts`.
+The Windows packaging pipeline pins and hash-verifies the stable WinSW 2.12.0 release and uses it as an SCM wrapper around the built server entry point. WinSW supplies SCM status, start/stop/restart commands, child-process supervision, bounded recovery actions, stdout/stderr capture, and size-based log rotation. Its stop path sends Ctrl+C and waits before its documented forced-stop fallback, which allows Node to receive SIGINT and run the graceful shutdown implemented in `server-runtime.ts`.
 
 Do not use the latest WinSW 3 prerelease for the first deployment without a separate qualification pass. NSSM's published stable release is old; do not choose it only for familiarity. If service lifecycle requirements later outgrow the wrapper, a small dedicated SCM host can replace WinSW, but that would be a separately tested component.
 
 ## Runtime layout and invocation
 
-The installer should put the pinned official Node.js runtime under `runtime\node.exe`, the compiled server output and production dependencies under `server\`, and the rendered service definition beside the WinSW executable. As of October 2026, Node 24.22.1 is the current Node 24 LTS security release; qualify the then-current patched Node 24 LTS build, `node:sqlite`, and the `argon2` native module together before shipping. Build/copy `argon2` for that exact runtime ABI. The service launches `installed.js --config <absolute server.json>` directly; `pnpm`, a global Node installation, Electron, and the process current directory are not runtime dependencies.
+The Windows packaging pipeline places the pinned official Node.js runtime under `runtime\node.exe`, the compiled server output and production dependencies under `server\`, and the rendered service definition beside WinSW. The bundled Node.js version and hash are specified in `scripts/package-windows.mjs`; qualify that runtime, `node:sqlite`, and the `argon2` native module together before changing the pin. The service launches `installed.js --config <absolute server.json>` directly; `pnpm`, a global Node installation, Electron, and the process current directory are not runtime dependencies.
 
 Once the installer renders and qualifies this template, the renamed wrapper's documented commands provide service control, for example `HromadaAIDService.exe install`, then `start`, `status`, `stop`, or `restart`. These commands are not run in this stage. Uninstalling the service must not remove the separate data or backup directories.
 
@@ -22,13 +22,12 @@ The five-minute wrapper stop timeout is a last-resort ceiling, not the normal sh
 
 ## Account, ACL, DPAPI, and TLS
 
-The template uses Windows `LocalService`, never `LocalSystem`. It has limited local privileges and no general network credentials. The installer should enable the unique service SID `NT SERVICE\HromadaAIDApi` (`sc.exe sidtype HromadaAIDApi unrestricted`) before first start, then assign the file ACLs to that SID. This provides per-service file isolation while keeping the low-privilege built-in logon and avoids storing an account password in the service definition. Verify the configured SID type before granting ACLs. The future installer must grant only:
+The template uses Windows `LocalService`, never `LocalSystem`. It has limited local privileges and no general network credentials. The installer enables the unique service SID `NT SERVICE\HromadaAIDApi` (`sc.exe sidtype HromadaAIDApi unrestricted`) before first start, then assigns the file ACLs to that SID. This provides per-service file isolation while keeping the low-privilege built-in logon and avoids storing an account password in the service definition. Verify the configured SID type before granting ACLs. The installer grants only:
 
 - Program files, runtime, and production modules: the service SID read/execute; administrators and installer may update them.
 - Server JSON: the service SID read; administrators/installer write. The file contains paths and transport settings, not passwords or backup keys.
 - SQLite directory and restore journal/staging: the service SID modify; administrators full control. This includes SQLite WAL/SHM and the process-lock file.
 - Backup and log directories: the service SID modify; administrators full control. Do not grant ordinary users write access.
-- TLS certificate: the service SID read. TLS private key: read only for the service SID and administrators; no ordinary user access.
 - The DPAPI backup-key file: read only for the service SID and administrators; write only during explicit key setup/recovery procedures. Do not recreate it automatically if absent.
 
 The backup key uses DPAPI `LocalMachine` scope. It is not bound to the account that created it, so the service can unprotect it under `LocalService` on the same Windows machine if its ACL permits reading. The DPAPI file is still machine-bound and is not a disaster-recovery copy; the separately protected recovery key remains necessary. The installer must not migrate, replace, or recreate existing keys. Network TLS private keys should be provisioned with similarly narrow ACLs; no key contents belong in logs or JSON.
@@ -41,4 +40,4 @@ If the configured database or backup drive is absent, inaccessible, or invalid a
 
 ## What must still be qualified by the installer stage
 
-The future installer must render the selected paths safely, package/hash-verify WinSW and the matching Node runtime, create the service only after ACL/config preflight, preserve data/config/backup paths during upgrades and uninstall, and manually test SCM status, stop timeout, Windows restart recovery, service-account ACLs, unavailable disks, and DPAPI access. This stage has not installed or changed a Windows service or any system ACL.
+The installer renders selected paths safely, package/hash-verifies WinSW and the pinned Node runtime, creates the service only after ACL/config preflight, and preserves data/config/backup paths during upgrades and uninstall. Windows VM qualification remains necessary for SCM status, stop timeout, restart recovery, service-account ACLs, unavailable disks, and DPAPI access. See [server/TRANSPORT.md](../TRANSPORT.md) for the current internal HTTP transport on port 4310.

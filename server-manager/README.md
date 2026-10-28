@@ -8,7 +8,7 @@
 - `pnpm manager:start` — production renderer через `file://`, без Vite/Fastify.
 - `pnpm manager:build` — типізація й збірка до `dist-server-manager`.
 - `pnpm manager:test-stage7` — цільові перевірки станів, Inspection Engine, керування службою, іконки й Electron GUI; без реальних SCM-операцій та повторного повного тестування ZIP-транзакцій.
-- `pnpm manager:test` — весь набір Manager, включно з тестовими файловими транзакціями оновлення.
+- `pnpm manager:test` — вибрані автоматичні перевірки Manager, включно з тестовими файловими транзакціями оновлення.
 - `pnpm manager:portable` — portable Windows x64 у `release/server-manager/win-unpacked`. Пакет містить Electron та комплектний server payload; робочі SQLite, конфігурації та ключі до нього не входять.
 - `pnpm manager:portable:smoke` — запуск готового EXE з тимчасовим профілем. Завершується лише процес тестового Manager.
 
@@ -20,7 +20,7 @@
 
 Inspection Engine залишається read-only: служба HromadaAIDApi, її WinSW XML, allowlist полів server.json, версія пакета та GET /health. Робоча SQLite, вміст резервних архівів і ключів для оглядової перевірки не відкриваються. SCM-помилка відрізняється від відсутньої служби. HTTP 200 без коректного HromadaAID health contract не підтверджує готовності API.
 
-Джерела Installation Discovery — метадані Windows Service, захищені advisory-шляхи інсталятора в HKLM\Software\HromadaAID\Installer та обмежені стандартні каталоги. Шляхи з locator не вважаються довіреними без перевірки. Сканування всіх дисків немає. Для мережевого API збережені HTTPS і стандартна перевірка сертифікатів.
+Джерела Installation Discovery — метадані Windows Service, захищені advisory-шляхи інсталятора в HKLM\Software\HromadaAID\Installer та обмежені стандартні каталоги. Шляхи з locator не вважаються довіреними без перевірки. Сканування всіх дисків немає. Внутрішній API використовує HTTP на порту 4310; актуальна політика описана в [server/TRANSPORT.md](../server/TRANSPORT.md).
 
 Встановлення використовує наявні серверні CLI й PowerShell-сценарії, передає пароль через stdin, окремо підтверджує збереження аварійного ключа. Оновлення використовує чинну транзакцію Server.next / Server / Server.previous / Server.failed. Установлений старий пакет з одним integrity-маніфестом підтримується без створення фіктивних метаданих. Новий ZIP потребує обох маніфестів. Коди помилок і стани відкату залишаються окремими.
 

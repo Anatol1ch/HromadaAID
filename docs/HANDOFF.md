@@ -70,6 +70,10 @@ Universal Setup зібрано, NSIS archive integrity та вміст пере�
 
 ### Наступний крок
 
-За [ROADMAP.md](ROADMAP.md) наступний запланований етап — **Stage 9.3: Project
-Cleanup**. Stage 9.2 прийнято; виправлення відомого обмеження Manager не планується.
-Протокол та результати оновлення: [stage-9.2-manual-testing.md](stage-9.2-manual-testing.md).
+За [ROADMAP.md](ROADMAP.md) **Stage 9.3: Project Cleanup завершено**; наступний
+етап — **Stage 9.4: CI/CD Automation**. Змінено шлях тесту `windows:test-installer`,
+видалено підтверджено невикористаний Client helper, точково актуалізовано чинні
+документи та додано перевірене очищення generated `dist-server` перед Server build.
+Цільові перевірки Stage 9.3 виконані; Windows VM/manual testing не проводилося.
+Stable залишається **0.2.1**. Рекомендації CL-05–08 перенесено до Stage 9.4.
+Протокол приймання Stage 9.2: [stage-9.2-manual-testing.md](stage-9.2-manual-testing.md).

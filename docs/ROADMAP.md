@@ -47,13 +47,17 @@ update до 0.1.6. Перевірено роботу Windows Service й API, а�
 [stage-9.2-manual-testing.md](stage-9.2-manual-testing.md). Фактична реалізація —
 [ARCHITECTURE.md](ARCHITECTURE.md), політика — [TRANSPORT.md](../server/TRANSPORT.md).
 
-## Stage 9.3 — Project Cleanup — PLANNED
+## Stage 9.3 — Project Cleanup — COMPLETED
 
-- Видаляти лише підтверджено невикористаний код.
-- Очищати застарілі залежності й технічний борг з конкретним обґрунтуванням.
-- Перевірити конфігурації та актуалізувати документацію.
-- Зберігати чинні контракти й сумісність; не проводити масштабний рефакторинг без потреби.
-- SQL/domain modules у `electron/`, які використовує Server, не вважати застарілими лише за їхнім розташуванням.
+Виправлено шлях тесту `windows:test-installer`, видалено підтверджено
+невикористаний Client helper резервування, актуалізовано чинні документи для
+Stage 9.2 та HTTP transport, а перед `server:build` додано перевірене очищення
+лише generated `dist-server`. Server payload і staging publication не змінено.
+Stable Release залишається **0.2.1**.
+
+Аудитні рекомендації CL-05–08 — фіксація CI toolchain, NSIS compiler, підготовка
+окремих regression checks і release artifact orchestration — перенесено до
+Stage 9.4. SQL/domain modules у `electron/`, які використовує Server, збережено.
 
 ## Stage 9.4 — CI/CD Automation — PLANNED
 
