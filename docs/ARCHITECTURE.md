@@ -58,16 +58,19 @@ Authentication, Argon2id, RBAC, sessions та server-side authorization збер
 Manager перевіряє SCM та http://127.0.0.1:4310/health окремо. Running не доводить
 готовності API. Той самий локальний health URL використовують install/update/recovery.
 Майстер має три кроки: каталоги, адміністратор, підсумок; адрес на завершенні немає.
-На основному екрані є loopback і адреси з копіюванням: LAN — активні фізичні IPv4
-адаптери Windows, Tailscale — підтверджений опис адаптера разом з відповідною IPv4.
-CGNAT-адреса або назва інтерфейсу самі по собі не визначають Tailscale. Якщо адаптер
-не визначено, адресу вводять у Client вручну. Збір метаданих обмежено тайм-аутом,
-його помилка не змінює результати SCM/API.
+На основному екрані Manager є loopback і адреси з копіюванням. LAN визначається за
+активними фізичними IPv4 адаптерами Windows; Tailscale — за metadata адаптера та
+відповідною IPv4, а сама CGNAT-адреса не є доказом. Відоме обмеження 0.2.1: у
+протестованій Windows VM автоматичне визначення/відображення LAN або Tailscale IPv4
+може бути некоректним. Це не впливає на API чи Client transport; адресу вводять у
+Client вручну. Власник прийняв обмеження. Збір metadata має timeout і його помилка
+не змінює результати SCM/API.
 
 Tailscale SDK/API, встановлення/керування tailnet, discovery і автоматичних правил
 Windows Firewall немає. Мережевий доступ залежить від зовнішніх firewall rules,
 маршрутизації й політик tailnet. Деталі: [TRANSPORT.md](../server/TRANSPORT.md).
-Stage 9.2 реалізовано, але завершення очікує [Windows VM-приймання](stage-9.2-manual-testing.md).
+Stage 9.2 прийнято у Windows VM; результати та відоме обмеження зафіксовані в
+[чеклісті ручного тестування](stage-9.2-manual-testing.md).
 
 ## Резервування та restore
 

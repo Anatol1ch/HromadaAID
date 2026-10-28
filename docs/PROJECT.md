@@ -39,16 +39,16 @@ Server Manager показує loopback, доступні LAN IPv4 та визн�
 
 ## Поточний стан
 
-Останній опублікований Stable Release — **0.2.0**. У Windows VM підтверджені базове
-встановлення Stage 9.2, Windows Service, API та віддалена авторизація через Tailscale.
-**Stage 9.1 — Automatic Updates завершено.** Перехід усіх компонентів з 0.2.0 на
-0.2.1 і збереження серверних даних ще очікують ручної перевірки.
+Останній опублікований Stable Release — **0.2.1**. Власник підтвердив у Windows VM
+успішне оновлення Client, Server Manager та API Server із 0.2.0 до 0.2.1,
+збереження конфігурації й бази даних та працездатність системи після оновлення.
+**Stage 9.1 — Automatic Updates і Stage 9.2 — Tailscale Connectivity завершено.**
 
-**Stage 9.2: Tailscale Connectivity — реалізовано, очікує завершального Windows VM-приймання.**
-Локальний тестовий кандидат 0.2.1 виправляє визначення Tailscale IPv4 у Server Manager.
-Етап не завершений до ручного тесту оновлення за
-[чеклістом Stage 9.2](stage-9.2-manual-testing.md). Поточний checkpoint і межі
-перевірок — у [HANDOFF.md](HANDOFF.md), подальші етапи — у [ROADMAP.md](ROADMAP.md).
+Відоме некритичне обмеження 0.2.1: Server Manager може некоректно визначати або
+показувати LAN/Tailscale IPv4 у деяких конфігураціях Windows VM. Це не перешкоджає
+підключенню Client; адресу сервера можна ввести вручну. Власник прийняв обмеження,
+окреме виправлення не планується. Наступний етап — Stage 9.3: Project Cleanup;
+поточний checkpoint — у [HANDOFF.md](HANDOFF.md), план — у [ROADMAP.md](ROADMAP.md).
 
 Технічні межі: [ARCHITECTURE.md](ARCHITECTURE.md). Подальша робота:
 [ROADMAP.md](ROADMAP.md). Актуальний checkpoint і перевірки: [HANDOFF.md](HANDOFF.md).

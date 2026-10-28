@@ -2,11 +2,13 @@
 
 ## Стан проєкту
 
-- Поточний Stable: **0.2.0**, опублікований у GitHub.
+- Поточний Stable: **0.2.1**, опублікований у GitHub.
 - **Stage 9.1 — Automatic Updates завершено** після приймання основних сценаріїв у Windows 10 x64 VM.
-- Stage 9.2 інтегровано в `main`; Stable tag `0.2.0` вказує на `c1319027f2d3edb63f1d33299120260c18e09e6b`. Поточна робоча гілка — `fix/tailscale-adapter-detection`.
+- **Stage 9.2 — Tailscale Connectivity завершено** та прийнято власником у Windows VM; Stable tag `0.2.1` вказує на `e159ab5b8536beb74e31ae8a3cee4c7151487932`.
+- Автоматичне оновлення Client, Server Manager та API Server з 0.2.0 до 0.2.1 підтверджене власником. Конфігурація, SQLite й наявні дані збережені; служба та система працюють після оновлення.
+- Відоме некритичне обмеження: Manager може некоректно визначати/показувати LAN або Tailscale IPv4 у деяких Windows VM. Client підключається через вручну введену адресу. Власник прийняв обмеження; окремого виправлення не планується.
 - Релізний commit: `10b0b85b36a9cad84d75259aa6fe2dd90e08b4d4`; annotated tag `0.1.6` лишається на цьому commit. Документаційний checkpoint перед README update був `263c50b74cabf3d1172676bcaa5b738f650559d3`.
-- Історичний VM snapshot Stage 9.1: `HromadaAID 0.1.6 – Stable Baseline`. Він не підтверджує Stage 9.2; новий transport і конфігурація v3 потребують чистого приймання.
+- Історичний VM snapshot Stage 9.1: `HromadaAID 0.1.6 – Stable Baseline`; він зберігає лише результати Stage 9.1.
 
 ## Архітектура й оновлення
 
@@ -33,11 +35,12 @@ Client та Server Manager — окремі Electron-застосунки; API S
 
 Локальний `release/<version>/` — тимчасове сховище артефактів; він ігнорується Git. Після опублікованого та перевіреного релізу власник може видалити локальні збірки. Source scripts, regression tests, fixtures, migrations та recovery/integrity code залишаються під контролем версій.
 
-## Stage 9.2 — очікує завершального оновлення 0.2.0 → 0.2.1 у VM
+## Stage 9.2 — COMPLETED, Stable 0.2.1
 
-Stable `0.2.0` опубліковано; користувач підтвердив у Windows VM базове встановлення,
-Windows Service, API, авторизацію та віддалене Tailscale-підключення. Етап **не
-завершено**: лишилася ручна перевірка оновлення встановленої системи до 0.2.1.
+Власник підтвердив успішне ручне оновлення на Windows VM: Client, Server Manager
+і API Server оновилися з 0.2.0; конфігурація, SQLite та записи збережені, Windows
+Service і застосунок працюють після оновлення. Client підключається й авторизується
+через Tailscale.
 
 Транспорт незмінний: один Fastify/SQLite та IPv4 HTTP `0.0.0.0:4310`; Client
 використовує вручну збережену IPv4/DNS адресу; discovery немає. Server Manager
@@ -46,15 +49,14 @@ Tailscale SDK/API та автоматичні Windows Firewall rules відсу�
 WinSW/LocalService, auth/RBAC, backup/restore і загальні update/recovery guards
 збережені.
 
-### Виправлення Tailscale у 0.2.1
+### Відоме обмеження Manager
 
-У 0.2.0 Manager покладався на повний збіг `InterfaceDescription` з обмеженим
-переліком назв. Властивості адаптера проблемної VM не збережені, тому це
-обґрунтована причина, а не підтверджене відтворення. 0.2.1 читає Windows alias,
-description, PnP identity, стан і адресу; приймає варіанти назви Tailscale на
-активному не фізичному адаптері та перевіряє IPv4. Сторонній Wintun/CGNAT інтерфейс
-без Tailscale identity не класифікується як Tailscale. Tailscale CLI не запускається;
-API Server і Windows Service не залежать від цих метаданих.
+На тестовій Windows VM автоматичне визначення/відображення LAN і Tailscale IPv4
+працює некоректно. Це лише інформаційне відображення: воно не впливає на API,
+Windows Service чи мережеву доступність. Client дозволяє вручну ввести серверну
+адресу, і Tailscale-підключення Client підтверджене. Власник визнав обмеження
+некритичним і вирішив не продовжувати виправлення зараз; нових завдань чи етапів
+на цю тему не створювати.
 
 ### Автоматичні перевірки та пакети
 
@@ -66,12 +68,8 @@ Universal Setup зібрано, NSIS archive integrity та вміст пере�
 розпакування пройшов package integrity/runtime. Пакетні тести — 50/50 PASS.
 Локальні артефакти лежать у `release/0.2.1`.
 
-### Ще потребує Windows 10 x64 VM
+### Наступний крок
 
-Використати наявну інсталяцію 0.2.0 — чиста інсталяція не замінює цей сценарій.
-Після ручної публікації 0.2.1 перевірити оновлення Client і Manager через Stable
-Setup, API Server через Server ZIP, збереження `server.json`/SQLite/записів, службу,
-Tailscale IPv4 у Manager, копіювання та авторизацію Client через Tailscale. Також
-перевірити реальний SCM/LocalService, UAC і повторний запуск. Оновлення не запускалося.
-Чекліст: [stage-9.2-manual-testing.md](stage-9.2-manual-testing.md), сценарій E7.
-Stage 9.2 лишається AWAITING VM ACCEPTANCE до підтвердження користувачем.
+За [ROADMAP.md](ROADMAP.md) наступний запланований етап — **Stage 9.3: Project
+Cleanup**. Stage 9.2 прийнято; виправлення відомого обмеження Manager не планується.
+Протокол та результати оновлення: [stage-9.2-manual-testing.md](stage-9.2-manual-testing.md).
