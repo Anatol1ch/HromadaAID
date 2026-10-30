@@ -170,7 +170,7 @@ test('Failure while writing address components rolls back other recipient change
   assert.deepEqual(db.prepare('SELECT * FROM recipients').get(), before)
 })
 
-test('Document SQL uses the shared formatter and contains the registration address, never the residence address', t => {
+test('Statement snapshot resolves registration and residence with the shared formatter', t => {
   const { db, input, call } = fixture(t)
   const recipient = call('recipients:save', { ...input(), registeredAddressParts: full(), addressParts: testAddress({ building: '999' }) }).recipient
   db.prepare('INSERT INTO decisions(id,decision_number,decision_date,created_at,updated_at) VALUES(?,?,?,?,?)').run('decision', 'ТЕСТ', '2027-01-02', stamp, stamp)
@@ -178,6 +178,7 @@ test('Document SQL uses the shared formatter and contains the registration addre
   db.prepare('INSERT INTO assignments(id,recipient_id,decision_id,aid_type_id,amount_minor,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run('aid', recipient.id, 'decision', aid, 1000000, 'Призначено', stamp, stamp)
   const rows = readStatementRows(db, ['aid'], '2027')
   assert.equal(rows.length, 1); assert.equal(rows[0].registered_address, expected)
+  assert.equal(rows[0].residence_address, formatAddress(testAddress({ building: '999' })))
   assert.equal(rows[0].amount_minor, 1000000); assert.equal(rows[0].bank_mfo, '000001')
 })
 

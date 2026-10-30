@@ -76,6 +76,7 @@ try {
     $sheet.Range('A13:A24').NumberFormat = '@'
     $sheet.Range('C13:F24').NumberFormat = '@'
     $sheet.Range('H13:K24').NumberFormat = '@'
+    $sheet.Range('G13:G25').NumberFormatLocal = '# ##0,00'
     $records = @($payload.records)
     if ($records.Count -gt 12) { throw 'Персональна форма вміщує до 12 записів. Розділіть вибір на кілька відомостей.' }
     for ($i = 0; $i -lt $records.Count; $i++) {
@@ -92,7 +93,7 @@ try {
       $sheet.Cells.Item($row, 8).Value2 = $record.fullName
       $sheet.Cells.Item($row, 9).Value2 = $record.rnokpp
       $sheet.Cells.Item($row, 10).Value2 = $record.passport
-      $sheet.Cells.Item($row, 11).Value2 = $record.registeredAddress
+      $sheet.Cells.Item($row, 11).Value2 = $record.residenceAddress
     }
     # Keep populated source rows at least as high as the original; collapse only unused slots in the copy.
     for ($row = 13; $row -le 24; $row++) {

@@ -34,8 +34,11 @@ test('bank-aware IPC generation uses fresh server snapshots and rolls back faile
   for (const id of ['bankA', 'bankB']) db.prepare('INSERT INTO banks(id,name) VALUES(?,?)').run(id, 'Синтетичний банк')
   for (const [id, bank, mfo] of [['a1', 'bankA', '000001'], ['a2', 'bankA', '000002'], ['b1', 'bankB', '000003']]) db.prepare('INSERT INTO bank_details(id,bank_id,mfo,edrpou) VALUES(?,?,?,?)').run(id, bank, mfo, '00000001')
   for (const [id, detail, rnokpp] of [['p1', 'a1', '0000000001'], ['p2', 'a2', '0000000002'], ['p3', 'b1', '0000000003']]) {
-    db.prepare('INSERT INTO recipients(id,last_name,first_name,patronymic,rnokpp,passport,registered_address,bank_details_id,bank_account,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(id, 'Вигаданий', 'Тестовий', 'Приклад', rnokpp, 'ТТ000001', 'Синтетична адреса', detail, 'UA000000000000000000000000001', stamp, stamp)
+    db.prepare('INSERT INTO recipients(id,last_name,first_name,patronymic,rnokpp,passport,address,registered_address,bank_details_id,bank_account,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(id, 'Вигаданий', 'Тестовий', 'Приклад', rnokpp, 'ТТ000001', 'Застаріла адреса проживання', 'Синтетична адреса реєстрації', detail, 'UA000000000000000000000000001', stamp, stamp)
   }
+  db.prepare("UPDATE recipients SET residence_settlement_name='Структуроване проживання' WHERE id='p1'").run()
+  db.prepare("UPDATE recipients SET address='Застаріле проживання p2' WHERE id='p2'").run()
+  db.prepare("UPDATE recipients SET address='Застаріле проживання p3' WHERE id='p3'").run()
   db.prepare('INSERT INTO decisions(id,decision_number,decision_date,created_at,updated_at) VALUES(?,?,?,?,?)').run('decision', 'TEST', '2026-01-01', stamp, stamp)
   const aids = db.prepare('SELECT id FROM aid_types ORDER BY id LIMIT 2').all().map(row => row.id)
   for (let i = 0; i < 16; i++) db.prepare('INSERT INTO assignments(id,recipient_id,decision_id,aid_type_id,amount_minor,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run('item' + String(i).padStart(2, '0'), i < 13 ? 'p1' : i < 15 ? 'p2' : 'p3', 'decision', i < 13 || i === 15 ? aids[0] : aids[1], i < 13 ? 101 : i < 15 ? 202 : 303, ['Призначено', 'В роботі', 'Передано до казначейства'][i % 3], stamp, stamp)
@@ -82,7 +85,14 @@ test('bank-aware IPC generation uses fresh server snapshots and rolls back faile
       assert.equal(result.documents.reduce((sum, doc) => sum + doc.totalMinor, 0), 2020)
       assert.equal(new Set(result.documents.map(doc => doc.fileName.toLocaleLowerCase('uk'))).size, result.documents.length)
       if (kind === 'bank') assert.deepEqual(result.documents.map(doc => [doc.bankId, doc.recordCount, doc.totalMinor]), [['bankA', 15, 1717], ['bankB', 1, 303]])
-      if (kind === 'personal') assert.deepEqual(calls.flatMap(payload => payload.records).map(row => row.amount).sort((a,b) => a-b), [...Array(13).fill(1.01), 2.02, 2.02, 3.03])
+      if (kind === 'personal') {
+        assert.deepEqual(calls.flatMap(payload => payload.records).map(row => row.amount).sort((a,b) => a-b), [...Array(13).fill(1.01), 2.02, 2.02, 3.03])
+        const addresses = calls.flatMap(payload => payload.records).map(row => row.residenceAddress)
+        assert.ok(addresses.includes('Структуроване проживання'))
+        assert.ok(addresses.includes('Застаріле проживання p2'))
+        assert.ok(addresses.includes('Застаріле проживання p3'))
+        assert.ok(calls.every(payload => payload.records.every(row => !('registeredAddress' in row))))
+      }
       if (kind === 'summary') assert.ok(calls.every(payload => payload.daily[0].dateDisplay === '29.02.2028' && payload.periodText.includes('01.01.2025')))
       assert.equal(financialState(), before)
       saved.push(...result.documents)
@@ -121,7 +131,7 @@ test('bank-aware IPC generation uses fresh server snapshots and rolls back faile
   })
   await t.test('missing banks, required details and duplicate snapshot IDs cannot silently drop records', async () => {
     for (const kind of ['personal', 'summary', 'bank']) {
-      for (const field of ['bank_id', ...(kind === 'bank' ? ['rnokpp', 'bank_account'] : kind === 'personal' ? ['bank_mfo', 'bank_edrpou', 'bank_account', 'rnokpp', 'passport', 'registered_address'] : ['bank_mfo', 'bank_edrpou'])]) {
+      for (const field of ['bank_id', ...(kind === 'bank' ? ['rnokpp', 'bank_account'] : kind === 'personal' ? ['bank_mfo', 'bank_edrpou', 'bank_account', 'rnokpp', 'passport'] : ['bank_mfo', 'bank_edrpou'])]) {
         calls.length = 0; transform = rows => rows.map((row, i) => i === 0 ? { ...row, [field]: null } : row)
         const result = await generate(kind)
         assert.equal(result.ok, false, kind + ':' + field); assert.equal(calls.length, 0)
@@ -129,6 +139,23 @@ test('bank-aware IPC generation uses fresh server snapshots and rolls back faile
       transform = rows => rows.map((row, i) => i === 1 ? rows[0] : row)
       assert.equal((await generate(kind)).ok, false)
     }
+    transform = rows => rows
+  })
+  await t.test('personal statement requires residence address, accepts legacy residence text and ignores registration address', async () => {
+    const rows = readStatementRows(db, ids, '2026')
+    assert.match(rows.find(row => row.id === 'item00').residence_address, /Структуроване проживання/)
+    assert.equal(rows.find(row => row.id === 'item13').residence_address, 'Застаріле проживання p2')
+    db.prepare("UPDATE recipients SET registered_address=NULL,registration_postal_code=NULL,registration_region=NULL,registration_district=NULL,registration_settlement_type=NULL,registration_settlement_name=NULL,registration_street_type=NULL,registration_custom_street_type=NULL,registration_street_name=NULL,registration_building=NULL,registration_apartment=NULL WHERE id='p1'").run()
+    calls.length = 0
+    assert.equal((await generate('personal')).ok, true)
+    assert.match(calls[0].records[0].residenceAddress, /Структуроване проживання/)
+    const jobs = jobNames(); calls.length = 0
+    transform = rows => rows.map((row, index) => index === 0 ? { ...row, residence_address: null } : row)
+    const result = await generate('personal')
+    assert.equal(result.ok, false)
+    assert.match(result.message, /адресу проживання у картці отримувача/i)
+    assert.equal(calls.length, 0)
+    assert.deepEqual(jobNames(), jobs)
     transform = rows => rows
   })
   await t.test('personal filename collisions are rejected before creating files', async () => {

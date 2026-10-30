@@ -115,7 +115,10 @@ function prepareStatementGroups(kind: DocumentKind, rows: Row[], ids: string[], 
   }))
   const groups = groupStatements(kind, normalized)
   assertStatementSelection(normalized, ids, selection)
-  const required = kind === 'bank' ? ['rnokpp', 'bank_account'] : kind === 'summary' ? ['bank_mfo', 'bank_edrpou'] : ['bank_mfo', 'bank_edrpou', 'bank_account', 'last_name', 'first_name', 'patronymic', 'rnokpp', 'passport', 'registered_address']
+  if (kind === 'personal' && rows.some(row => !String(row.residence_address ?? '').trim())) {
+    throw new Error('Заповніть адресу проживання у картці отримувача та оновіть список перед формуванням персонального документа.')
+  }
+  const required = kind === 'bank' ? ['rnokpp', 'bank_account'] : kind === 'summary' ? ['bank_mfo', 'bank_edrpou'] : ['bank_mfo', 'bank_edrpou', 'bank_account', 'last_name', 'first_name', 'patronymic', 'rnokpp', 'passport']
   if (rows.some(row => required.some(field => !String(row[field] ?? '').trim()))) throw new Error('У вибраних отримувачів неповні реквізити для цього документа. Доповніть картки й оновіть список.')
   return groups
 }
@@ -175,7 +178,7 @@ export function registerStatementsIpc(source: StatementDataSource, worker: typeo
           amount: Number(row.amount_minor) / 100,
           fullName: [row.last_name, row.first_name, row.patronymic].filter((part) => typeof part === 'string' && part.trim()).join(' '),
           bankAccount: String(row.bank_account ?? ''), bankName: String(row.bank_name ?? ''), bankMfo: String(row.bank_mfo ?? ''), bankEdrpou: String(row.bank_edrpou ?? ''),
-          rnokpp: String(row.rnokpp ?? ''), passport: String(row.passport ?? ''), registeredAddress: String(row.registered_address ?? ''),
+          rnokpp: String(row.rnokpp ?? ''), passport: String(row.passport ?? ''), residenceAddress: String(row.residence_address ?? ''),
         }))
         const totalMinor = group.totalMinor
         if (kind === 'personal') await worker(scriptPath, { ...common, records })
