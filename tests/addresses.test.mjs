@@ -142,7 +142,7 @@ test('IPC stores components, ignores forged display text and restores both addre
   const read = handlers.get('recipients:get')({}, result.recipient.id)
   assert.equal(read.registeredAddress, expected); assert.deepEqual(read.registeredAddressParts, full())
   const edited = { ...value, addressParts: { ...read.addressParts, building: '15/2', apartment: '' } }
-  assert.equal(handlers.get('recipients:save')({}, edited, read.id).ok, true)
+  assert.equal(handlers.get('recipients:save')({}, edited, read.id, false, read.updatedAt).ok, true)
   const updated = handlers.get('recipients:get')({}, read.id)
   assert.equal(updated.registeredAddressParts.building, '105'); assert.equal(updated.addressParts.building, '15/2')
   assert.equal(updated.bankAccount, value.bankAccount)
@@ -156,7 +156,7 @@ test('Registration is mandatory, partial residence is rejected, and optional res
   assert.equal(call('recipients:save', { ...value, addressParts: null, address: 'Старий текст без складових' }).reason, 'validation')
   const created = call('recipients:save', value)
   assert.equal(created.ok, true)
-  const cleared = call('recipients:save', { ...value, addressParts: null, address: '' }, created.recipient.id)
+  const cleared = call('recipients:save', { ...value, addressParts: null, address: '' }, created.recipient.id, false, created.recipient.updatedAt)
   assert.equal(cleared.ok, true); assert.equal(cleared.recipient.address, null); assert.equal(cleared.recipient.addressParts, null)
   assert.equal(cleared.recipient.registeredAddress, formatAddress(value.registeredAddressParts))
 })
@@ -166,7 +166,7 @@ test('Failure while writing address components rolls back other recipient change
   const created = call('recipients:save', input())
   const before = db.prepare('SELECT * FROM recipients').get()
   db.exec("CREATE TRIGGER reject_address BEFORE UPDATE OF registration_building ON recipients WHEN NEW.registration_building='BLOCK' BEGIN SELECT RAISE(ABORT,'synthetic address failure'); END;")
-  assert.equal(call('recipients:save', { ...input(), firstName: 'Не зберегти', registeredAddressParts: { ...full(), building: 'BLOCK' } }, created.recipient.id).reason, 'storage')
+  assert.equal(call('recipients:save', { ...input(), firstName: 'Не зберегти', registeredAddressParts: { ...full(), building: 'BLOCK' } }, created.recipient.id, false, created.recipient.updatedAt).reason, 'storage')
   assert.deepEqual(db.prepare('SELECT * FROM recipients').get(), before)
 })
 
@@ -182,13 +182,13 @@ test('Statement snapshot resolves registration and residence with the shared for
   assert.equal(rows[0].amount_minor, 1000000); assert.equal(rows[0].bank_mfo, '000001')
 })
 
-test('Migration 16 → 19 preserves legacy address strings and exposes them without guessing components', t => {
+test('Migration 16 → 28 preserves legacy address strings and exposes them without guessing components', t => {
   const { db, open } = fixture(t, true)
   db.prepare('INSERT INTO recipients(id,last_name,first_name,address,registered_address,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run('legacy', 'Вигаданий', 'Тест', 'Стара адреса проживання', 'Стара адреса реєстрації', stamp, stamp)
   const before = db.prepare('SELECT * FROM recipients').get()
   db.close()
   const current = open(); registerRecipientFixture(current)
-  assert.equal(current.prepare('PRAGMA user_version').get().user_version, 19)
+  assert.equal(current.prepare('PRAGMA user_version').get().user_version, 28)
   const read = handlers.get('recipients:get')({}, 'legacy')
   assert.equal(read.registeredAddress, 'Стара адреса реєстрації'); assert.equal(read.address, 'Стара адреса проживання')
   assert.equal(read.registeredAddressParts, null); assert.equal(read.addressParts, null)

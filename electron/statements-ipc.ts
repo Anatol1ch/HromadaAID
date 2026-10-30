@@ -115,6 +115,12 @@ function prepareStatementGroups(kind: DocumentKind, rows: Row[], ids: string[], 
   }))
   const groups = groupStatements(kind, normalized)
   assertStatementSelection(normalized, ids, selection)
+  if (kind === 'personal' && rows.some(row => !Object.hasOwn(row, 'residence_address'))) {
+    throw new Error('Сервер повернув snapshot без поля адреси проживання. Перевірте актуальність і сумісність API Server із Client, потім повторіть формування.')
+  }
+  if (kind === 'personal' && rows.some(row => row.residence_address !== null && typeof row.residence_address !== 'string')) {
+    throw new Error('Сервер повернув адресу проживання в непідтримуваному форматі. Перевірте сумісність API Server із Client.')
+  }
   if (kind === 'personal' && rows.some(row => !String(row.residence_address ?? '').trim())) {
     throw new Error('Заповніть адресу проживання у картці отримувача та оновіть список перед формуванням персонального документа.')
   }

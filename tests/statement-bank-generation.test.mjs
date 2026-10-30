@@ -44,6 +44,8 @@ test('bank-aware IPC generation uses fresh server snapshots and rolls back faile
   for (let i = 0; i < 16; i++) db.prepare('INSERT INTO assignments(id,recipient_id,decision_id,aid_type_id,amount_minor,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run('item' + String(i).padStart(2, '0'), i < 13 ? 'p1' : i < 15 ? 'p2' : 'p3', 'decision', i < 13 || i === 15 ? aids[0] : aids[1], i < 13 ? 101 : i < 15 ? 202 : 303, ['Призначено', 'В роботі', 'Передано до казначейства'][i % 3], stamp, stamp)
   await createFirstAdministrator(db, { username: 'synthetic-admin', password: 'synthetic test password' })
   server = createApp(db); server.log.level = 'silent'
+  const health = await server.inject({ url: '/health' })
+  assert.equal(health.json().apiContractVersion, 1)
   const login = await server.inject({ method: 'POST', url: '/auth/login', payload: { username: 'synthetic-admin', password: 'synthetic test password' } })
   assert.equal(login.statusCode, 200)
   const headers = { authorization: 'Bearer ' + login.json().token }
@@ -64,6 +66,11 @@ test('bank-aware IPC generation uses fresh server snapshots and rolls back faile
   const listed = await server.inject({ url: '/api/statements?year=2026', headers })
   assert.equal(listed.statusCode, 200); assert.ok(isStatementListResult(listed.json()))
   const initialRows = listed.json().assignments, ids = initialRows.map(row => row.id)
+  const actualSnapshot = await server.inject({ method: 'POST', url: '/api/statements/snapshot', headers, payload: { ids, year: 2026 } })
+  assert.equal(actualSnapshot.statusCode, 200)
+  assert.match(actualSnapshot.json().find(row => row.id === 'item00').residence_address, /Структуроване проживання/)
+  assert.equal(actualSnapshot.json().find(row => row.id === 'item13').residence_address, 'Застаріле проживання p2')
+  assert.notEqual(actualSnapshot.json().find(row => row.id === 'item00').residence_address, actualSnapshot.json().find(row => row.id === 'item00').registered_address)
   assert.deepEqual(new Set(initialRows.map(row => row.bankId)), new Set(['bankA', 'bankB']))
   assert.equal(listStatementAssignments(db, 2026).assignments.length, 16)
   const selection = initialRows.map(({ id, aidTypeId, bankId }) => ({ id, aidTypeId, bankId }))
@@ -150,6 +157,11 @@ test('bank-aware IPC generation uses fresh server snapshots and rolls back faile
     assert.equal((await generate('personal')).ok, true)
     assert.match(calls[0].records[0].residenceAddress, /Структуроване проживання/)
     const jobs = jobNames(); calls.length = 0
+    transform = rows => rows.map(({ residence_address, ...row }) => row)
+    const oldServerResult = await generate('personal')
+    assert.equal(oldServerResult.ok, false)
+    assert.match(oldServerResult.message, /snapshot без поля адреси проживання.*сумісність API Server із Client/i)
+    assert.equal(calls.length, 0); assert.deepEqual(jobNames(), jobs)
     transform = rows => rows.map((row, index) => index === 0 ? { ...row, residence_address: null } : row)
     const result = await generate('personal')
     assert.equal(result.ok, false)
