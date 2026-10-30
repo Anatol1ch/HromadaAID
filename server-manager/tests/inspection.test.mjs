@@ -248,15 +248,6 @@ test('incompatible config versions and obsolete transport fields block API probi
   assert.equal((await inspectEnvironment(timeout)).api.status, 'unavailable')
 })
 
-test('unavailable address metadata does not change service or API checks', async () => {
-  const f = fixture()
-  f.adapter.networkAddresses = async () => { throw new Error('metadata unavailable') }
-  const result = await inspectEnvironment(f.adapter)
-  assert.equal(result.service.status, 'running')
-  assert.equal(result.api.status, 'available')
-  assert.deepEqual(result.networkAddresses, { lan: [], tailscale: [], unavailable: true })
-})
-
 test('configuration and package access errors remain visible as checks, and no database contents are read', async () => {
   const f = fixture()
   const reads = []

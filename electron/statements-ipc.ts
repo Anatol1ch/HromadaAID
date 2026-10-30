@@ -1,5 +1,6 @@
-import { bankStatementFileName, statementFileName } from './statement-filenames.js'
-import { statementKey, statementPeriodText, statementPlan, validateStatementParameters } from './statement-parameters.js'
+import { assertStatementSelection, groupStatements, type DocumentKind } from '../shared/statement-groups.js'
+import { assertUniqueStatementFileNames, bankStatementFileName, statementFileName } from './statement-filenames.js'
+import { statementKey, statementPeriodText, validateStatementParameters } from './statement-parameters.js'
 import { app, dialog } from 'electron'
 import { trustedIpcMain as ipcMain } from './ipc-security.js'
 import { appendFileSync, mkdirSync, copyFileSync, readFileSync, unlinkSync } from 'node:fs'
@@ -8,7 +9,7 @@ import { spawn } from 'node:child_process'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
-import type { GeneratedStatement, StatementKind } from './api-contract.js'
+import type { GeneratedStatement, GeneratedBankStatement, StatementKind } from './api-contract.js'
 import { cancelDocumentGeneration, cleanupDocumentTemp, createDocumentDirectory, initializeDocumentTemp, isDocumentTempPath, removeDocumentDirectory, setDocumentWorker } from './document-temp.js'
 
 type Row = Record<string, number | string | null>
@@ -20,7 +21,6 @@ let shuttingDown = false
 
 function displayDate(iso: string) { return `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}` }
 function safeFileName(value: string) { return value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').replace(/\s+/g, '_').slice(0, 100) || 'Відомість' }
-function asMinor(value: unknown) { const number = Number(value); if (!Number.isSafeInteger(number) || number < 0) throw new Error('invalid amount'); return number }
 
 function generationFailure(error: unknown, stage: Parameters<typeof statementFailure>[1]) {
   const failure = statementFailure(error, stage)
@@ -105,10 +105,25 @@ function invokeExcel(scriptPath: string, payload: object) {
 }
 
 export type StatementDataSource = { readRows: (ids: string[], year: string) => Promise<Row[]>; readBankRows: (ids: string[], year: number) => Promise<Row[]> }
-export function registerStatementsIpc(source: StatementDataSource) {
+function prepareStatementGroups(kind: DocumentKind, rows: Row[], ids: string[], selection: unknown) {
+  const normalized = rows.map(row => ({
+    id: typeof row.id === 'string' ? row.id : '', aidTypeId: typeof row.aid_type_id === 'string' ? row.aid_type_id : '',
+    aidTypeName: String(row.aid_type_name ?? ''), bankId: typeof row.bank_id === 'string' ? row.bank_id : null,
+    bankName: typeof row.bank_name === 'string' ? row.bank_name : null,
+    amountMinor: typeof row.amount_minor === 'number' ? row.amount_minor : NaN,
+    decisionDate: String(row.decision_date ?? ''), createdAt: String(row.created_at ?? ''), source: row,
+  }))
+  const groups = groupStatements(kind, normalized)
+  assertStatementSelection(normalized, ids, selection)
+  const required = kind === 'bank' ? ['rnokpp', 'bank_account'] : kind === 'summary' ? ['bank_mfo', 'bank_edrpou'] : ['bank_mfo', 'bank_edrpou', 'bank_account', 'last_name', 'first_name', 'patronymic', 'rnokpp', 'passport', 'registered_address']
+  if (rows.some(row => required.some(field => !String(row[field] ?? '').trim()))) throw new Error('У вибраних отримувачів неповні реквізити для цього документа. Доповніть картки й оновіть список.')
+  return groups
+}
+
+export function registerStatementsIpc(source: StatementDataSource, worker: typeof invokeExcel = invokeExcel) {
   initializeDocumentTemp()
 
-  ipcMain.handle('statements:generate', async (_event, kindValue: unknown, idsValue: unknown, yearValue: unknown, parametersValue: unknown) => {
+  ipcMain.handle('statements:generate', async (_event, kindValue: unknown, idsValue: unknown, yearValue: unknown, parametersValue: unknown, selectionValue: unknown) => {
     if (shuttingDown) return { ok: false, message: 'Застосунок завершує роботу.' }
     if ((kindValue !== 'personal' && kindValue !== 'summary') || !Array.isArray(idsValue) || idsValue.length < 1 || idsValue.length > 500 || idsValue.some((id) => typeof id !== 'string' || !id)) {
       return { ok: false, message: 'Позначте від одного до 500 призначень.' }
@@ -117,20 +132,21 @@ export function registerStatementsIpc(source: StatementDataSource) {
     if (!year) return { ok: false, message: 'Оберіть коректний звітний рік.' }
     const kind = kindValue as StatementKind
     const ids = [...new Set(idsValue as string[])]
-    const rows = await source.readRows(ids, year)
-    if (rows.length !== ids.length) return { ok: false, message: 'Частина призначень недоступна: їх видалено, змінено статус або рік рішення. Оновіть список.' }
+    let rows: Row[]
+    try { rows = await source.readRows(ids, year) }
+    catch { return { ok: false, message: 'Не вдалося отримати актуальні дані призначень. Оновіть список і параметри формування.' } }
+    let grouped: ReturnType<typeof prepareStatementGroups>
+    let parameters: NonNullable<ReturnType<typeof validateStatementParameters>>
+    let fileNames: string[]
     try {
-      for (const row of rows) asMinor(row.amount_minor)
-    } catch { return { ok: false, message: 'Суми допомог у базі потребують перевірки.' } }
-
-    if (rows.some(row => !row.bank_name || !row.bank_mfo || !row.bank_edrpou)) return { ok: false, message: 'У вибраних отримувачів не обрано банківські реквізити. Доповніть картки перед формуванням відомості.' }
-    const grouped = new Map<string, Row[]>()
-    for (const row of rows) {
-      const group = grouped.get(String(row.aid_type_id)) ?? []
-      group.push(row); grouped.set(String(row.aid_type_id), group)
-    }
-    const parameters = validateStatementParameters(parametersValue, statementPlan(kind, rows.map(row => ({ aidTypeId: String(row.aid_type_id), aidTypeName: String(row.aid_type_name) }))))
-    if (!parameters) return { ok: false, message: 'Перевірте номер, дати та період кожної відомості. Якщо склад документів змінився, відкрийте параметри повторно.' }
+      grouped = prepareStatementGroups(kind, rows, ids, selectionValue)
+      const validated = validateStatementParameters(parametersValue, grouped)
+      if (!validated) throw new Error('Перевірте номер, дати та період кожного документа. Якщо склад змінився, відкрийте параметри повторно.')
+      parameters = validated
+      const byKey = new Map(parameters.map(value => [statementKey(value), value]))
+      fileNames = grouped.map(group => statementFileName(kind, byKey.get(statementKey(group))!, group))
+      assertUniqueStatementFileNames(fileNames)
+    } catch (error) { return { ok: false, message: error instanceof Error ? error.message : 'Перевірте параметри формування.' } }
     const parameterMap = new Map(parameters.map(value => [statementKey(value), value]))
     const templatePath = join(currentDirectory, 'reference', kind === 'personal' ? 'Список.xlsx' : 'Зведений список.xlsx')
     const scriptPath = externalExcelScriptPath(currentDirectory, 'excel-templates.ps1')
@@ -139,51 +155,40 @@ export function registerStatementsIpc(source: StatementDataSource) {
     const documents: GeneratedStatement[] = []
     try {
       directory = createDocumentDirectory()
-      for (const typeRows of grouped.values()) {
-        const aidTypeName = String(typeRows[0].aid_type_name)
-        const batches = kind === 'personal' ? Array.from({ length: Math.ceil(typeRows.length / 12) }, (_unused, index) => typeRows.slice(index * 12, index * 12 + 12)) : [typeRows]
-        for (let index = 0; index < batches.length; index++) {
-          const batch = batches[index]
-          const parameter = parameterMap.get(statementKey({ aidTypeId: String(batch[0].aid_type_id), partIndex: index }))!
-          const id = randomUUID()
-          const suffix = kind === 'personal' && batches.length > 1 ? `_${index + 1}` : ''
-          const baseName = `${safeFileName(`${kind === 'personal' ? 'Персональна_відомість' : 'Зведений_список'}_${aidTypeName}${suffix}`)}_${id.slice(0, 8)}`
-          const xlsxPath = join(directory, `${baseName}.xlsx`)
-          const excelExtension = kind === 'personal' ? 'xls' : 'xlsx'
-          const excelPath = join(directory, `${baseName}.${excelExtension}`)
-          const pdfPath = join(directory, `${baseName}.pdf`)
-          stage = 'template-copy'
-          copyFileSync(templatePath, xlsxPath)
-          stage = 'worker'
-          const common = { kind, templatePath: xlsxPath, excelPath, pdfPath, aidTypeName: socialAidText(aidTypeName), periodText: statementPeriodText(parameter), documentNumber: parameter.documentNumber, documentDateDisplay: displayDate(parameter.documentDate) }
-          const records = batch.map((row) => ({
-            dateDisplay: displayDate(parameter.documentDate),
-            amount: Number(row.amount_minor) / 100,
-            fullName: [row.last_name, row.first_name, row.patronymic].filter((part) => typeof part === 'string' && part.trim()).join(' '),
-            bankAccount: String(row.bank_account ?? ''), bankName: String(row.bank_name ?? ''), bankMfo: String(row.bank_mfo ?? ''), bankEdrpou: String(row.bank_edrpou ?? ''),
-            rnokpp: String(row.rnokpp ?? ''), passport: String(row.passport ?? ''), registeredAddress: String(row.registered_address ?? ''),
-          }))
-          const totalMinor = batch.reduce((sum, row) => sum + asMinor(row.amount_minor), 0)
-          if (kind === 'personal') await invokeExcel(scriptPath, { ...common, records })
-          else {
-            const dailyMap = new Map<string, { count: number; amountMinor: number }>()
-            for (const row of batch) {
-              const date = parameter.documentDate; const daily = dailyMap.get(date) ?? { count: 0, amountMinor: 0 }
-              daily.count++; daily.amountMinor += asMinor(row.amount_minor); dailyMap.set(date, daily)
-            }
-            const daily = [...dailyMap.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, value]) => ({ dateDisplay: displayDate(parameter.documentDate), count: value.count, amount: value.amountMinor / 100 }))
-            await invokeExcel(scriptPath, { ...common, daily })
-          }
-          if (kind === 'personal') {
-            try { unlinkSync(xlsxPath) } catch { /* A locked intermediate remains in the managed job directory until cleanup. */ }
-          }
-          stage = 'pdf-read'
-          const pdfBase64 = readFileSync(pdfPath).toString('base64')
-          const excelName = statementFileName(kind, parameter)
-          const pdfName = excelName.replace(/\.(?:xls|xlsx)$/, '.pdf')
-          savedDocuments.set(id, { excelPath, excelName, pdfPath, pdfName })
-          documents.push({ id, fileName: pdfName, aidTypeName, recordCount: batch.length, totalMinor, pdfBase64, documentNumber: parameter.documentNumber, documentDate: parameter.documentDate })
+      for (const [groupIndex, group] of grouped.entries()) {
+        const batch = group.rows.map(row => row.source)
+        const aidTypeName = group.aidTypeName
+        const parameter = parameterMap.get(statementKey(group))!
+        const id = randomUUID()
+        const suffix = `_${group.partIndex + 1}`
+        const baseName = `${safeFileName(`${kind === 'personal' ? 'Персональна_відомість' : 'Зведений_список'}_${aidTypeName}${suffix}`)}_${id.slice(0, 8)}`
+        const xlsxPath = join(directory, `${baseName}.xlsx`)
+        const excelExtension = kind === 'personal' ? 'xls' : 'xlsx'
+        const excelPath = join(directory, `${baseName}.${excelExtension}`)
+        const pdfPath = join(directory, `${baseName}.pdf`)
+        stage = 'template-copy'
+        copyFileSync(templatePath, xlsxPath)
+        stage = 'worker'
+        const common = { kind, templatePath: xlsxPath, excelPath, pdfPath, aidTypeName: socialAidText(aidTypeName), periodText: statementPeriodText(parameter), documentNumber: parameter.documentNumber, documentDateDisplay: displayDate(parameter.documentDate) }
+        const records = batch.map((row) => ({
+          dateDisplay: displayDate(parameter.documentDate),
+          amount: Number(row.amount_minor) / 100,
+          fullName: [row.last_name, row.first_name, row.patronymic].filter((part) => typeof part === 'string' && part.trim()).join(' '),
+          bankAccount: String(row.bank_account ?? ''), bankName: String(row.bank_name ?? ''), bankMfo: String(row.bank_mfo ?? ''), bankEdrpou: String(row.bank_edrpou ?? ''),
+          rnokpp: String(row.rnokpp ?? ''), passport: String(row.passport ?? ''), registeredAddress: String(row.registered_address ?? ''),
+        }))
+        const totalMinor = group.totalMinor
+        if (kind === 'personal') await worker(scriptPath, { ...common, records })
+        else await worker(scriptPath, { ...common, daily: [{ dateDisplay: displayDate(parameter.documentDate), count: group.recordCount, amount: totalMinor / 100 }] })
+        if (kind === 'personal') {
+          try { unlinkSync(xlsxPath) } catch { /* A locked intermediate remains in the managed job directory until cleanup. */ }
         }
+        stage = 'pdf-read'
+        const pdfBase64 = readFileSync(pdfPath).toString('base64')
+        const excelName = fileNames[groupIndex]
+        const pdfName = excelName.replace(/\.(?:xls|xlsx)$/, '.pdf')
+        savedDocuments.set(id, { excelPath, excelName, pdfPath, pdfName })
+        documents.push({ id, fileName: pdfName, aidTypeName, bankId: group.bankId, bankName: group.bankName, recordCount: batch.length, totalMinor, pdfBase64, documentNumber: parameter.documentNumber, documentDate: parameter.documentDate })
       }
       return { ok: true, documents }
     } catch (error) {
@@ -193,7 +198,7 @@ export function registerStatementsIpc(source: StatementDataSource) {
     }
   })
 
-  ipcMain.handle('statements:generate-bank', async (_event, idsValue: unknown, yearValue: unknown) => {
+  ipcMain.handle('statements:generate-bank', async (_event, idsValue: unknown, yearValue: unknown, selectionValue: unknown) => {
     if (shuttingDown) return { ok: false, message: 'Застосунок завершує роботу.' }
     if (!Array.isArray(idsValue) || idsValue.length < 1 || idsValue.length > 500 || idsValue.some((id) => typeof id !== 'string' || !id)) {
       return { ok: false, message: 'Позначте від одного до 500 призначень.' }
@@ -201,39 +206,40 @@ export function registerStatementsIpc(source: StatementDataSource) {
     if (!Number.isInteger(yearValue) || Number(yearValue) < 2000 || Number(yearValue) > 2200) {
       return { ok: false, message: 'Оберіть коректний звітний рік.' }
     }
-    const excelName = bankStatementFileName()
     const ids = [...new Set(idsValue as string[])]
-    const rows = await source.readBankRows(ids, Number(yearValue))
-    if (rows.length !== ids.length) return { ok: false, message: 'Частина призначень недоступна: їх видалено, змінено статус або рік рішення. Оновіть список.' }
-    const missing = rows.flatMap((row) => {
-      const fields = [!String(row.rnokpp ?? '').trim() ? 'РНОКПП' : '', !String(row.bank_account ?? '').trim() ? 'банківський рахунок' : ''].filter(Boolean)
-      if (!fields.length) return []
-      const name = [row.last_name, row.first_name, row.patronymic].filter(Boolean).join(' ')
-      return [`${name}: ${fields.join(', ')}`]
-    })
-    if (missing.length) return { ok: false, message: `Відомість «ПриватБанк» не сформовано. Заповніть дані в картках отримувачів:\n${missing.join('\n')}` }
-    let totalMinor = 0
+    let rows: Row[]
+    try { rows = await source.readBankRows(ids, Number(yearValue)) }
+    catch { return { ok: false, message: 'Не вдалося отримати актуальні дані призначень. Оновіть список і параметри формування.' } }
+    let groups: ReturnType<typeof prepareStatementGroups>
+    let fileNames: string[]
     try {
-      for (const row of rows) totalMinor += asMinor(row.amount_minor)
-    } catch { return { ok: false, message: 'Суми допомог у базі потребують перевірки.' } }
-    const id = randomUUID()
+      groups = prepareStatementGroups('bank', rows, ids, selectionValue)
+      const date = new Date()
+      fileNames = groups.map(group => bankStatementFileName(date, group))
+      assertUniqueStatementFileNames(fileNames)
+    } catch (error) { return { ok: false, message: error instanceof Error ? error.message : 'Перевірте параметри формування.' } }
+    const documents: GeneratedBankStatement[] = []
     let directory: string | undefined
     let stage: 'temporary-directory' | 'template-copy' | 'worker' = 'temporary-directory'
-    const fileName = `ПриватБанк_${yearValue}_${id.slice(0, 8)}.xlsx`
     try {
       directory = createDocumentDirectory()
-      const excelPath = join(directory, fileName)
-      stage = 'template-copy'
-      copyFileSync(join(currentDirectory, 'reference', 'ПриватБанк.xlsx'), excelPath)
-      stage = 'worker'
-      await invokeExcel(externalExcelScriptPath(currentDirectory, 'excel-privatbank.ps1'), {
-        templatePath: excelPath,
-        paymentPurpose: 'Матеріальна допомога',
-        records: rows.map((row) => ({ amount: Number(row.amount_minor) / 100, rnokpp: String(row.rnokpp).trim(), bankAccount: String(row.bank_account).trim() })),
-      })
-      savedDocuments.set(id, { excelPath, excelName })
-      return { ok: true, document: { id, fileName: excelName, recordCount: rows.length, totalMinor } }
+      for (const [index, group] of groups.entries()) {
+        const id = randomUUID()
+        const excelPath = join(directory, `bank_${id}.xlsx`)
+        stage = 'template-copy'
+        copyFileSync(join(currentDirectory, 'reference', 'ПриватБанк.xlsx'), excelPath)
+        stage = 'worker'
+        await worker(externalExcelScriptPath(currentDirectory, 'excel-privatbank.ps1'), {
+          templatePath: excelPath, paymentPurpose: 'Матеріальна допомога',
+          records: group.rows.map(({ source: row }) => ({ amount: Number(row.amount_minor) / 100, rnokpp: String(row.rnokpp).trim(), bankAccount: String(row.bank_account).trim() })),
+        })
+        const excelName = fileNames[index]
+        savedDocuments.set(id, { excelPath, excelName })
+        documents.push({ id, fileName: excelName, bankId: group.bankId, bankName: group.bankName, recordCount: group.recordCount, totalMinor: group.totalMinor })
+      }
+      return { ok: true, documents }
     } catch (error) {
+      for (const document of documents) savedDocuments.delete(document.id)
       if (directory) removeDocumentDirectory(directory)
       return generationFailure(error, stage)
     }
@@ -245,7 +251,7 @@ export function registerStatementsIpc(source: StatementDataSource) {
     if (!document) return { ok: false, message: 'Тимчасовий файл уже очищено. Сформуйте відомість повторно.' }
     try {
       const result = await dialog.showSaveDialog({
-        title: 'Зберегти заповнений файл Excel', defaultPath: document.excelName,
+        title: 'Зберегти заповнений файл Excel', defaultPath: document.excelName, properties: ['showOverwriteConfirmation'],
         filters: [{ name: extname(document.excelName) === '.xls' ? 'Книга Excel 97–2003' : 'Книга Excel', extensions: [extname(document.excelName).slice(1)] }],
       })
       if (result.canceled || !result.filePath) return { ok: false, message: 'Збереження скасовано.' }
@@ -264,7 +270,7 @@ export function registerStatementsIpc(source: StatementDataSource) {
     if (!document.pdfPath || !document.pdfName) return { ok: false, message: 'Для банківської відомості доступне збереження лише Excel-файлу.' }
     try {
       const result = await dialog.showSaveDialog({
-        title: 'Зберегти сформований PDF', defaultPath: document.pdfName,
+        title: 'Зберегти сформований PDF', defaultPath: document.pdfName, properties: ['showOverwriteConfirmation'],
         filters: [{ name: 'Документ PDF', extensions: ['pdf'] }],
       })
       if (result.canceled || !result.filePath) return { ok: false, message: 'Збереження скасовано.' }

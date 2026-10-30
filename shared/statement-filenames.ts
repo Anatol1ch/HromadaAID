@@ -8,13 +8,27 @@ export function documentNumberError(value: unknown): string | undefined {
   return undefined
 }
 
-export function statementFileName(kind: StatementKind, value: Pick<StatementParameters, 'documentNumber' | 'documentDate'>): string {
+export function bankFileLabel(bank: { bankId: string; bankName: string }): string {
+  const name = bank.bankName.replace(/[<>:"/\\|?*\u0000-\u001f]/gu, '-').replace(/\s+/gu, ' ').trim().slice(0, 40) || 'Банк'
+  const identity = [...new TextEncoder().encode(bank.bankId)].map(byte => byte.toString(16).padStart(2, '0')).join('')
+  return `${name}_${identity}`
+}
+function checkedFileName(name: string) {
+  if (name.length > 255) throw new Error('Назва файла надто довга. Скоротіть номер відомості.')
+  return name
+}
+export function statementFileName(kind: StatementKind, value: Pick<StatementParameters, 'documentNumber' | 'documentDate'>, bank?: { bankId: string; bankName: string }): string {
   if (documentNumberError(value.documentNumber)) throw new Error('Invalid statement number')
   if (kind === 'personal') return `vf021324210900415${value.documentDate.slice(2).replaceAll('-', '')}41059569${value.documentNumber}.xls`
-  return `(${value.documentDate})(${value.documentNumber}) – ЗВЕДЕНИЙ СПИСОК ВИПЛАТИ.xlsx`
+  return checkedFileName(`(${value.documentDate})(${value.documentNumber}) – ЗВЕДЕНИЙ СПИСОК ВИПЛАТИ${bank ? ` – ${bankFileLabel(bank)}` : ''}.xlsx`)
 }
 
-export function bankStatementFileName(date = new Date()): string {
+export function bankStatementFileName(date = new Date(), bank?: { bankId: string; bankName: string }): string {
   const localDate = [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-')
-  return `(${localDate}) – ВІДОМІСТЬ ДЛЯ ПРИВАТБАНКУ.xlsx`
+  return checkedFileName(`(${localDate}) – ${bank ? `БАНКІВСЬКА ВІДОМІСТЬ – ${bankFileLabel(bank)}` : 'ВІДОМІСТЬ ДЛЯ ПРИВАТБАНКУ'}.xlsx`)
+}
+
+export function assertUniqueStatementFileNames(names: string[]) {
+  const normalized = names.map(name => name.normalize('NFC').toLocaleLowerCase('uk'))
+  if (new Set(normalized).size !== names.length) throw new Error('Назви файлів повторюються. Вкажіть різні номери відомостей для документів з однаковою датою.')
 }

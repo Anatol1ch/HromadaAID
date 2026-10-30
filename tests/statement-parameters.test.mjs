@@ -1,11 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { statementPlan, statementKey, statementParameterErrors, validateStatementParameters, statementPeriodText } from '../electron/statement-parameters.ts'
-const rows=[...Array.from({length:13},()=>({aidTypeId:'a',aidTypeName:'Вид А'})),{aidTypeId:'b',aidTypeName:'Вид Б'}]
+const rows=[...Array.from({length:13},(_,i)=>({id:'a-'+i,aidTypeId:'a',aidTypeName:'Вид А',bankId:'bank',bankName:'Банк',amountMinor:101})),{id:'b-1',aidTypeId:'b',aidTypeName:'Вид Б',bankId:'bank',bankName:'Банк',amountMinor:202}]
 const parameters=plan=>plan.map((item,index)=>({...item,documentNumber:'Номер-'+index,documentDate:'2028-02-29',periodStart:'2025-01-01',periodEnd:'2025-12-31'}))
 test('Document plan preserves aid grouping and personal capacity of 12; each part has its own key',()=>{
   const plan=statementPlan('personal',rows)
-  assert.deepEqual(plan.map(p=>[statementKey(p),p.recordCount]),[['a:0',12],['a:1',1],['b:0',1]])
+  assert.deepEqual(plan.map(p=>[statementKey(p),p.recordCount]),[[JSON.stringify(['a','bank',0]),12],[JSON.stringify(['a','bank',1]),1],[JSON.stringify(['b','bank',0]),1]])
   assert.deepEqual(statementPlan('summary',rows).map(p=>p.recordCount),[13,1])
 })
 test('All parameters required, real calendar dates and period order validated without working-year restriction',()=>{

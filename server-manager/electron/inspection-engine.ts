@@ -1,5 +1,4 @@
 import { win32 } from 'node:path'
-import type { NetworkAddresses } from './inspection-types.js'
 import type { CheckStatus, InspectionDiagnostic, InspectionCheck, InspectionSnapshot, InstallationStatus, InspectedConfiguration, ServiceStatus } from './inspection-types.js'
 
 export const HROMADAAID_SERVICE_NAME = 'HromadaAIDApi'
@@ -19,7 +18,6 @@ export type InspectionAdapters = {
   exists(path: string): Promise<boolean>
   readText(path: string): Promise<string>
   probeApi(url: string, timeoutMs: number): Promise<{ kind: 'response'; status: number; redirected: boolean; body: unknown } | { kind: 'timeout' } | { kind: 'network_error' } | { kind: 'invalid_response' }>
-  networkAddresses?(): Promise<NetworkAddresses>
   now(): Date
 }
 
@@ -86,7 +84,6 @@ function check(id: InspectionCheck['id'], title: string, status: CheckStatus, ti
 
 /** Read-only inspection. All operating-system and file access is supplied by narrow adapters. */
 export async function inspectEnvironment(adapters: InspectionAdapters): Promise<InspectionSnapshot> {
-  const addresses = adapters.networkAddresses?.().catch(() => ({ lan: [], tailscale: [], unavailable: true }))
   const time = adapters.now().toISOString()
   const configuration: InspectedConfiguration = { programDirectory: null, dataDirectory: null, backupDirectory: null, databasePath: null, apiAddress: null, host: null, port: null, transport: null, serverVersion: null, serviceName: HROMADAAID_SERVICE_NAME, serviceAccount: null, startMode: null, logDirectory: null }
   const checks: InspectionCheck[] = []
@@ -413,5 +410,5 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
     } catch { api = { status: 'unavailable', message: 'Перевірка API завершилася технічною помилкою.', contractVersion: null } }
   }
   checks.push(check('api', 'Health endpoint API', api.status === 'available' ? 'passed' : api.status === 'not_configured' ? 'not_checked' : api.status === 'unavailable' ? 'warning' : 'failed', time, api.message, api.contractVersion === null ? undefined : `apiContractVersion=${api.contractVersion}`))
-  return { checkedAt: time, installation: { status: installationStatus, message: installationMessage }, service: { status: serviceStatus, message: serviceMessage }, api, configuration, discovery, checks, networkAddresses: await addresses }
+  return { checkedAt: time, installation: { status: installationStatus, message: installationMessage }, service: { status: serviceStatus, message: serviceMessage }, api, configuration, discovery, checks }
 }

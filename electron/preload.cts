@@ -106,8 +106,8 @@ const api: HromadaAidApi = {
   },
   statements: {
     list: (year) => invoke('statements:list', year),
-    generate: (kind, assignmentIds, year, parameters) => invoke('statements:generate', kind, assignmentIds, year, parameters),
-    generateBank: (assignmentIds, year) => invoke('statements:generate-bank', assignmentIds, year),
+    generate: (kind, assignmentIds, year, parameters, selection) => invoke('statements:generate', kind, assignmentIds, year, parameters, selection),
+    generateBank: (assignmentIds, year, selection) => invoke('statements:generate-bank', assignmentIds, year, selection),
     save: (documentId) => invoke('statements:save', documentId),
     savePdf: (documentId) => invoke('statements:save-pdf', documentId),
   },

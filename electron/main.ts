@@ -371,7 +371,7 @@ if (!hasSingleInstanceLock) {
       trustedIpcMain.handle('reports:plan-remove', async (_event, id: unknown) => { if(typeof id!=='string'||!id) return {ok:false,message:'Плановий рядок не знайдено.'}; return http.deleteJson(`/api/reports/plan-entries/${encodeURIComponent(id)}`) })
       trustedIpcMain.handle('deletion:preview', async (_event, entity: unknown, id: unknown) => { if(typeof entity!=='string'||typeof id!=='string'||!id) return null; return http.getJson(`/api/deletion/${encodeURIComponent(entity)}/${encodeURIComponent(id)}`) })
       trustedIpcMain.handle('deletion:execute', async (_event, entity: unknown, id: unknown, confirmationToken: unknown) => { if(typeof entity!=='string'||typeof id!=='string'||!id) return {ok:false,message:'Запис не знайдено.'}; return http.postJson(`/api/deletion/${encodeURIComponent(entity)}/${encodeURIComponent(id)}`, { confirmationToken }) })
-      trustedIpcMain.handle('statements:list', async (_event, yearValue: unknown): Promise<AssignmentListResult> => {
+      trustedIpcMain.handle('statements:list', async (_event, yearValue: unknown) => {
         const path = yearValue === undefined ? '/api/statements' : `/api/statements?year=${encodeURIComponent(String(yearValue))}`
         return http.getJson(path, isStatementListResult)
       })

@@ -1,6 +1,6 @@
 import { createOperationCloseGuard } from './operation-close-guard.js'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, screen, session } from 'electron'
-import { createAddressCopyHandler, readNetworkAddresses } from './network-addresses.js'
+import { createAddressHandlers, createServerAddressSettings } from './server-address-settings.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import { lstat, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
@@ -273,7 +273,10 @@ async function openWindow() {
 if (!app.requestSingleInstanceLock()) app.quit()
 else {
   const inspectRequest = createInspectionRequestHandler(inspectWithUpdateReadiness, isTrustedRenderer, failedInspection)
-  ipcMain.handle('manager:copy-server-address', createAddressCopyHandler(isTrustedRenderer, readNetworkAddresses, text => clipboard.writeText(text)))
+  const addresses = createAddressHandlers(isTrustedRenderer, createServerAddressSettings(app.getPath('userData')), text => clipboard.writeText(text))
+  ipcMain.handle('manager:get-server-addresses', event => addresses.read(event))
+  ipcMain.handle('manager:save-server-address', (event, key: unknown, value: unknown) => addresses.save(event, key, value))
+  ipcMain.handle('manager:copy-server-address', (event, key: unknown) => addresses.copy(event, key))
   ipcMain.handle('manager:inspect-environment', event => inspectRequest(event))
   ipcMain.handle('manager:release-update-state', event => { if (!isTrustedRenderer(event) || !releaseUpdater) throw new Error('UNTRUSTED_RENDERER'); return releaseUpdater.getState() })
   ipcMain.handle('manager:check-release-updates', async event => {

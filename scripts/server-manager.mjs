@@ -39,6 +39,7 @@ process.once('SIGTERM', stop)
 try {
   if (mode === 'dev' || mode === 'smoke-dev') {
     await run(process.execPath, [require.resolve('typescript/bin/tsc'), '-p', join(root, 'server-manager/tsconfig.electron.json')]).completion
+    await import('./copy-manager-shared.mjs')
     const probe = createServer()
     await new Promise((resolve, reject) => {
       probe.once('error', () => reject(new Error('Порт Server Manager 5176 зайнятий. Закрийте попередній dev-сеанс і повторіть запуск.')))

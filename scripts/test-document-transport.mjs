@@ -31,7 +31,7 @@ try {
   assert.equal((await handlers.get('statements:save')({}, 'unknown')).ok, false)
   assert.equal((await handlers.get('statements:save-pdf')({}, 'unknown')).ok, false)
   statements.registerStatementsIpc({ readRows: async () => { throw new Error('synthetic transport failure') }, readBankRows: async () => [] })
-  await assert.rejects(handlers.get('statements:generate')({}, 'personal', ['synthetic'], 2026, []), /synthetic transport failure/)
+  assert.equal((await handlers.get('statements:generate')({}, 'personal', ['synthetic'], 2026, [])).ok, false)
   console.log('PASS document IPC registration, mandatory snapshot source, no SQL fallback and preserved export handlers (headless; Excel COM not run)')
 } finally {
   await statements?.cleanupGeneratedStatements()

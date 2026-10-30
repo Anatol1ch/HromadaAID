@@ -1,6 +1,86 @@
 # HromadaAID — поточний checkpoint
 
-## Стан проєкту
+## Checkpoint 1.0.1 — локальна підготовка, не опубліковано
+
+Дата: 30.10.2026. Версії root/server: **1.0.1**. Підготовка виконується на main;
+попередній HEAD — 16582ce252086bb39d2276ac3c1de90e4895f21f.
+Цей checkpoint входить до локального коміту «release: prepare HromadaAID v1.0.1»;
+push, теги, release workflow та GitHub Release у цьому завданні не виконуються.
+
+### Реалізовано
+
+- Персональні/зведені документи групуються за aidTypeId + banks.id; персональні
+  частини — до 12 призначень. Банківські відомості групуються лише за банком
+  та повертаються масивом. Кількість означає призначення, не унікальних людей.
+- Спільний план, усунення повторних ID, перевірка safe integer сум, свіжий snapshot,
+  перевірка реквізитів і складу, колізій назв та скасування невдалого пакета.
+  Генерація не змінює фінансових даних; шаблони незмінені.
+- Вибір банків через chips, компактні картки параметрів, фіксовані заголовок/дії,
+  реактивні підсумки. Стовпець «Банк» між видом допомоги та статусом; відсутній банк
+  показується як «Не вказано», довгі назви скорочуються з повною підказкою.
+- Ручні Loopback/LAN/Tailscale у server-addresses.json профілю Manager;
+  текст адреси з Copy → Pencil, модальне редагування, явні помилки сховища.
+  Автовизначення адаптерів вилучено. Спільний із Client чистий URL-валідатор;
+  SCM/API, локальний health-check і серверна конфігурація v3 незалежні.
+
+Основні модулі: src/StatementFormation.tsx, src/components/StatementParametersModal.tsx,
+shared/statement-groups.ts, shared/statement-parameters.ts, shared/statement-filenames.ts,
+electron/statement-data.ts, electron/statement-list-data.ts, electron/statements-ipc.ts,
+server/src/app.ts; server-manager/src/ServerAddresses.tsx,
+server-manager/electron/server-address-settings.ts, shared/server-base-url.mjs.
+Відповідні контракти, preload, стилі, скрипти доставки runtime та тести включені.
+
+### Приймання та свіжі автоматизовані перевірки
+
+Користувач підтвердив ручне тестування реалізованих функцій та UI перед цим
+завданням. Це не твердження про перевірку опублікованих пакетів 1.0.1.
+Повторний повний GUI-цикл у цьому завданні не проводиться.
+
+Перевірки виконано заново після підняття версій у цьому checkpoint:
+
+- pnpm build — PASS (Client TypeScript, Electron TypeScript, assets і Vite).
+- pnpm server:build — PASS; pnpm manager:build — PASS (обидва Manager TypeScript і Vite).
+- Документи: tests/statement-groups.test.mjs, tests/statement-parameters.test.mjs,
+  tests/statement-filenames.test.mjs, tests/statement-bank-generation.test.mjs — **18/18 PASS**.
+  Генератори перевірено через справжні Fastify endpoints та ізольовану SQLite
+  з підставним Excel worker, включно зі збоєм другого файла й незмінністю фінансів.
+- Цільові джерела документів у tests/banks.test.mjs та tests/accounting-years.test.mjs —
+  **2/2 PASS**. scripts/test-document-transport.mjs — PASS.
+- Адреси, незалежність inspection/presentation/SCM:
+  server-manager/tests/server-address-settings.test.mjs, inspection.test.mjs,
+  inspection-presentation.test.mjs, service-control.test.mjs — **43/43 PASS**.
+- Client URL/transport: electron/transport.test.ts — **4/4 PASS**.
+- Release eligibility/publication з підставним GitHub API, manifest і синтетичний
+  Server ZIP round-trip: scripts/github-release.test.mjs,
+  packaging/release-manifest.test.mjs, scripts/package-release.test.mjs —
+  **14/14 PASS**, без реальних GitHub mutations.
+- Разом **81/81 автоматизованих тестів PASS**, окремий transport script PASS.
+- Root/server 1.0.1; джерела версій Client, Manager, Setup і manifest узгоджені.
+  Свіжий Manager bundle містить 1.0.1; перевірено синтетичний manifest 1.0.1.
+  Залежності й pnpm-lock.yaml незмінені.
+- Локальні посилання документації та git diff --check перевірено перед комітом.
+- Client Vite попереджає про chunk понад 500 kB; збірка успішна.
+  Повний suite, повторна Excel COM/GUI-перевірка, реальний Windows packaging,
+  оновлення у VM та release workflow у цьому завданні не запускалися.
+
+### Обмеження і наступний крок
+
+- Банківський XLSX використовує «ПриватБанк.xlsx»; імпорт іншими банками
+  не підтверджений. Рахуються призначення, зокрема кілька призначень одній людині.
+- Пошкоджене/несумісне сховище адрес Manager блокує редагування; автоматичного
+  reset немає. Профіль прив'язаний до Windows-користувача.
+- Локальні перевірки не доводять поведінку реального SCM/ACL чи банківського імпорту.
+  Пакети 1.0.1 у цьому завданні не створювалися.
+- Після перевірки локального коміту власником потрібне окреме завдання на push.
+  Чинний workflow на push у main перевіряє eligibility, збирає Windows x64 комплект
+  та публікує Stable. Перевірити Actions, tag SHA, версії й три очікувані assets.
+  До того останній підтверджений опублікований Stable — 1.0.0.
+
+Нижче збережено історичний checkpoint Stable 1.0.0 та попередніх етапів.
+Його описи автопошуку й обмежень Stage 9.2 не є актуальною поведінкою 1.0.1.
+
+## Історичний стан Stable 1.0.0
+
 
 - **Stage 9.6 — COMPLETED (documentation deliverable).** Підготовлено
   [єдину практичну інструкцію](installation-and-administration.md) для Stable

@@ -123,6 +123,8 @@ export type DecisionInput = { decisionNumber: string; decisionDate: string; titl
 export type DecisionSummary = { id: string; decisionNumber: string; decisionDate: string; title: string | null; assignmentCount: number; assignedTotalMinor: number; createdAt: string; updatedAt: string }
 export type AssignmentRecord = { id: string; createdAt: string; updatedAt: string; recipientId: string; recipientName: string; recipientIsDemo: boolean; recipientSex: 'Жінка' | 'Чоловік' | null; recipientIsVpo: boolean | null; decisionId: string; decisionNumber: string; decisionDate: string; programId: string; programName: string; aidTypeId: string; aidTypeName: string; amountMinor: number; status: AssignmentStatus; paidOn: string | null }
 export type AssignmentInput = { recipientId: string; decisionId?: string; decisionNumber: string; decisionDate: string; aidTypeId: string; amountMinor: number; status: AssignmentStatus; paidOn?: string }
+export type StatementAssignment = AssignmentRecord & { bankId: string | null; bankName: string | null }
+export type StatementListResult = { assignments: StatementAssignment[]; years: number[] }
 export type AssignmentListResult = { assignments: AssignmentRecord[]; years: number[] }
 export type AssignmentStatusBatchInput = { assignmentIds: string[]; year: number; status: AssignmentStatus; paidOn?: string }
 export type AssignmentStatusBatchResult = | { ok: true; updatedCount: number; unchangedCount: number } | { ok: false; reason: 'validation' | 'not-found' | 'conflict' | 'storage'; message: string }
@@ -148,8 +150,8 @@ export function isAssignmentListResult(value: unknown): value is AssignmentListR
     isAssignmentRecordList(value.assignments)
 }
 
-export function isStatementListResult(value: unknown): value is AssignmentListResult {
-  return isAssignmentListResult(value)
+export function isStatementListResult(value: unknown): value is StatementListResult {
+  return isAssignmentListResult(value) && value.assignments.every(row => isNullableString((row as StatementAssignment).bankId) && isNullableString((row as StatementAssignment).bankName))
 }
 
 export function isDecisionSummary(value: unknown): value is DecisionSummary {
@@ -282,9 +284,9 @@ export type AssignmentSaveResult = | { ok: true; assignments: AssignmentRecord[]
 export type DeleteEntity = 'assignment' | 'recipient' | 'decision' | 'program' | 'aidType'
 export type DeletePreview = { entity: DeleteEntity; id: string; name: string; dependencies: { label: string; count: number }[]; confirmationToken: string }
 export type StatementKind = 'personal' | 'summary'
-export type StatementParameters = { aidTypeId: string; partIndex: number; documentNumber: string; documentDate: string; periodStart: string; periodEnd: string }
-export type GeneratedStatement = { id: string; fileName: string; aidTypeName: string; recordCount: number; totalMinor: number; pdfBase64: string; documentNumber: string; documentDate: string }
-export type GeneratedBankStatement = { id: string; fileName: string; recordCount: number; totalMinor: number }
+export type StatementParameters = { aidTypeId: string; bankId: string; partIndex: number; documentNumber: string; documentDate: string; periodStart: string; periodEnd: string }
+export type GeneratedStatement = { id: string; fileName: string; aidTypeName: string; bankId: string; bankName: string; recordCount: number; totalMinor: number; pdfBase64: string; documentNumber: string; documentDate: string }
+export type GeneratedBankStatement = { id: string; fileName: string; bankId: string; bankName: string; recordCount: number; totalMinor: number }
 export type ManagedUser = { id: string; username: string; displayName: string | null; firstName: string | null; lastName: string | null; roles: UserRole[]; status: 'active' | 'inactive' | 'blocked'; mustChangePassword: boolean; createdAt: string; updatedAt: string }
 export type ManagedUserInput = { username: string; firstName: string | null; lastName: string | null; roles: UserRole[]; password?: string }
 export type ManagedUserSaveResult = { ok: true; user: ManagedUser } | { ok: false; reason: 'validation' | 'conflict' | 'not-found'; message: string }
@@ -346,7 +348,7 @@ export type HromadaAidApi = {
   dashboard: { get: (year: number) => Promise<DashboardData> }
   reports: { get: (sheet: ReportSheet) => Promise<ReportSourceRow[]>; summary: (year: number, period: ReportPeriod) => Promise<ReportSummary>; annualPlanList: (year: number) => Promise<AnnualAidPlan[]>; annualPlanSave: (input: AnnualAidPlanInput, expectedUpdatedAt?: string) => Promise<{ ok: boolean; message?: string }>; generate: (snapshot: ReportExportSnapshot) => Promise<{ ok: true; document: PreparedReport } | { ok: false; message: string }>; savePdf: (documentId: string) => Promise<ReportExportResult>; saveExcel: (documentId: string) => Promise<ReportExportResult>; release: (documentId: string) => Promise<void>; planList: (year: number) => Promise<AnnualPlanEntry[]>; planSave: (input: AnnualPlanInput, id?: string) => Promise<{ ok: boolean; message?: string }>; planRemove: (id: string) => Promise<{ ok: boolean; message?: string }> }
   deletion: { preview: (entity: DeleteEntity, id: string) => Promise<DeletePreview | null>; execute: (entity: DeleteEntity, id: string, confirmationToken?: string) => Promise<{ ok: boolean; message?: string }> }
-  statements: { list: (year: number) => Promise<AssignmentListResult>; generate: (kind: StatementKind, assignmentIds: string[], year: number, parameters: StatementParameters[]) => Promise<{ ok: true; documents: GeneratedStatement[] } | { ok: false; message: string }>; generateBank: (assignmentIds: string[], year: number) => Promise<{ ok: true; document: GeneratedBankStatement } | { ok: false; message: string }>; save: (documentId: string) => Promise<{ ok: boolean; message?: string }>; savePdf: (documentId: string) => Promise<{ ok: boolean; message?: string }> }
+  statements: { list: (year: number) => Promise<StatementListResult>; generate: (kind: StatementKind, assignmentIds: string[], year: number, parameters: StatementParameters[], selection: import('./statement-groups.js').StatementSelection[]) => Promise<{ ok: true; documents: GeneratedStatement[] } | { ok: false; message: string }>; generateBank: (assignmentIds: string[], year: number, selection: import('./statement-groups.js').StatementSelection[]) => Promise<{ ok: true; documents: GeneratedBankStatement[] } | { ok: false; message: string }>; save: (documentId: string) => Promise<{ ok: boolean; message?: string }>; savePdf: (documentId: string) => Promise<{ ok: boolean; message?: string }> }
 }
 
 export type ClientUpdateState = {

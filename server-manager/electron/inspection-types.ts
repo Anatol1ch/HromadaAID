@@ -6,7 +6,6 @@ export type DiscoverySource = 'windows_service' | 'installer_registry' | 'standa
 export type DiscoveryConfidence = 'confirmed' | 'corroborated' | 'stale' | 'untrusted' | 'unavailable'
 
 export type InspectionDiagnostic = { operation: string; target: string; code: string; message: string }
-export type NetworkAddresses = { lan: string[]; tailscale: string[]; unavailable: boolean }
 
 export type InspectionCheck = {
   id: 'installation' | 'service' | 'configuration' | 'package' | 'api'
@@ -35,7 +34,6 @@ export type InspectedConfiguration = {
 }
 
 export type InspectionSnapshot = {
-  networkAddresses?: NetworkAddresses
   checkedAt: string
   installation: { status: InstallationStatus; message: string }
   service: { status: ServiceStatus; message: string }
@@ -47,7 +45,9 @@ export type InspectionSnapshot = {
 }
 
 export type ManagerInspectionApi = {
-  copyServerAddress(address: string): Promise<boolean>
+  getServerAddresses(): Promise<import('./server-address-contract.js').AddressResult>
+  saveServerAddress(key: import('./server-address-contract.js').ServerAddressKey, value: string): Promise<import('./server-address-contract.js').AddressResult>
+  copyServerAddress(key: import('./server-address-contract.js').ServerAddressKey): Promise<import('./server-address-contract.js').AddressCopyResult>
   releaseUpdateState(): Promise<{ manager: import('./server-update-contract.js').ReleaseUpdateState; server: import('./server-update-contract.js').ServerReleaseState }>
   checkReleaseUpdates(): Promise<{ manager: import('./server-update-contract.js').ReleaseUpdateState; server: import('./server-update-contract.js').ServerReleaseState }>
   downloadManagerUpdate(): Promise<{ packagePath: string; version: string }>

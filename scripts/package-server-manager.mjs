@@ -92,7 +92,7 @@ try {
 }
 if (!asar) throw new Error('Cannot inspect app.asar using electron-builder’s bundled @electron/asar.')
 const archiveEntries = asar.listPackage(asarPath).map(path => path.replace(/\\/g, '/').replace(/^\/+/, ''))
-for (const expected of ['main/main.js', 'main/preload.cjs', 'main/inspection-engine.js', 'main/installation-recovery.js', 'main/shared/release-updates.mjs', 'main/shared/windows-update-launcher.mjs', 'renderer/index.html']) {
+for (const expected of ['main/main.js', 'main/preload.cjs', 'main/inspection-engine.js', 'main/installation-recovery.js', 'main/shared/release-updates.mjs', 'main/shared/windows-update-launcher.mjs', 'main/shared/server-base-url.mjs', 'renderer/index.html']) {
   if (!archiveEntries.includes(expected)) throw new Error(`Packaged Server Manager is missing ${expected}.`)
 }
 if (archiveEntries.some(path => /(^|[\\/])(server|node_modules|client|electron|fixtures|tests)([\\/]|$)|\.sqlite(?:3)?$|\.hraid$|\.dpapi/i.test(path))) {

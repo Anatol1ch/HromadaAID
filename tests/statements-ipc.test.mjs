@@ -40,12 +40,13 @@ test('Statements IPC: isolated SQLite, independent parameters, actual Excel/PDF 
  db.prepare('INSERT INTO recipients(id,last_name,first_name,patronymic,rnokpp,passport,bank_details_id,bank_account,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)').run('person','Вигаданий','Отримувач','Тестович','0000000001','ТТ000001','detail','UA000000000000000000000000001','2026-01-01','2026-01-01')
  db.prepare('INSERT INTO decisions(id,decision_number,decision_date,title,created_at,updated_at) VALUES(?,?,?,?,?,?)').run('decision','TEST','2026-01-02','','2026-01-01','2026-01-01')
  db.prepare('INSERT INTO decisions(id,decision_number,decision_date,title,created_at,updated_at) VALUES(?,?,?,?,?,?)').run('decision-2','TEST-2','2026-02-03','','2026-01-01','2026-01-01')
+ db.prepare("UPDATE recipients SET registered_address=? WHERE id='person'").run('Синтетична адреса')
  const aidTypes=db.prepare('SELECT id,short_name FROM aid_types ORDER BY id LIMIT 2').all()
  const ids=[];const selected=[]
  for(let i=0;i<14;i++) {
   const type=aidTypes[i===13?1:0],id='synthetic-'+i
   db.prepare('INSERT INTO assignments(id,recipient_id,decision_id,aid_type_id,amount_minor,status,created_at) VALUES(?,?,?,?,?,?,?)').run(id,'person',i%2?'decision-2':'decision',type.id,100000,'Призначено','2026-01-03T10:00:00.000Z')
-  ids.push(id);selected.push({aidTypeId:type.id,aidTypeName:type.short_name})
+  ids.push(id);selected.push({id,aidTypeId:type.id,aidTypeName:type.short_name,bankId:'bank',bankName:'Вигаданий банк',amountMinor:100000})
  }
  await createFirstAdministrator(db,{username:'synthetic-admin',password:'synthetic password'})
  server=createApp(db);server.log.level='silent';await server.listen({host:'127.0.0.1',port:0})
@@ -59,7 +60,7 @@ test('Statements IPC: isolated SQLite, independent parameters, actual Excel/PDF 
  for(const kind of ['personal','summary']) {
   const plan=statementPlan(kind,selected)
   const parameters=plan.map((item,i)=>({...item,documentNumber:kind+'-'+i,documentDate:i===0?'2028-02-29':'2029-01-05',periodStart:'2025-01-01',periodEnd:'2025-12-31'}))
-  const result=await call('statements:generate',kind,ids,2026,parameters)
+  const result=await call('statements:generate',kind,ids,2026,parameters,selected)
   assert.equal(result.ok,true,result.message)
   assert.equal(result.documents.length,kind==='personal'?3:2)
   assert.equal(result.documents.reduce((sum,d)=>sum+d.recordCount,0),14)
@@ -77,7 +78,7 @@ test('Statements IPC: isolated SQLite, independent parameters, actual Excel/PDF 
    assert.equal((await call('statements:save',doc.id)).ok,true)
    const dialog=globalThis.__statementDialogs.at(-1)
    assert.deepEqual(dialog.filters[0].extensions,[excelExtension])
-   const expectedName=kind==='personal'?'vf021324210900415'+doc.documentDate.slice(2).replaceAll('-','')+'41059569'+doc.documentNumber+'.xls':'('+doc.documentDate+')('+doc.documentNumber+') – ЗВЕДЕНИЙ СПИСОК ВИПЛАТИ.xlsx'
+   const expectedName=kind==='personal'?'vf021324210900415'+doc.documentDate.slice(2).replaceAll('-','')+'41059569'+doc.documentNumber+'.xls':'('+doc.documentDate+')('+doc.documentNumber+') – ЗВЕДЕНИЙ СПИСОК ВИПЛАТИ – Вигаданий банк_62616e6b.xlsx'
    assert.equal(dialog.defaultPath,expectedName)
    const excelPath=globalThis.__statementExport
    if(kind==='personal') {
@@ -114,17 +115,17 @@ with zipfile.ZipFile(base+'.xlsx') as z:
 
   }
  }
- const bank=await call('statements:generate-bank',ids.slice(0,1),2026)
+ const bank=await call('statements:generate-bank',ids.slice(0,1),2026,selected.slice(0,1))
  assert.equal(bank.ok,true,bank.message)
  globalThis.__statementExport=join(root,'bank.xlsx')
- assert.equal((await call('statements:save',bank.document.id)).ok,true)
+ assert.equal((await call('statements:save',bank.documents[0].id)).ok,true)
  assert.deepEqual(globalThis.__statementDialogs.at(-1).filters[0].extensions,['xlsx'])
- assert.equal(globalThis.__statementDialogs.at(-1).defaultPath,'('+[new Date().getFullYear(),String(new Date().getMonth()+1).padStart(2,'0'),String(new Date().getDate()).padStart(2,'0')].join('-')+') – ВІДОМІСТЬ ДЛЯ ПРИВАТБАНКУ.xlsx')
+ assert.equal(globalThis.__statementDialogs.at(-1).defaultPath,'('+[new Date().getFullYear(),String(new Date().getMonth()+1).padStart(2,'0'),String(new Date().getDate()).padStart(2,'0')].join('-')+') – БАНКІВСЬКА ВІДОМІСТЬ – Вигаданий банк_62616e6b.xlsx')
  assert.equal(readFileSync(globalThis.__statementExport).subarray(0,2).toString(),'PK','PrivatBank stays XLSX')
  const tempRoot=join(profile,'generated-documents-temp')
  const jobCount=readdirSync(tempRoot).length
  writeFileSync(join(runtime,'excel-templates.ps1'),"$ErrorActionPreference='Stop';throw 'Synthetic conversion failure'")
- const failed=await call('statements:generate','personal',ids.slice(0,1),2026,[{aidTypeId:selected[0].aidTypeId,partIndex:0,documentNumber:'FAIL',documentDate:'2028-02-29',periodStart:'2025-01-01',periodEnd:'2025-12-31'}])
+ const failed=await call('statements:generate','personal',ids.slice(0,1),2026,[{aidTypeId:selected[0].aidTypeId,bankId:'bank',partIndex:0,documentNumber:'FAIL',documentDate:'2028-02-29',periodStart:'2025-01-01',periodEnd:'2025-12-31'}],selected.slice(0,1))
  assert.equal(failed.ok,false)
  assert.equal(readdirSync(tempRoot).length,jobCount,'failed job removed without touching successful previews')
  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM assignments WHERE status='Призначено'").get().count,14)
