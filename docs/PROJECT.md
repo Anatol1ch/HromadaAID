@@ -48,10 +48,9 @@ Server Manager показує три вручну задані адреси ли
 
 ## Поточний стан
 
-**Цільова версія — 1.1.0; підготовлена локально, не опублікована.** Останній
-опублікований Stable — **1.0.2**. Root/Client, Server Manager та API Server
-використовують SemVer 1.1.0; API Contract — v2. Пакети не створювалися, публікація
-не виконувалася.
+**Поточний Stable — 1.1.0, опублікований.** Root/Client, Server Manager та API
+Server використовують SemVer 1.1.0; API Contract — v2. Офіційні пакети й Release
+Notes доступні на [GitHub Releases](https://github.com/Anatol1ch/HromadaAID/releases/tag/v1.1.0).
 
 Генерація документів не змінює фінансових даних. Сумісність формату
 «ПриватБанк.xlsx» з імпортом інших банків не підтверджена. Ручні адреси Manager
@@ -65,7 +64,7 @@ IBAN перевіряється добровільно кнопкою за ук�
 
 Перехід із 1.0.2 вимагає оновити Server Manager → API Server → усі Client.
 Порядок описаний в [інструкції оновлення](installation-and-administration.md).
-Запропоновані користувацькі Release Notes: [1.1.0](release-notes/1.1.0.md).
+Release Notes: [Stable 1.1.0](release-notes/1.1.0.md).
 
 Технічні межі: [ARCHITECTURE](ARCHITECTURE.md), домовленості:
 [DECISIONS](DECISIONS.md), статус етапів: [ROADMAP](ROADMAP.md).

@@ -1,16 +1,17 @@
 # HromadaAID — поточний checkpoint
 
-## Stage 10.7.3 — Stable 1.1.0 (публікація в роботі)
+## Stage 10.7.3 — Stable 1.1.0 опубліковано
 
-Поточний Stable, підтверджений власником: **1.0.2**. Цільові версії Client,
+Поточний Stable: **1.1.0**. Версії Client,
 API Server і Server Manager: **1.1.0**; API Contract: **v2**. Версії root і
 `server/package.json` синхронізовані; Manager, Setup і component/release manifests
 отримують SemVer з root package під час пакування. Залежності й lockfile не змінені.
 
-Stage 10.1–10.7.2 завершені й прийняті власником. Погоджений текст Release Notes
-зафіксований у [release-notes/1.1.0.md](release-notes/1.1.0.md). Client отримує
-опис із GitHub Release body. Публікація Stable 1.1.0 ще не підтверджена; до неї
-останнім опублікованим Stable залишається 1.0.2.
+Stage 10.1–10.7.2 завершені й прийняті власником. Stable 1.1.0 опубліковано як
+звичайний Stable-реліз; CI run [45499606565](https://github.com/Anatol1ch/HromadaAID/actions/runs/45499606565)
+завершився успішно. Client отримує погоджені Release Notes із GitHub Release body;
+їхній текст збігається з [release-notes/1.1.0.md](release-notes/1.1.0.md).
+Реліз містить Setup, серверний ZIP і release manifest.
 
 Для переходу з 1.0.2: створити штатну резервну копію, завершити Client, оновити
 Server Manager, потім API Server, потім усі Client; перевірити підключення після
@@ -21,13 +22,14 @@ manifest збережені v1 bootstrap-маркери, щоб старий upd
 розпізнає v1 для переходу й підтвердження старого пакета після штатного rollback;
 поведінку реального Windows deployment у VM тут не перевіряли.
 
-Stage 10.7.2: версійні джерела й package/release metadata звірені; цільові
-release-manifest та GitHub Release metadata тести — 12 PASS; `git diff --check` —
-PASS. Для Stage 10.7.3 CI виконує Windows packaging, перевірку production ZIP і
-маніфесту до запуску publish job; самі артефакти треба підтвердити за результатом
-workflow. Локальний seed та SQLite залишаються поза Git через `.git/info/exclude`
-і `.gitignore`; `server:seed` у root package відсутній. Це не твердження про факт
-публікації Stable 1.1.0.
+Stage 10.7.2: версійні джерела й package/release metadata звірені; тести
+release-manifest та GitHub Release metadata — 12 PASS. Stage 10.7.3: build,
+перевірка релізних артефактів і publish jobs — PASS. Опублікований серверний ZIP
+має API Contract v2; його розмір і SHA-256 відповідають release manifest, а вміст
+не містить seed/local-dev/SQLite/WAL/SHM файлів. Bootstrap-маркери v1 збережені,
+target-маркери вказують v2. Синтетичні база та seed залишаються локальними й
+виключеними через `.git/info/exclude` та `.gitignore`; `server:seed` відсутній у
+root package. Перевірений локальний Git-стан після публікації чистий.
 
 ## Історичний checkpoint Stage 10.7.2 — підготовка Stable 1.1.0
 

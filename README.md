@@ -97,15 +97,14 @@ HromadaAID Client ──► API Server ──► SQLite
 
 ## Стан розробки
 
-**Цільова версія — 1.1.0; підготовлена локально, ще не опублікована.** Останній
-опублікований Stable — **1.0.2**. Версії Client, API Server і Server Manager для
-цільового релізу узгоджені на 1.1.0; API Contract — v2.
+**Поточний Stable — 1.1.0.** Версії Client, API Server і Server Manager — 1.1.0;
+API Contract — v2. [Завантажити Stable 1.1.0](https://github.com/Anatol1ch/HromadaAID/releases/tag/v1.1.0).
 
 У 1.1.0 оновлено реєстр допомог і навігацію, вдосконалено картки отримувачів та
 запроваджено несумісний із v1 контракт API. Для переходу з 1.0.2 необхідно
 оновити Server Manager, потім API Server, а після нього всі Client. Деталі — в
 [інструкції встановлення й адміністрування](docs/installation-and-administration.md).
-Запропоновані Release Notes: [1.1.0](docs/release-notes/1.1.0.md).
+Release Notes: [Stable 1.1.0](docs/release-notes/1.1.0.md).
 
 Попередні описи випусків і протоколи тестування залишаються історичними; вони
 не описують поточний інтерфейс чи актуальний порядок оновлення.
