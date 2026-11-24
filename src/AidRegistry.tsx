@@ -3,9 +3,9 @@ import DataState from './components/DataState'
 import { TableSkeleton } from './components/Skeleton'
 import Alert from './components/Alert'
 import { useCatalogUpdates } from './services/catalogRepository'
-import { ASSIGNMENT_STATUSES, assignmentStatusColor, assignmentStatusOrder as statusOrder, isAssignedStatus } from '../electron/assignment-model'
+import { ASSIGNMENT_STATUSES, assignmentStatusColor, assignmentStatusOrder as statusOrder } from '../electron/assignment-model'
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Check, FilterX, Info, ListRestart, Pencil, Plus, SlidersHorizontal, Trash2, X } from 'lucide-react'
+import { Check, FilterX, Info, ListChecks, ListRestart, LockKeyhole, Pencil, Plus, RefreshCw, ShieldAlert, SlidersHorizontal, Trash2, X } from 'lucide-react'
 import type { AssignmentInput, AssignmentRecord, AssignmentStatus, DecisionSummary, DeletePreview, RecipientRecord, RecipientSummary } from '../electron/api-contract'
 import Modal from './components/Modal'
 import { confirmModalClose } from './components/Modal'
@@ -25,6 +25,7 @@ import DeleteConfirmation from './components/DeleteConfirmation'
 import BatchAssignmentStatusModal from './components/BatchAssignmentStatusModal'
 import { eligibleAssignmentIds, keepEligibleSelection, selectionForYear, selectionState, toggleEligibleSelection } from './lib/assignmentSelection'
 import { useConnectionRefresh } from './services/connectionRefresh'
+import { summarizeAidRegistry } from './lib/aidRegistrySummary'
 import type { DecisionAssignmentTarget } from './lib/decision-assignment-navigation'
 
 type Catalogs = Awaited<ReturnType<typeof assignmentRepository.catalogs>>
@@ -47,8 +48,11 @@ const tableColumns: { key: SortKey; label: string }[] = [
   { key: 'vpo', label: 'ВПО' },
   { key: 'status', label: 'Статус' },
 ]
+const summaryAmountColumnIndex = tableColumns.findIndex(({ key }) => key === 'amountMinor')
+const summaryLabelColSpan = summaryAmountColumnIndex + 1
+const summaryTrailingColSpan = tableColumns.length + 1 - summaryLabelColSpan
 
-export default function AidRegistry({ createOnOpen = false, decisionContext, onReturnToDecision }: { createOnOpen?: boolean; decisionContext?: DecisionAssignmentTarget & { label: string }; onReturnToDecision?: () => void }) {
+export default function AidRegistry({ createOnOpen = false, decisionContext, onReturnToDecision, canDeleteAssignments = false, canDeletePaidAssignments = false }: { createOnOpen?: boolean; decisionContext?: DecisionAssignmentTarget & { label: string }; onReturnToDecision?: () => void; canDeleteAssignments?: boolean; canDeletePaidAssignments?: boolean }) {
   const { year, setYear } = useReportingYear()
   const [rows, setRows] = useState<AssignmentRecord[]>([])
   const [recipients, setRecipients] = useState<RecipientSummary[]>([])
@@ -58,6 +62,7 @@ export default function AidRegistry({ createOnOpen = false, decisionContext, onR
   const [filters, setFilters] = useState<RegistryFilters>(emptyFilters)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const filtersPanelId = useId()
+  const filterLabelPrefix = useId()
   const activeFilterCount = Object.values(filters).filter(Boolean).length
   const [sort, setSort] = useState<SortState>(defaultSort)
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -78,6 +83,8 @@ export default function AidRegistry({ createOnOpen = false, decisionContext, onR
   const refreshSequence = useRef(0)
   const [showDecisionForm, setShowDecisionForm] = useState(false)
   const [deletePreview, setDeletePreview] = useState<DeletePreview | null>(null)
+  const [deleteUnavailableReason, setDeleteUnavailableReason] = useState<'paid' | 'historical-payout' | 'permission' | null>(null)
+  const [missingDeleteNotice, setMissingDeleteNotice] = useState(false)
   const [selection, setSelection] = useState<{ year: number; ids: Set<string> }>(() => ({ year, ids: new Set() }))
   const [batchIds, setBatchIds] = useState<string[] | null>(null)
   const [contextError, setContextError] = useState('')
@@ -161,11 +168,11 @@ export default function AidRegistry({ createOnOpen = false, decisionContext, onR
     }
     return filtered.sort(compare)
   }, [rows, search, filters, sort])
-  const assignedTotalMinor = useMemo(() => visible.reduce((sum, row) => sum + (isAssignedStatus(row.status) ? row.amountMinor : 0), 0), [visible])
-  const assignedCount = visible.filter((row) => isAssignedStatus(row.status)).length
+  const registrySummary = useMemo(() => summarizeAidRegistry(visible), [visible])
   const eligibleIds = useMemo(() => eligibleAssignmentIds(visible), [visible])
   const selectedIds = useMemo(() => selectionForYear(selection, year, eligibleIds), [selection, year, eligibleIds])
   const headerSelection = selectionState(eligibleIds, selectedIds)
+  const showBatchToolbar = !loading && !loadError && selectedIds.size > 0
   useEffect(() => {
     setSelection((current) => {
       if (current.year !== year) return { year, ids: new Set() }
@@ -195,8 +202,21 @@ export default function AidRegistry({ createOnOpen = false, decisionContext, onR
     setEditingId(row.id); setEditingUpdatedAt(row.updatedAt); assignmentRequestId.current = undefined; setError(''); saveAndContinueRef.current = false
   }
   const requestDelete = async (row: AssignmentRecord) => {
-    try { const preview = await window.hromadaAid.deletion.preview('assignment', row.id); if (preview) setDeletePreview(preview); else setError('Призначення не знайдено. Оновіть список.') }
-    catch { setError('Не вдалося перевірити залежні дані призначення.') }
+    if (canDeleteAssignments && !canDeletePaidAssignments && row.status === 'Виплачено') { setDeleteUnavailableReason('paid'); return }
+    try {
+      const preview = await window.hromadaAid.deletion.preview('assignment', row.id)
+      if (!preview) { setMissingDeleteNotice(true); return }
+      if (canDeleteAssignments && !canDeletePaidAssignments) {
+        if (preview.status === 'Виплачено') { setDeleteUnavailableReason('paid'); return }
+        if (preview.dependencies.some(item => item.label === 'Історичні записи попередньої моделі' && item.count > 0)) { setDeleteUnavailableReason('historical-payout'); return }
+      }
+      setDeletePreview(preview)
+    }
+    catch (cause) {
+      const message = cause instanceof Error ? cause.message.toLocaleLowerCase('uk') : ''
+      if (message.includes('немає дозволу')) setDeleteUnavailableReason('permission')
+      else if (!message.includes('сес') && !message.includes('сервер') && !message.includes('з’єднан') && !message.includes('з\'єднан')) setError('Не вдалося перевірити залежні дані призначення.')
+    }
   }
   const close = () => { setDraft(null); setEditingId(undefined); setEditingUpdatedAt(undefined); assignmentRequestId.current = undefined; setError(''); setShowPersonForm(false); setRecipientEditor(null); setShowDecisionForm(false); saveAndContinueRef.current = false }
 
@@ -255,32 +275,40 @@ export default function AidRegistry({ createOnOpen = false, decisionContext, onR
     {decisionContext && (contextError || filters.decisionId === decisionContext.decisionId) && <div className={`decision-assignment-context${contextError ? ' is-warning' : ''}`} role={contextError ? 'alert' : 'status'}><Info size={19} aria-hidden="true"/><div><strong>{contextError ? 'Не вдалося відкрити допомоги' : 'Допомоги за рішенням'}</strong><span>{contextError || decisionContext.label}</span></div>{onReturnToDecision && <button type="button" className="secondary-button" onClick={onReturnToDecision}>Повернутися до рішення</button>}</div>}
     {error && !draft && <Alert variant="error" action={<button onClick={() => void refresh()}>Оновити</button>}>{error}</Alert>}
     <section className="dashboard-panel registry-panel aid-registry-panel">
+      <div className={`aid-registry-toolbar-layout${filtersOpen ? ' filters-open' : ''}${showBatchToolbar ? ' batch-open' : ''}`}>
       <div className="aid-toolbar">
         <SearchField value={search} onChange={setSearch} label="Пошук за ПІБ" placeholder="Пошук за ПІБ отримувача"/>
         <button type="button" className={`secondary-button aid-filter-toggle${filtersOpen ? ' expanded' : ''}`} aria-expanded={filtersOpen} aria-controls={filtersPanelId} onClick={() => setFiltersOpen((current) => !current)}><SlidersHorizontal size={18} aria-hidden="true"/>Фільтри{activeFilterCount > 0 && <span className="aid-filter-count" aria-label={`Застосовано фільтрів: ${activeFilterCount}`}>{activeFilterCount}</span>}</button>
         <button type="button" className="secondary-button aid-filter-reset" aria-label="Очистити пошук і всі фільтри" onClick={() => { setSearch(''); setFilters(emptyFilters()); setContextError('') }} disabled={!search && !activeFilterCount}><FilterX size={18} aria-hidden="true"/>Очистити фільтри</button>
-        <button type="button" className="secondary-button aid-sort-reset" title="Скинути сортування" aria-label="Скинути сортування" onClick={() => setSort(defaultSort)} disabled={sort.key === defaultSort.key && sort.direction === defaultSort.direction}><ListRestart size={18} aria-hidden="true"/>Скинути сортування</button>
-        <button className="primary-button" onClick={startCreate}><Plus size={19}/>Додати призначення</button>
+        <button type="button" className="secondary-button aid-sort-reset aid-toolbar-sort-reset" title="Скинути сортування" aria-label="Скинути сортування" onClick={() => setSort(defaultSort)} disabled={sort.key === defaultSort.key && sort.direction === defaultSort.direction}><ListRestart size={18} aria-hidden="true"/>Скинути сортування</button>
+        <button className="primary-button aid-toolbar-add-assignment" onClick={startCreate}><Plus size={19}/>Додати призначення</button>
       </div>
-      <div id={filtersPanelId} className="aid-filter-panel" hidden={!filtersOpen}><div className="aid-filter-grid">
-        <label><span>Програма</span><Select label="Фільтр: програма" value={filters.programId} placeholder="Усі програми" options={[{ value: '', label: 'Усі програми' }, ...catalogs.programs.map((item) => ({ value: item.id, label: item.shortName }))]} onChange={(value) => setFilters((current) => ({ ...current, programId: value, aidTypeId: '' }))}/></label>
-        <label><span>Вид допомоги</span><Select label="Фільтр: вид допомоги" value={filters.aidTypeId} placeholder="Усі види" options={[{ value: '', label: 'Усі види' }, ...catalogs.aidTypes.filter((item) => !filters.programId || item.programId === filters.programId).map((item) => ({ value: item.id, label: item.shortName }))]} onChange={(value) => setFilters((current) => ({ ...current, aidTypeId: value }))}/></label>
-        <label><span>Номер рішення</span><Select label="Фільтр: номер рішення" value={filters.decisionId} placeholder="Усі рішення" options={[{ value: '', label: 'Усі рішення' }, ...filterDecisions.map((decision) => ({ value: decision.id, label: `№ ${decision.decisionNumber} від ${formatDate(decision.decisionDate)}` }))]} onChange={(value) => setFilters((current) => ({ ...current, decisionId: value }))}/></label>
-        <label><span>Статус</span><Select label="Фільтр: статус" value={filters.status} placeholder="Усі статуси" options={[{ value: '', label: 'Усі статуси' }, ...ASSIGNMENT_STATUSES.map((value) => ({ value, label: value }))]} onChange={(value) => setFilters((current) => ({ ...current, status: value }))}/></label>
-        <label><span>Стать</span><Select label="Фільтр: стать" value={filters.sex} placeholder="Усі" options={[{ value: '', label: 'Усі' }, { value: 'Жінка', label: 'Жінка' }, { value: 'Чоловік', label: 'Чоловік' }]} onChange={(value) => setFilters((current) => ({ ...current, sex: value }))}/></label>
-        <label><span>ВПО</span><Select label="Фільтр: ВПО" value={filters.vpo} placeholder="Усі" options={[{ value: '', label: 'Усі' }, { value: 'yes', label: 'Так' }, { value: 'no', label: 'Ні' }]} onChange={(value) => setFilters((current) => ({ ...current, vpo: value }))}/></label>
-      </div></div>
+      <div id={filtersPanelId} className={`aid-filter-panel-collapse${filtersOpen ? ' is-open' : ''}`} aria-hidden={!filtersOpen} inert={!filtersOpen}><div className="aid-filter-panel-clip"><div className="aid-filter-panel"><div className="aid-filter-grid">
+        <div className="aid-filter-field"><span id={`${filterLabelPrefix}-program`}>Програма</span><Select label="Фільтр: програма" ariaLabelledBy={`${filterLabelPrefix}-program`} value={filters.programId} placeholder="Усі програми" options={[{ value: '', label: 'Усі програми' }, ...catalogs.programs.map((item) => ({ value: item.id, label: item.shortName }))]} onChange={(value) => setFilters((current) => ({ ...current, programId: value, aidTypeId: '' }))}/></div>
+        <div className="aid-filter-field"><span id={`${filterLabelPrefix}-aid-type`}>Вид допомоги</span><Select label="Фільтр: вид допомоги" ariaLabelledBy={`${filterLabelPrefix}-aid-type`} value={filters.aidTypeId} placeholder="Усі види" options={[{ value: '', label: 'Усі види' }, ...catalogs.aidTypes.filter((item) => !filters.programId || item.programId === filters.programId).map((item) => ({ value: item.id, label: item.shortName }))]} onChange={(value) => setFilters((current) => ({ ...current, aidTypeId: value }))}/></div>
+        <div className="aid-filter-field"><span id={`${filterLabelPrefix}-decision`}>Номер рішення</span><Select label="Фільтр: номер рішення" ariaLabelledBy={`${filterLabelPrefix}-decision`} value={filters.decisionId} placeholder="Усі рішення" options={[{ value: '', label: 'Усі рішення' }, ...filterDecisions.map((decision) => ({ value: decision.id, label: `№ ${decision.decisionNumber} від ${formatDate(decision.decisionDate)}` }))]} onChange={(value) => setFilters((current) => ({ ...current, decisionId: value }))}/></div>
+        <div className="aid-filter-field"><span id={`${filterLabelPrefix}-status`}>Статус</span><Select label="Фільтр: статус" ariaLabelledBy={`${filterLabelPrefix}-status`} value={filters.status} placeholder="Усі статуси" options={[{ value: '', label: 'Усі статуси' }, ...ASSIGNMENT_STATUSES.map((value) => ({ value, label: value }))]} onChange={(value) => setFilters((current) => ({ ...current, status: value }))}/></div>
+        <div className="aid-filter-field"><span id={`${filterLabelPrefix}-sex`}>Стать</span><Select label="Фільтр: стать" ariaLabelledBy={`${filterLabelPrefix}-sex`} value={filters.sex} placeholder="Усі" options={[{ value: '', label: 'Усі' }, { value: 'Жінка', label: 'Жінка' }, { value: 'Чоловік', label: 'Чоловік' }]} onChange={(value) => setFilters((current) => ({ ...current, sex: value }))}/></div>
+        <div className="aid-filter-field"><span id={`${filterLabelPrefix}-vpo`}>ВПО</span><Select label="Фільтр: ВПО" ariaLabelledBy={`${filterLabelPrefix}-vpo`} value={filters.vpo} placeholder="Усі" options={[{ value: '', label: 'Усі' }, { value: 'yes', label: 'Так' }, { value: 'no', label: 'Ні' }]} onChange={(value) => setFilters((current) => ({ ...current, vpo: value }))}/></div>
+      </div></div></div></div>
+      <div className={`aid-batch-toolbar-collapse${showBatchToolbar ? ' is-open' : ''}`} role="region" aria-label="Масові операції з призначеннями" aria-hidden={!showBatchToolbar} inert={!showBatchToolbar}>
+        <div className="aid-batch-toolbar-inner"><div className="aid-batch-toolbar">
+          <div className="aid-batch-toolbar-summary"><span className="aid-batch-toolbar-icon"><ListChecks size={19} aria-hidden="true"/></span><strong>Вибрано: <span aria-live="polite">{selectedIds.size}</span></strong></div>
+          <div className="aid-batch-toolbar-actions"><button type="button" className="secondary-button" onClick={() => setSelection({ year, ids: new Set() })}><X size={16} aria-hidden="true"/>Скасувати вибір</button><button type="button" className="primary-button aid-batch-primary" onClick={() => setBatchIds([...selectedIds])}><RefreshCw size={16} aria-hidden="true"/>Змінити статус</button></div>
+        </div></div>
+      </div>
+      </div>
       <span id={paidSelectionReasonId} className="visually-hidden">Виплачене призначення можна змінити лише індивідуально</span>
-      {loading && !rows.length ? <TableSkeleton columns={11} label="Завантажуємо призначення…"/> : loadError ? <Alert variant="error" action={<button type="button" onClick={() => void refresh()}>Повторити завантаження</button>}>{loadError}</Alert> : <div className="aid-table-wrap" role="region" aria-label="Таблиця реєстру допомог — горизонтальна прокрутка за потреби" tabIndex={0}><table className="aid-table" aria-label="Призначення матеріальної допомоги" aria-busy={loading || undefined}><colgroup><col className="aid-col-selection"/>{tableColumns.map(({ key }) => <col className={`aid-col-${key}`} key={key}/>)}<col className="aid-col-actions"/></colgroup><thead><tr><th scope="col" className="aid-selection-cell"><SelectAllAssignments checked={headerSelection.checked} indeterminate={headerSelection.indeterminate} disabled={!eligibleIds.length} onChange={() => setSelection({ year, ids: toggleEligibleSelection(eligibleIds, selectedIds) })}/></th>{tableColumns.map(({ key, label }) => <th scope="col" key={key} aria-sort={sort.key === key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : undefined}>{sortHeader(label, key)}</th>)}<th scope="col">Дії</th></tr></thead><tbody>{!visible.length && <tr><td colSpan={tableColumns.length + 2} className="aid-empty-cell"><DataState kind={rows.length ? "search" : "empty"} message={decisionContext && filters.decisionId === decisionContext.decisionId ? 'За цим рішенням призначень не знайдено' : rows.length ? 'За заданими параметрами нічого не знайдено' : `За ${year} рік призначень немає`} description={decisionContext && filters.decisionId === decisionContext.decisionId ? 'Перевірте, чи додано призначення до цього рішення.' : rows.length ? 'Очистіть пошук або фільтри, щоб переглянути призначення.' : 'Створіть перше призначення, щоб розпочати облік'}/></td></tr>}{visible.map((row, index) => <tr key={row.id} className={selectedIds.has(row.id) ? 'aid-row-selected' : undefined}><td className="aid-selection-cell"><span className="aid-selection-control" title={row.status === 'Виплачено' ? 'Виплачене призначення можна змінити лише індивідуально' : undefined}><input type="checkbox" aria-label={`Вибрати призначення: ${row.recipientName}, рішення № ${row.decisionNumber}`} aria-describedby={row.status === 'Виплачено' ? paidSelectionReasonId : undefined} checked={selectedIds.has(row.id)} disabled={row.status === 'Виплачено'} onChange={() => toggleAssignment(row.id)}/></span></td><td data-label="№">{index + 1}</td><td data-label="Рішення"><strong className="registry-name">№ {row.decisionNumber}</strong><span className="decision-date-cell">{formatDate(row.decisionDate)}</span></td><td data-label="Програма">{row.programName}</td><td data-label="Вид допомоги">{row.aidTypeName}</td><td data-label="ПІБ"><strong className="registry-name">{row.recipientName}</strong>{row.recipientIsDemo && <span className="demo-recipient-badge">Демо</span>}</td><td data-label="Стать">{row.recipientSex ?? '—'}</td><td data-label="Сума призначення" className="assignment-amount"><strong>{money(row.amountMinor)}</strong></td><td data-label="ВПО">{row.recipientIsVpo === null ? 'Не зазначено' : row.recipientIsVpo ? 'Так' : 'Ні'}</td><td data-label="Статус"><span className={`status-badge status-${assignmentStatusColor[row.status]}`}>{row.status}</span></td><td data-label="Дії"><div className="registry-row-actions"><button className="table-action" aria-label={`Редагувати призначення ${row.recipientName}`} onClick={() => startEdit(row)}><Pencil size={17}/></button><button className="table-action danger-action" aria-label={`Видалити призначення ${row.recipientName}`} onClick={() => void requestDelete(row)}><Trash2 size={17}/></button></div></td></tr>)}</tbody><tfoot aria-live="polite"><tr><td colSpan={7} className="aid-total-count">{visible.length ? 'Призначено:' : 'Всього:'} <strong>{assignedCount}</strong></td><td className="assignment-amount" data-label="Сума призначень">{!visible.length && <span className="aid-empty-total-label">Сума призначень:</span>}<strong>{money(assignedTotalMinor)}</strong></td><td colSpan={3} className="aid-total-spacer" aria-hidden="true"/></tr></tfoot></table></div>}
-      {!loading && !loadError && selectedIds.size > 0 && <div className="aid-batch-toolbar"><strong>Вибрано призначень: {selectedIds.size}</strong><div><button type="button" className="primary-button" onClick={() => setBatchIds([...selectedIds])}>Змінити статус</button><button type="button" className="secondary-button" onClick={() => setSelection({ year, ids: new Set() })}>Скасувати вибір</button></div></div>}
-
+        {loading && !rows.length ? <TableSkeleton columns={11} label="Завантажуємо призначення…"/> : loadError ? <Alert variant="error" action={<button type="button" onClick={() => void refresh()}>Повторити завантаження</button>}>{loadError}</Alert> : <div className="aid-table-wrap" role="region" aria-label="Таблиця реєстру допомог — горизонтальна прокрутка за потреби" tabIndex={0}><table className="aid-table" aria-label="Призначення матеріальної допомоги" aria-busy={loading || undefined}><colgroup><col className="aid-col-selection"/>{tableColumns.map(({ key }) => <col className={`aid-col-${key}`} key={key}/>)}<col className="aid-col-actions"/></colgroup><thead><tr><th scope="col" className="aid-selection-cell"><SelectAllAssignments checked={headerSelection.checked} indeterminate={headerSelection.indeterminate} disabled={!eligibleIds.length} onChange={() => setSelection({ year, ids: toggleEligibleSelection(eligibleIds, selectedIds) })}/></th>{tableColumns.map(({ key, label }) => <th scope="col" key={key} aria-sort={sort.key === key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : undefined}>{sortHeader(label, key)}</th>)}<th scope="col">Дії</th></tr></thead><tbody>{!visible.length && <tr><td colSpan={tableColumns.length + 2} className="aid-empty-cell"><DataState kind={rows.length ? "search" : "empty"} message={decisionContext && filters.decisionId === decisionContext.decisionId ? 'За цим рішенням призначень не знайдено' : rows.length ? 'За заданими параметрами нічого не знайдено' : `За ${year} рік призначень немає`} description={decisionContext && filters.decisionId === decisionContext.decisionId ? 'Перевірте, чи додано призначення до цього рішення.' : rows.length ? 'Очистіть пошук або фільтри, щоб переглянути призначення.' : 'Створіть перше призначення, щоб розпочати облік'}/></td></tr>}{visible.map((row, index) => <tr key={row.id} className={selectedIds.has(row.id) ? 'aid-row-selected' : undefined}><td className="aid-selection-cell"><span className="aid-selection-control" title={row.status === 'Виплачено' ? 'Виплачене призначення можна змінити лише індивідуально' : undefined}><input type="checkbox" aria-label={`Вибрати призначення: ${row.recipientName}, рішення № ${row.decisionNumber}`} aria-describedby={row.status === 'Виплачено' ? paidSelectionReasonId : undefined} checked={selectedIds.has(row.id)} disabled={row.status === 'Виплачено'} onChange={() => toggleAssignment(row.id)}/></span></td><td data-label="№">{index + 1}</td><td data-label="Рішення"><strong className="registry-name">№ {row.decisionNumber}</strong><span className="decision-date-cell">{formatDate(row.decisionDate)}</span></td><td data-label="Програма">{row.programName}</td><td data-label="Вид допомоги">{row.aidTypeName}</td><td data-label="ПІБ"><strong className="registry-name">{row.recipientName}</strong></td><td data-label="Стать">{row.recipientSex ?? '—'}</td><td data-label="Сума призначення" className="assignment-amount"><strong>{money(row.amountMinor)}</strong></td><td data-label="ВПО"><span className="aid-vpo-value">{row.recipientIsVpo === null ? 'Не зазначено' : row.recipientIsVpo ? 'Так' : 'Ні'}</span></td><td data-label="Статус"><span className={`status-badge status-${assignmentStatusColor[row.status]}`}>{row.status}</span></td><td data-label="Дії"><div className="registry-row-actions"><button className="table-action" aria-label={`Редагувати призначення ${row.recipientName}`} onClick={() => startEdit(row)}><Pencil size={17}/></button>{canDeleteAssignments && <button className="table-action danger-action" aria-label={`Видалити призначення ${row.recipientName}`} onClick={() => void requestDelete(row)}><Trash2 size={17}/></button>}</div></td></tr>)}</tbody><tfoot aria-live="polite"><tr><td colSpan={summaryLabelColSpan} className="aid-total-count">Усього записів: <strong>{registrySummary.count}</strong></td><td className="aid-summary-amount assignment-amount" data-label="Сума призначень"><strong>{money(registrySummary.totalMinor)}</strong></td><td colSpan={summaryTrailingColSpan} className="aid-total-spacer" aria-hidden="true"/></tr></tfoot></table></div>}
     </section>
     {batchIds && <BatchAssignmentStatusModal assignmentIds={batchIds} year={year} onClose={() => setBatchIds(null)} onSaved={(result) => {
       setBatchIds(null); setSelection({ year, ids: new Set() })
       notifySystemToast(result.updatedCount ? 'success' : 'info', result.updatedCount ? 'Статус оновлено' : 'Змін не потрібно', result.updatedCount ? `Оновлено призначень: ${result.updatedCount}.` : 'Усі вибрані призначення вже мають цей статус.')
       void refresh(year)
     }}/>}
-    {deletePreview && <DeleteConfirmation preview={deletePreview} onClose={() => setDeletePreview(null)} onDeleted={async () => { setDeletePreview(null); await refresh() }}/>}
+    {deletePreview && <DeleteConfirmation preview={deletePreview} onClose={() => setDeletePreview(null)} onDeleted={async () => { setDeletePreview(null); setSelection(current => ({ ...current, ids: new Set([...current.ids].filter(id => id !== deletePreview.id)) })); await refresh() }}/>}
+    {deleteUnavailableReason && <Modal title="Видалення недоступне" description="Ви не маєте права видалити це призначення." headerIcon={<ShieldAlert size={26} aria-hidden="true"/>} onClose={() => setDeleteUnavailableReason(null)} className="deletion-unavailable-modal"><div className="deletion-unavailable-reason"><LockKeyhole size={17} aria-hidden="true"/><div><strong>Причина обмеження</strong><p>{deleteUnavailableReason === 'paid' ? 'За цим призначенням уже здійснено виплату. Видалення таких записів доступне лише адміністратору.' : deleteUnavailableReason === 'historical-payout' ? 'У пов’язаних даних є історичний запис виплати. Видалення такого призначення недоступне.' : 'Для вашого облікового запису не надано повноваження видаляти це призначення.'}</p></div></div><div className="deletion-unavailable-footer"><button type="button" className="primary-button" data-modal-autofocus onClick={() => setDeleteUnavailableReason(null)}>Зрозуміло</button></div></Modal>}
+    {missingDeleteNotice && <Modal title="Запис не знайдено" description="Це призначення вже видалено або більше недоступне. Оновіть реєстр перед продовженням." onClose={() => setMissingDeleteNotice(false)}><div className="confirm-dialog-actions"><button type="button" className="primary-button" data-modal-autofocus onClick={() => { setMissingDeleteNotice(false); void refresh() }}>Зрозуміло</button></div></Modal>}
 
     {draft && <Modal title={editingId ? 'Редагувати призначення' : 'Нове призначення'} description="Оберіть отримувача й рішення та заповніть відомості про допомогу." onClose={() => { if (!savingRef.current) close() }} busy={saving} dirty={JSON.stringify(draft) !== initialDraft.current} size="wide">
       <form ref={assignmentFormRef} onSubmit={(event) => void submit(event)} className="assignment-modal-form"><div className="assignment-modal-grid">

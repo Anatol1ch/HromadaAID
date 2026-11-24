@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import type { DeleteEntity, DeletePreview } from '../../electron/api-contract'
 import ConfirmDialog from './ConfirmDialog'
+import { notifySystemToast } from './SystemToastHost'
 
 const titles: Record<DeleteEntity, string> = {
   assignment: 'Видалити призначення?', recipient: 'Видалити отримувача?', decision: 'Видалити рішення?',
@@ -23,11 +24,20 @@ export default function DeleteConfirmation({ preview, onClose, onDeleted }: {
     setError('')
     try {
       const result = await window.hromadaAid.deletion.execute(preview.entity, preview.id, preview.confirmationToken)
-      if (!result.ok) { setError(result.message ?? 'Не вдалося видалити запис.'); return }
+      if (!result.ok) {
+        setError(result.reason === 'status' ? 'Статус призначення змінився на «Виплачено» або виявлено історичний запис виплати. Видалення скасовано.' : result.reason === 'changed' ? 'Призначення або пов’язані дані змінилися. Оновіть попередній перегляд перед видаленням.' : result.reason === 'not-found' ? 'Запис уже видалено або його не знайдено. Оновіть список.' : result.message ?? 'Не вдалося видалити запис.')
+        return
+      }
       committed.current = true; setDeleted(true)
+      notifySystemToast('success', preview.entity === 'assignment' ? 'Призначення видалено' : 'Запис видалено', preview.entity === 'assignment' ? 'Призначення успішно видалено.' : 'Запис успішно видалено.')
       if (preview.entity === 'program' || preview.entity === 'aidType') notifyCatalogsChanged()
       else notifyOverviewChanged()
-    } catch { setError('Не вдалося видалити запис. Перевірте список перед повторною спробою.'); return }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message.toLocaleLowerCase('uk') : ''
+      if (message.includes('немає дозволу')) setError('Недостатньо повноважень для видалення цього запису. Зверніться до адміністратора.')
+      else if (!message.includes('сес') && !message.includes('сервер') && !message.includes('з’єднан') && !message.includes('з\'єднан')) setError('Не вдалося видалити запис. Перевірте список перед повторною спробою.')
+      return
+    }
     try { await onDeleted() }
     catch { setError('Запис видалено, але не вдалося оновити список. Закрийте це вікно та оновіть список.'); }
   }

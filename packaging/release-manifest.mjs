@@ -5,9 +5,12 @@ import { pathToFileURL } from 'node:url'
 
 export const isStableReleaseVersion = value => typeof value === 'string' && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value)
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex')
+const LEGACY_UPDATE_CONTRACT_VERSION = 1
+const CURRENT_API_CONTRACT_VERSION = 2
 
-export async function createReleaseManifest(directory, version) {
+export async function createReleaseManifest(directory, version, apiContractVersion = CURRENT_API_CONTRACT_VERSION) {
   if (!isStableReleaseVersion(version)) throw new Error('Release manifest потребує стабільної версії SemVer X.Y.Z.')
+  if (!Number.isInteger(apiContractVersion) || apiContractVersion !== CURRENT_API_CONTRACT_VERSION) throw new Error('Release manifest має відповідати поточній версії API-контракту.')
   const root = resolve(directory)
   const setupName = `HromadaAID-Setup-${version}.exe`
   const serverName = `HromadaAID-Server-v${version}-win-x64.zip`
@@ -24,13 +27,15 @@ export async function createReleaseManifest(directory, version) {
   }
   return { formatVersion: 1, version, platform: 'win32', architecture: 'x64', compatibility: {
     installer: 'hromadaaid-universal-nsis-v1', installModes: ['Client-only', 'Server-only', 'Combined'],
-    api: { contract: 'hromadaaid-rest', version: 1 }, client: { versionPolicy: 'same-release-version' }, manager: { versionPolicy: 'same-release-version', apiContract: 'hromadaaid-rest', apiContractVersion: 1 }, server: { integrity: 'embedded-package-integrity-v1' },
+    // Keep v1 bootstrap markers so installed 1.0.2 updaters can fetch Manager 1.1.0.
+    // New Client/Manager code must use targetVersion, which identifies the actual v2 release.
+    api: { contract: 'hromadaaid-rest', version: LEGACY_UPDATE_CONTRACT_VERSION, targetVersion: apiContractVersion }, client: { versionPolicy: 'same-release-version' }, manager: { versionPolicy: 'same-release-version', apiContract: 'hromadaaid-rest', apiContractVersion: LEGACY_UPDATE_CONTRACT_VERSION, targetApiContractVersion: apiContractVersion }, server: { integrity: 'embedded-package-integrity-v1' },
   }, artifacts }
 }
 
-export async function verifyReleaseManifest(directory, value) {
+export async function verifyReleaseManifest(directory, value, apiContractVersion = CURRENT_API_CONTRACT_VERSION) {
   if (!value || value.formatVersion !== 1 || !isStableReleaseVersion(value.version) || value.platform !== 'win32' || value.architecture !== 'x64') throw new Error('Метадані release-manifest.json некоректні.')
-  if (value.compatibility?.installer !== 'hromadaaid-universal-nsis-v1' || !['Client-only', 'Server-only', 'Combined'].every(mode => value.compatibility?.installModes?.includes(mode)) || value.compatibility?.api?.contract !== 'hromadaaid-rest' || value.compatibility?.api?.version !== 1 || value.compatibility?.manager?.versionPolicy !== 'same-release-version' || value.compatibility?.manager?.apiContract !== 'hromadaaid-rest' || value.compatibility?.manager?.apiContractVersion !== 1 || value.compatibility?.server?.integrity !== 'embedded-package-integrity-v1') throw new Error('Метадані сумісності release manifest некоректні.')
+  if (value.compatibility?.installer !== 'hromadaaid-universal-nsis-v1' || !['Client-only', 'Server-only', 'Combined'].every(mode => value.compatibility?.installModes?.includes(mode)) || value.compatibility?.api?.contract !== 'hromadaaid-rest' || value.compatibility?.api?.version !== LEGACY_UPDATE_CONTRACT_VERSION || value.compatibility?.api?.targetVersion !== apiContractVersion || value.compatibility?.manager?.versionPolicy !== 'same-release-version' || value.compatibility?.manager?.apiContract !== 'hromadaaid-rest' || value.compatibility?.manager?.apiContractVersion !== LEGACY_UPDATE_CONTRACT_VERSION || value.compatibility?.manager?.targetApiContractVersion !== apiContractVersion || value.compatibility?.server?.integrity !== 'embedded-package-integrity-v1') throw new Error('Метадані сумісності release manifest некоректні.')
   const root = resolve(directory)
   const expected = [
     { component: 'installer', name: `HromadaAID-Setup-${value.version}.exe` },
@@ -49,10 +54,10 @@ export async function verifyReleaseManifest(directory, value) {
   return true
 }
 
-export async function writeReleaseManifest(directory, version) {
+export async function writeReleaseManifest(directory, version, apiContractVersion = CURRENT_API_CONTRACT_VERSION) {
   const root = resolve(directory)
-  const value = await createReleaseManifest(root, version)
-  await verifyReleaseManifest(root, value)
+  const value = await createReleaseManifest(root, version, apiContractVersion)
+  await verifyReleaseManifest(root, value, apiContractVersion)
   await writeFile(join(root, 'release-manifest.json'), JSON.stringify(value, null, 2) + '\n', { flag: 'wx' })
   return value
 }

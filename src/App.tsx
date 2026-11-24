@@ -3,9 +3,10 @@ import DataState from './components/DataState'
 import LoginScreen from './components/LoginScreen'
 import WelcomeScreen from './components/WelcomeScreen'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { waitForStartupGate } from './lib/startup-timing'
 import { initialAccountingYear, rememberAccountingYear } from './lib/accountingYear'
-import { Activity, ChevronRight, CircleHelp, Code2, Plus, ArrowUpRight, CalendarDays, FileText, HandCoins, HeartHandshake, Home, LogOut, Settings, BookOpen, ChartNoAxesCombined, UsersRound, Lock, LockKeyhole, Phone, Mail, Send } from 'lucide-react'
+import { Activity, ChevronRight, CircleHelp, Code2, Plus, ArrowUpRight, CalendarDays, FileText, HandCoins, HeartHandshake, Home, LogOut, Settings, BookOpen, ChartNoAxesCombined, UsersRound, Lock, LockKeyhole, Phone, Mail, Send, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import type { AuthenticatedUser, ClientAuthState } from '../shared/auth-contract'
 import { allowedDictionarySections as dictionarySectionsForRoles, hasWorkspacePage, USER_ROLE_LABELS, type Permission, type WorkspacePage } from '../shared/authorization'
 import StatementFormation from './StatementFormation'
@@ -27,6 +28,7 @@ import { YearContext } from './context/YearContext'
 import { notifyConnectionRestored } from './services/connectionRefresh'
 import { decisionAssignmentTarget, type DecisionAssignmentTarget } from './lib/decision-assignment-navigation'
 import Modal from './components/Modal'
+import { getSidebarToggleLabel, readCompactSidebar, writeCompactSidebar } from './lib/sidebar-preference'
 
 const ACCESS_RESTRICTED_HINT = 'Доступ для вашої ролі обмежено'
 
@@ -169,6 +171,8 @@ function App() {
 
 function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extract<ClientAuthState, { status: 'authenticated' }>; onChangePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; message?: string }>; connectionActions: { getState: () => Promise<import('../shared/api-contract').ServerConnectionState>; check: (apiUrl: string) => Promise<import('../shared/api-contract').ServerConnectionCheckResult>; save: (apiUrl: string) => Promise<import('../shared/api-contract').ServerConnectionSaveResult> } }) {
   const [activeNav, setActiveNav] = useState('Головна')
+  const [compactSidebar, setCompactSidebar] = useState(() => readCompactSidebar({ getItem: key => window.localStorage.getItem(key) }))
+  const [sidebarTooltip, setSidebarTooltip] = useState<{ label: string; top: number; left: number } | null>(null)
   const [createAssignment, setCreateAssignment] = useState(false)
   const [decisionContext, setDecisionContext] = useState<(DecisionAssignmentTarget & { label: string }) | null>(null)
   const [dictionarySection, setDictionarySection] = useState<DictionarySection | undefined>()
@@ -182,6 +186,15 @@ function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extrac
   const dictionarySections = useMemo(() => dictionarySectionsForRoles(auth.user.roles) as DictionarySection[], [auth.user.roles])
   const canOpenPage = (page: WorkspacePage, permission: Permission) => (page === 'dictionaries' ? dictionarySections.length > 0 : hasWorkspacePage(auth.user.roles, page) && can(permission))
   const showAccessDenied = useCallback(() => notifySystemToast('access-denied', 'Доступ обмежено', 'У вашого облікового запису немає дозволу на виконання цієї дії.', 5_000), [])
+  useEffect(() => { writeCompactSidebar({ setItem: (key, value) => window.localStorage.setItem(key, value) }, compactSidebar) }, [compactSidebar])
+  useEffect(() => { if (!compactSidebar) setSidebarTooltip(null) }, [compactSidebar])
+  const updateSidebarTooltip = (target: EventTarget | null) => {
+    if (!compactSidebar || !(target instanceof Element)) { setSidebarTooltip(null); return }
+    const trigger = target.closest<HTMLElement>('[data-sidebar-tooltip]')
+    if (!trigger) { setSidebarTooltip(null); return }
+    const rect = trigger.getBoundingClientRect()
+    setSidebarTooltip({ label: trigger.dataset.sidebarTooltip ?? '', top: Math.max(28, Math.min(window.innerHeight - 28, rect.top + rect.height / 2)), left: Math.min(rect.right + 9, Math.max(12, window.innerWidth - 270)) })
+  }
   useEffect(() => { rememberAccountingYear(year) }, [year])
   useEffect(() => { if (activeNav !== 'Налаштування' && !visibleNav.some((item) => item.label === activeNav && canOpenPage(item.page, item.permission))) setActiveNav('Головна') }, [activeNav, visibleNav, dictionarySections, permissions])
   const navigate = (label: string) => { const item = visibleNav.find((value) => value.label === label); if (!item) return; if (!canOpenPage(item.page, item.permission)) { showAccessDenied(); return }; setCreateAssignment(false); if (label !== 'Реєстр допомог') setDecisionContext(null); if (label !== 'Довідники') setDictionarySection(undefined); setActiveNav(label); setNotice('') }
@@ -207,23 +220,24 @@ function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extrac
   const user = auth.user
   const displayName = user.displayName || user.username
   const roles = user.roles.map((role) => USER_ROLE_LABELS[role]).join(', ')
-  return <YearContext.Provider value={{ year, setYear }}><div className="app-shell">
-    <aside className="sidebar">
-      <div className="brand"><div className="brand-mark"><HeartHandshake size={22} strokeWidth={2.1}/></div><div className="brand-copy"><div className="brand-name">Hromada<span>Aid</span></div><div className="brand-caption">Автоматизована система обліку матеріальних допомог</div></div></div>
-      <div className="nav-label">РОБОЧИЙ ПРОСТІР</div>
+  const sidebarToggleLabel = getSidebarToggleLabel(compactSidebar)
+  return <YearContext.Provider value={{ year, setYear }}><div className={`app-shell${compactSidebar ? ' sidebar-compact' : ''}`}>
+    <aside className="sidebar" onPointerOver={event => updateSidebarTooltip(event.target)} onPointerOut={event => updateSidebarTooltip(event.relatedTarget)} onFocus={event => updateSidebarTooltip(event.target)} onBlur={event => updateSidebarTooltip(event.relatedTarget)}>
+      <div className="brand"><div className="brand-mark" role="img" aria-label="HromadaAID"><HeartHandshake size={22} strokeWidth={2.1} aria-hidden="true"/></div><div className="brand-copy"><div className="brand-name">Hromada<span>Aid</span></div></div></div>
       <nav className="nav-list">{visibleNav.map(({ label, icon: Icon, permission }) => {
         const item = nav.find((entry) => entry.label === label)!
         const available = canOpenPage(item.page, permission)
         const hint = available ? label : ACCESS_RESTRICTED_HINT
-        return <button key={label} type="button" aria-label={available ? label : `${label}. ${hint}`} title={hint}
+        return <button key={label} type="button" aria-label={available ? label : `${label}. ${hint}`} data-sidebar-tooltip={available ? label : `${label}. ${hint}`}
           aria-current={available && activeNav === label ? 'page' : undefined} aria-disabled={!available}
           className={`nav-item ${available && activeNav === label ? 'active' : ''}${available ? '' : ' nav-item-locked'}`}
           onClick={() => navigate(label)}><Icon size={19} strokeWidth={1.8} aria-hidden="true"/><span>{label}</span>{!available && <LockKeyhole className="nav-lock" size={14} aria-hidden="true"/>}</button>
       })}</nav>
-      <div className="sidebar-bottom"><div className="nav-label">СИСТЕМА</div><button type="button" className={`nav-item${activeNav === 'Налаштування' ? ' active' : ''}`} aria-label="Налаштування" title="Налаштування" aria-current={activeNav === 'Налаштування' ? 'page' : undefined} onClick={navigateSettings}><Settings size={19} strokeWidth={1.8} aria-hidden="true"/><span>Налаштування</span></button><button type="button" className="help-card help-card-button" onClick={() => setHelpOpen(true)}><span className="help-icon"><CircleHelp size={18}/></span><span className="help-copy"><strong>Потрібна допомога?</strong><span>Зверніться до адміністратора системи</span></span><ChevronRight size={17}/></button><div className="user-row"><div className="avatar">{user ? displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() : 'Л'}</div><button type="button" className="user-profile-link" onClick={navigateSettings} title="Мій обліковий запис"><strong>{displayName}</strong><span title={roles}>{roles}</span></button>{user && <div className="user-actions"><button type="button" className="icon-button" title="Вийти" aria-label="Вийти" disabled={logoutBusy} onClick={() => void logout()}><LogOut size={16}/></button></div>}</div></div>
+      <div className="sidebar-bottom"><button type="button" className={`nav-item sidebar-help-item${helpOpen ? ' active' : ''}`} aria-label="Допомога та підтримка" data-sidebar-tooltip="Допомога та підтримка" aria-haspopup="dialog" aria-expanded={helpOpen} onClick={() => setHelpOpen(true)}><CircleHelp size={19} strokeWidth={1.8} aria-hidden="true"/><span>Допомога та підтримка</span></button><button type="button" className={`nav-item${activeNav === 'Налаштування' ? ' active' : ''}`} aria-label="Налаштування" data-sidebar-tooltip="Налаштування" aria-current={activeNav === 'Налаштування' ? 'page' : undefined} onClick={navigateSettings}><Settings size={19} strokeWidth={1.8} aria-hidden="true"/><span>Налаштування</span></button><span className="sidebar-bottom-separator" aria-hidden="true"/><div className="user-row"><div className="avatar" aria-hidden="true">{user ? displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() : 'Л'}</div><button type="button" className="user-profile-link" onClick={navigateSettings} aria-label={`Мій обліковий запис: ${displayName}`} data-sidebar-tooltip={`Профіль: ${displayName}`}><strong>{displayName}</strong><span title={roles}>{roles}</span></button>{user && <div className="user-actions"><button type="button" className="icon-button" title="Вийти" aria-label="Вийти" data-sidebar-tooltip="Вийти" disabled={logoutBusy} onClick={() => void logout()}><LogOut size={16} aria-hidden="true"/></button></div>}</div></div>
     </aside>
+    {sidebarTooltip && compactSidebar && createPortal(<div className="sidebar-tooltip" aria-hidden="true" style={{ top: sidebarTooltip.top, left: sidebarTooltip.left }}>{sidebarTooltip.label}</div>, document.body)}
     <main className="main-area">
-      <header className="topbar"><div className="topbar-inner"><Breadcrumbs items={[{ label: 'Робочий простір', section: 'Головна' }, { label: activeNav }]} navigate={navigate}/><div className="top-actions"><YearPicker value={year} onChange={setYear} label="Рік"/></div></div></header>
+      <header className="topbar"><div className="topbar-inner"><button type="button" className="topbar-sidebar-toggle" aria-label={sidebarToggleLabel} title={sidebarToggleLabel} aria-pressed={compactSidebar} onClick={() => setCompactSidebar(value => !value)}>{compactSidebar ? <PanelLeftOpen size={24} strokeWidth={2} aria-hidden="true"/> : <PanelLeftClose size={24} strokeWidth={2} aria-hidden="true"/>}</button><span className="topbar-sidebar-separator" aria-hidden="true"/><Breadcrumbs items={[{ label: 'Робочий простір', section: 'Головна' }, { label: activeNav }]} navigate={navigate}/><div className="top-actions"><YearPicker value={year} onChange={setYear} label="Рік"/></div></div></header>
       <div className={`content${activeNav === 'Головна' ? ' home-content' : ''}`}>
         {notice && <Alert variant="info" onDismiss={() => setNotice('')}>{notice}</Alert>}
         <div>{activeNav === 'Головна' ? <StartPage navigate={navigate} onCreate={newAssignment} canCreate={can('assignments.manage')} availableActions={{
@@ -232,7 +246,7 @@ function Workspace({ auth, onChangePassword, connectionActions }: { auth: Extrac
           'Звітність': canOpenPage('reports', 'reports.read'),
           'Довідники': dictionarySections.some((section) => section === 'programs' || section === 'plans'),
         }} canViewOverview={canOpenPage('overview', 'dashboard.read')} onAccessDenied={showAccessDenied}/> :
-          activeNav === 'Реєстр допомог' ? <AidRegistry createOnOpen={createAssignment} decisionContext={decisionContext ?? undefined} onReturnToDecision={decisionContext ? returnToDecision : undefined}/> :
+          activeNav === 'Реєстр допомог' ? <AidRegistry createOnOpen={createAssignment} decisionContext={decisionContext ?? undefined} onReturnToDecision={decisionContext ? returnToDecision : undefined} canDeleteAssignments={can('assignments.delete')} canDeletePaidAssignments={can('protected_entities.delete')}/> :
           activeNav === 'Формування відомостей' ? <StatementFormation/> :
           activeNav === 'Довідники' ? <Dictionaries allowedSections={dictionarySections} initialSection={dictionarySection} onViewDecisionAssignments={viewDecisionAssignments} onAccessDenied={showAccessDenied} canManageCatalogs={can('catalogs.manage')} canManagePlans={can('planning.manage')} canManageDecisions={can('decisions.manage')} canManagePersonal={can('recipients.manage') || can('banks.manage')}/> :
           activeNav === 'Огляд' ? <Dashboard/> : activeNav === 'Користувачі' ? <UsersAdmin currentUserId={auth.user.id}/> : activeNav === 'Налаштування' ? <SettingsPage user={user} onChangePassword={onChangePassword} connectionActions={connectionActions}/> : <Reports/>}</div>

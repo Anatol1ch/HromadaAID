@@ -1,5 +1,5 @@
 import { cleanupGeneratedReports, registerReportExportIpc } from './report-export-ipc.js'
-import { app, BrowserWindow, dialog, screen, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, screen, shell } from 'electron'
 import { RemoteAuthSession } from './auth-session.js'
 import { readLastLogin, saveLastLoginAfterSuccessfulLogin } from './client-preferences.js'
 import type { AuthActionResult, ClientAuthState } from '../shared/auth-contract.js'
@@ -10,6 +10,7 @@ import { createClientUpdateService } from './client-update-service.js'
 import { configureIpcSecurity, isTrustedAppUrl, trustedIpcMain } from './ipc-security.js'
 import { ElectronRuntimeConfigError, enforceTlsCertificateValidation, readElectronRuntimeConfig, readSavedConnectionConfig, validateServerBaseUrl, type ElectronRuntimeConfig } from './runtime-config.js'
 import { HttpClient, HttpClientError } from './http-client.js'
+import { getClientWindowAction } from './window-shortcuts.js'
 import { checkServerAddress, switchRemoteServer, type ServerConnectionState } from './connection-config.js'
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, CatalogList, DashboardData, DecisionRecord, DecisionSummary, ProgramApproval, RecipientRecord, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from './api-contract.js'
 import { isAnnualAidPlanList, isAnnualPlanEntryList, isAssignmentChangeResult, isAssignmentListResult, isAssignmentRecordList, isAssignmentSaveResult, isBankDetailList, isBankRecordList, isBankSaveResult, isCatalogList, isCatalogOrderResult, isCatalogSaveResult, isDashboardData, isDecisionSaveResult, isDecisionSummaryList, isNullableBankRecord, isNullableDecisionRecord, isNullableRecipientRecord, isProgramApprovalList, isProgramApprovalSaveResult, isRecipientSaveResult, isRecipientSummaryList, isReportSourceRowList, isReportSummary, isStatementListResult } from '../shared/api-contract.js'
@@ -21,6 +22,7 @@ const isDev = !app.isPackaged
 enforceTlsCertificateValidation()
 const devServerUrl = 'http://127.0.0.1:5175/'
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
+const clientWindowTitle = 'HromadaAID'
 const iconDirectory = app.isPackaged ? join(process.resourcesPath, 'assets') : join(currentDirectory, 'assets')
 let mainWindow: BrowserWindow | null = null
 let runtimeConfig: ElectronRuntimeConfig | undefined
@@ -59,7 +61,7 @@ function createWindow() {
       minWidth: Math.min(800, area.width),
       minHeight: Math.min(480, area.height),
       backgroundColor: '#f5f6f8',
-      title: 'HromadaAID — Огляд',
+      title: clientWindowTitle,
       icon: join(iconDirectory, process.platform === 'win32' ? 'hromadaaid.ico' : 'hromadaaid.png'),
       // Keep the native surface hidden until Chromium has a frame to show. This
       // prevents a small window from flashing before the normal maximized state.
@@ -73,6 +75,10 @@ function createWindow() {
       },
     })
     mainWindow = window
+    window.webContents.on('page-title-updated', event => {
+      event.preventDefault()
+      if (!window.isDestroyed()) window.setTitle(clientWindowTitle)
+    })
     window.webContents.on('will-navigate', (event, url) => {
       if (!isTrustedAppUrl(url)) event.preventDefault()
     })
@@ -80,6 +86,21 @@ function createWindow() {
       if (isMainFrame && !isTrustedAppUrl(url)) event.preventDefault()
     })
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    window.webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return
+      if (isDev && (input.key === 'F12' || ((input.control || input.meta) && input.shift && input.key.toLowerCase() === 'i'))) {
+        event.preventDefault()
+        window.webContents.toggleDevTools()
+        return
+      }
+      const action = getClientWindowAction(input)
+      if (!action) return
+      event.preventDefault()
+      if (action === 'zoom-in') window.webContents.setZoomLevel(window.webContents.getZoomLevel() + 0.5)
+      else if (action === 'zoom-out') window.webContents.setZoomLevel(window.webContents.getZoomLevel() - 0.5)
+      else if (action === 'zoom-reset') window.webContents.setZoomLevel(0)
+      else window.webContents[action]()
+    })
     // Leave PDF subframe navigation and Vite's resource/WebSocket requests alone.
     // Printing is the only web permission needed by the document preview.
     window.webContents.session.setPermissionCheckHandler((contents, permission) =>
@@ -129,6 +150,8 @@ if (!hasSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     try {
+      // Remove Electron's default File/Edit/View/Window menu in both dev and packaged Client.
+      Menu.setApplicationMenu(null)
       const userDataPath = app.getPath('userData')
       const clientUpdates = createClientUpdateService({
         currentVersion: app.getVersion(), resourcesPath: process.resourcesPath, userDataPath,
@@ -369,8 +392,16 @@ if (!hasSingleInstanceLock) {
       trustedIpcMain.handle('reports:annual-plan-save', async (_event, input: unknown, expectedUpdatedAt: unknown) => http.postJson('/api/reports/annual-plans', { input, expectedUpdatedAt }))
       trustedIpcMain.handle('reports:plan-save', async (_event, input: unknown, id: unknown) => http.postJson('/api/reports/plan-entries', { input, id }))
       trustedIpcMain.handle('reports:plan-remove', async (_event, id: unknown) => { if(typeof id!=='string'||!id) return {ok:false,message:'Плановий рядок не знайдено.'}; return http.deleteJson(`/api/reports/plan-entries/${encodeURIComponent(id)}`) })
-      trustedIpcMain.handle('deletion:preview', async (_event, entity: unknown, id: unknown) => { if(typeof entity!=='string'||typeof id!=='string'||!id) return null; return http.getJson(`/api/deletion/${encodeURIComponent(entity)}/${encodeURIComponent(id)}`) })
-      trustedIpcMain.handle('deletion:execute', async (_event, entity: unknown, id: unknown, confirmationToken: unknown) => { if(typeof entity!=='string'||typeof id!=='string'||!id) return {ok:false,message:'Запис не знайдено.'}; return http.postJson(`/api/deletion/${encodeURIComponent(entity)}/${encodeURIComponent(id)}`, { confirmationToken }) })
+      trustedIpcMain.handle('deletion:preview', async (_event, entity: unknown, id: unknown) => {
+        if(typeof entity!=='string'||typeof id!=='string'||!id) return null
+        const path = entity === 'assignment' ? `/api/assignments/${encodeURIComponent(id)}/deletion-preview` : `/api/deletion/${encodeURIComponent(entity)}/${encodeURIComponent(id)}`
+        return http.getJson(path)
+      })
+      trustedIpcMain.handle('deletion:execute', async (_event, entity: unknown, id: unknown, confirmationToken: unknown) => {
+        if(typeof entity!=='string'||typeof id!=='string'||!id) return {ok:false,reason:'not-found',message:'Запис не знайдено.'}
+        const path = entity === 'assignment' ? `/api/assignments/${encodeURIComponent(id)}/delete` : `/api/deletion/${encodeURIComponent(entity)}/${encodeURIComponent(id)}`
+        return http.postJson(path, { confirmationToken }, (value): value is { ok: boolean; reason?: 'status' | 'changed' | 'not-found' | 'operation'; message?: string } => !!value && typeof value === 'object' && typeof (value as { ok?: unknown }).ok === 'boolean')
+      })
       trustedIpcMain.handle('statements:list', async (_event, yearValue: unknown) => {
         const path = yearValue === undefined ? '/api/statements' : `/api/statements?year=${encodeURIComponent(String(yearValue))}`
         return http.getJson(path, isStatementListResult)

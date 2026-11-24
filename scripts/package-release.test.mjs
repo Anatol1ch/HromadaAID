@@ -23,7 +23,7 @@ test('Server ZIP round-trips through the actual updater and both integrity contr
       'app/dist/server/src/installed.js': '// fixture',
       'app/dist/server/src/create-admin.js': '// fixture',
       'app/dist/electron/database.js': 'const migrations = [{ version: 28 }]',
-      'app/dist/shared/api-compatibility.js': 'export const HROMADAAID_API_CONTRACT_VERSION = 1;',
+      'app/dist/shared/api-compatibility.js': 'export const HROMADAAID_API_CONTRACT_VERSION = 2;',
       'app/node_modules/argon2/package.json': '{}',
       'app/node_modules/@phc/format/package.json': '{}',
       'app/node_modules/fastify/package.json': '{}',
@@ -36,7 +36,7 @@ test('Server ZIP round-trips through the actual updater and both integrity contr
       await writeFile(join(server, path), bytes)
     }
     await writeFile(join(server, 'package-integrity.json'), JSON.stringify({ formatVersion: 1, files: await packageFiles(server) }))
-    await writeComponentManifest(server, { component: 'server', name: 'HromadaAID Server', version, platform: 'win32', architecture: 'x64', compatibility: { serverApi: { contract: 'hromadaaid-rest', version: 1 }, sqliteSchema: { minimum: 1, maximum: 28 } } })
+    await writeComponentManifest(server, { component: 'server', name: 'HromadaAID Server', version, platform: 'win32', architecture: 'x64', compatibility: { serverApi: { contract: 'hromadaaid-rest', version: 2 }, sqliteSchema: { minimum: 1, maximum: 28 } } })
     const zip = join(work, `HromadaAID-Server-v${version}-win-x64.zip`)
     createServerZip(server, zip)
     const extracted = join(work, 'extracted')
@@ -48,6 +48,7 @@ test('Server ZIP round-trips through the actual updater and both integrity contr
     assert.equal(await readFile(join(extracted, 'app/Українська назва.txt'), 'utf8'), files['app/Українська назва.txt'])
     await writeFile(join(work, `HromadaAID-Setup-${version}.exe`), 'synthetic setup, never executed')
     const manifest = await writeReleaseManifest(work, version)
+    assert.equal(manifest.compatibility.api.targetVersion, 2)
     await verifyReleaseManifest(work, manifest)
     assert.deepEqual(manifest.artifacts.map(item => item.name), [`HromadaAID-Setup-${version}.exe`, `HromadaAID-Server-v${version}-win-x64.zip`])
     await writeFile(join(extracted, 'app/.hidden'), 'corruption')

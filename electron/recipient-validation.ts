@@ -43,19 +43,19 @@ export function validateRecipientInput(value: unknown): ValidationResult {
     }
   }
   const registration = validateAddress(source.registeredAddressParts)
-  if (!registration.ok) errors.registeredAddress = 'Адреса реєстрації: ' + registration.message
-  const residence = source.addressParts === null ? null : validateAddress(source.addressParts)
-  if (residence && !residence.ok) errors.address = 'Адреса проживання: ' + residence.message
-  if (!residence && typeof source.address === 'string' && source.address.trim()) errors.address = 'Заповніть складові адреси проживання в редакторі або очистіть її.'
-  if (source.addressParts === undefined) errors.address = 'Перевірте відомості адреси проживання.'
-  if (typeof source.registeredAddress !== 'string' && !errors.registeredAddress) errors.registeredAddress = 'Перевірте адресу реєстрації.'
-  if (typeof source.address !== 'string' && !errors.address) errors.address = 'Перевірте адресу проживання.'
+  if (source.registeredAddressParts == null) errors.registeredAddress = 'Зазначте адресу реєстрації отримувача.'
+  else if (!registration.ok) errors.registeredAddress = 'Адреса реєстрації: ' + registration.message
+  const residence = source.addressParts == null ? null : validateAddress(source.addressParts)
+  if (source.addressParts == null) errors.address = 'Зазначте адресу проживання отримувача.'
+  else if (!residence?.ok) errors.address = 'Адреса проживання: ' + (residence && !residence.ok ? residence.message : 'Перевірте складові адреси.')
+  if (typeof source.registeredAddress !== 'string' && !errors.registeredAddress) errors.registeredAddress = 'Зазначте адресу реєстрації отримувача.'
+  if (typeof source.address !== 'string' && !errors.address) errors.address = 'Зазначте адресу проживання отримувача.'
   const sex = typeof source.sex === 'string' ? source.sex.trim() : ''
   if (sex !== 'Жінка' && sex !== 'Чоловік') errors.sex = 'Оберіть стать отримувача.'
   if (typeof source.isVpo !== 'boolean') errors.isVpo = 'Оберіть ознаку ВПО: «Так» або «Ні».'
   if (Object.keys(errors).length) return { ok: false, errors, message: Object.values(errors)[0]! }
-  if (!registration.ok || (residence && !residence.ok)) return { ok: false, errors, message: 'Перевірте адреси отримувача.' }
+  if (!registration.ok || !residence?.ok) return { ok: false, errors, message: errors.registeredAddress ?? errors.address ?? 'Перевірте адреси отримувача.' }
   const registeredAddressParts = registration.address
-  const addressParts = residence?.ok ? residence.address : null
+  const addressParts = residence.address
   return { ok: true, input: { ...strings, registeredAddressParts, addressParts, registeredAddress: formatAddress(registeredAddressParts), address: formatAddress(addressParts), sex: sex as RecipientInput['sex'], isVpo: source.isVpo as boolean }, errors }
 }

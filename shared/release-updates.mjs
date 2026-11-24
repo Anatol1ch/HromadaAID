@@ -44,8 +44,10 @@ export function validateReleaseManifest(value, release, currentVersion) {
   if (release.draft || release.prerelease || tagVersion !== value.version) throw new Error('Реліз не є стабільним або версія не відповідає тегу.')
   if (compareVersions(value.version, currentVersion) <= 0) return null
   if (value.compatibility?.installer !== 'hromadaaid-universal-nsis-v1' || !Array.isArray(value.compatibility?.installModes) || !['Client-only', 'Server-only', 'Combined'].every(mode => value.compatibility.installModes.includes(mode))) throw new Error('Маніфест не підтверджує сумісність з універсальним інсталятором HromadaAID.')
-  if (value.compatibility?.api?.contract !== 'hromadaaid-rest' || value.compatibility?.api?.version !== 1) throw new Error('Маніфест має некоректний API contract compatibility marker.')
-  if (value.compatibility?.manager?.versionPolicy !== 'same-release-version' || value.compatibility?.manager?.apiContract !== 'hromadaaid-rest' || value.compatibility?.manager?.apiContractVersion !== 1) throw new Error('Маніфест не підтверджує сумісність Server Manager із сервером цього релізу.')
+  // v1 fields are the bootstrap envelope understood by installed 1.0.2 updaters.
+  // Current Client/Manager must additionally match the actual target contract v2.
+  if (value.compatibility?.api?.contract !== 'hromadaaid-rest' || value.compatibility?.api?.version !== 1 || value.compatibility?.api?.targetVersion !== 2) throw new Error('Маніфест має некоректний API contract compatibility marker.')
+  if (value.compatibility?.manager?.versionPolicy !== 'same-release-version' || value.compatibility?.manager?.apiContract !== 'hromadaaid-rest' || value.compatibility?.manager?.apiContractVersion !== 1 || value.compatibility?.manager?.targetApiContractVersion !== 2) throw new Error('Маніфест не підтверджує сумісність Server Manager із сервером цього релізу.')
   if (!Array.isArray(value.artifacts)) throw new Error('У маніфесті відсутній перелік артефактів.')
   const setupName = `HromadaAID-Setup-${value.version}.exe`
   const serverName = `HromadaAID-Server-v${value.version}-win-x64.zip`

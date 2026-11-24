@@ -10,6 +10,7 @@ type ModalProps = {
   title: string
   description?: string
   children: ReactNode
+  footer?: ReactNode
   onClose: () => void
   dirty?: boolean
   size?: 'compact' | 'wide' | 'large'
@@ -26,7 +27,7 @@ let modalSequence = 0
 const openModalStack: number[] = []
 let initialBodyOverflow = ''
 
-export default function Modal({ title, description, children, onClose, dirty = false, size = 'compact', labelledBy, role = 'dialog', className = '', describedBy, headerIcon, busy = false, dismissible = true }: ModalProps) {
+export default function Modal({ title, description, children, footer, onClose, dirty = false, size = 'compact', labelledBy, role = 'dialog', className = '', describedBy, headerIcon, busy = false, dismissible = true }: ModalProps) {
   const id = useId()
   const titleId = labelledBy ?? `modal-title-${id}`
   const descriptionId = `modal-description-${id}`
@@ -105,6 +106,7 @@ export default function Modal({ title, description, children, onClose, dirty = f
     <section ref={dialogRef} onFocusCapture={event => { if (event.target !== event.currentTarget) lastFieldRef.current = event.target as HTMLElement }} className={`app-modal app-modal-${size}${className ? ` ${className}` : ''}`} role={role} aria-modal="true" aria-busy={busy || undefined} aria-labelledby={titleId} aria-describedby={[description ? descriptionId : '', describedBy].filter(Boolean).join(' ') || undefined} tabIndex={-1}>
       <header className="app-modal-header"><div>{headerIcon && <span className="app-modal-header-icon">{headerIcon}</span>}<h2 id={titleId}>{title}</h2>{description && <p id={descriptionId}>{description}</p>}</div>{dismissible && <button type="button" className="icon-button" aria-label="Закрити вікно" disabled={busy} onClick={requestClose}><X size={19}/></button>}</header>
       <div className="app-modal-content">{children}</div>
+      {footer && <footer className="app-modal-footer">{footer}</footer>}
     </section>
   </div>, document.body)
 }

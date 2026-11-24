@@ -7,14 +7,31 @@ import { validateRecipientInput } from './recipient-validation.js'
 import { nextRecordRevision } from '../shared/record-revision.js'
 
 export function saveRecipient(database: DatabaseSync, value: unknown, idValue?: unknown, confirmSameName?: unknown, expectedUpdatedAtValue?: unknown): RecipientSaveResult {
-  const validation = validateRecipientInput(value)
-  if (!validation.ok) return { ok: false, reason: 'validation', matches: [], message: validation.message }
-  const input = validation.input
   const id = typeof idValue === 'string' && idValue ? idValue : null
   const confirmName = confirmSameName === true
   if (id && (typeof expectedUpdatedAtValue !== 'string' || !expectedUpdatedAtValue)) return { ok: false, reason: 'validation', matches: [], message: 'Картка отримувача застаріла. Оновіть її перед збереженням.' }
   try {
     database.exec('BEGIN IMMEDIATE')
+    let inputValue = value
+    if (id) {
+      const currentRow = database.prepare('SELECT * FROM recipients WHERE id=?').get(id) as RecipientRow | undefined
+      if (!currentRow) { database.exec('ROLLBACK'); return { ok: false, reason: 'not-found', matches: [], message: 'Картку не знайдено. Оновіть список і спробуйте ще раз.' } }
+      if (String(currentRow.updated_at) !== expectedUpdatedAtValue) { database.exec('ROLLBACK'); return conflict() }
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const current = recipientRecordFromRow(currentRow)
+        inputValue = {
+          ...current,
+          patronymic: current.patronymic ?? '', rnokpp: current.rnokpp ?? '', sex: current.sex ?? '',
+          address: current.address ?? '', registeredAddress: current.registeredAddress ?? '',
+          phone: current.phone ?? '', email: current.email ?? '', bankAccount: current.bankAccount ?? '',
+          bankDetailsId: current.bankDetailsId ?? '', passport: current.passport ?? '',
+          ...value as Record<string, unknown>,
+        }
+      }
+    }
+    const validation = validateRecipientInput(inputValue)
+    if (!validation.ok) { database.exec('ROLLBACK'); return { ok: false, reason: 'validation', matches: [], message: validation.message } }
+    const input = validation.input
     if (!database.prepare('SELECT 1 FROM bank_details WHERE id=?').get(input.bankDetailsId)) { database.exec('ROLLBACK'); return { ok: false, reason: 'validation', matches: [], message: 'Оберіть наявний банк і набір банківських реквізитів. Оновіть список банків.' } }
     const existing = database.prepare('SELECT id, last_name, first_name, patronymic, rnokpp, updated_at FROM recipients').all() as RecipientRow[]
     const others = existing.filter((row) => row.id !== id)

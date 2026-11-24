@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, dirname, basename } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { openTestDatabase } from './fakes/database.mjs'
 import { changeAssignmentStatuses } from '../electron/assignment-status.ts'
 import { eligibleAssignmentIds, keepEligibleSelection, selectionForYear, selectionState, toggleEligibleSelection } from '../src/lib/assignmentSelection.ts'
@@ -30,6 +31,7 @@ function fixture(t, statuses = ['Призначено', 'Призначено'])
   return { db, reopen }
 }
 const input = (status, extra = {}) => ({ assignmentIds: ['a', 'b'], year: 2027, status, ...extra })
+const change = (db, value, requestId = randomUUID()) => changeAssignmentStatuses(db, value, requestId)
 const rows = db => db.prepare('SELECT * FROM assignments ORDER BY id').all()
 const snapshot = db => JSON.stringify({ assignments: rows(db), payouts: db.prepare('SELECT * FROM payouts ORDER BY id').all() })
 const assertNoPayouts = db => assert.equal(db.prepare('SELECT COUNT(*) AS n FROM payouts').get().n, 0)
@@ -37,7 +39,7 @@ const assertNoPayouts = db => assert.equal(db.prepare('SELECT COUNT(*) AS n FROM
 for (const [from, to] of [['Призначено', 'В роботі'], ['В роботі', 'Призначено']]) {
   test(from + ' → ' + to + ': all records updated, unrelated fields preserved', t => {
     const { db } = fixture(t, [from, from]); const before = rows(db)
-    assert.deepEqual(changeAssignmentStatuses(db, input(to)), { ok: true, updatedCount: 2, unchangedCount: 0 })
+    assert.deepEqual(change(db, input(to)), { ok: true, updatedCount: 2, unchangedCount: 0 })
     for (const row of rows(db)) {
       const old = before.find(item => item.id === row.id)
       if (row.id === 'other-year') { assert.deepEqual(row, old); continue }
@@ -50,25 +52,25 @@ for (const [from, to] of [['Призначено', 'В роботі'], ['В ро
 
 test('Mixed unpaid statuses → paid: explicit date, unchanged full sums, no new payouts', t => {
   const { db } = fixture(t, ['Призначено', 'В роботі'])
-  assert.equal(changeAssignmentStatuses(db, input('Виплачено', { paidOn: '2027-02-28' })).ok, true)
+  assert.equal(change(db, input('Виплачено', { paidOn: '2027-02-28' })).ok, true)
   const changed = rows(db).filter(row => row.id !== 'other-year')
   assert(changed.every(row => row.status === 'Виплачено' && row.paid_on === '2027-02-28'))
   assert.deepEqual(changed.map(row => row.amount_minor), [1000000, 1500000]); assertNoPayouts(db)
   const after = snapshot(db)
-  const repeat = changeAssignmentStatuses(db, input('Виплачено', { paidOn: '2027-02-28' }))
+  const repeat = change(db, input('Виплачено', { paidOn: '2027-02-28' }))
   assert.equal(repeat.ok, false); assert.equal(repeat.reason, 'conflict'); assert.equal(snapshot(db), after)
 })
 
 test('Paid IDs are rejected directly by the database operation, atomically', t => {
   const { db } = fixture(t, ['Призначено', 'Виплачено']); const before = snapshot(db)
-  const result = changeAssignmentStatuses(db, input('В роботі'))
+  const result = change(db, input('В роботі'))
   assert.equal(result.ok, false); assert.equal(result.reason, 'conflict'); assert.equal(snapshot(db), before)
 })
 
 test('Wrong year or missing ID rejects the entire batch', t => {
   const { db } = fixture(t); const before = snapshot(db)
   for (const id of ['other-year', 'missing']) {
-    const result = changeAssignmentStatuses(db, input('В роботі', { assignmentIds: ['a', id] }))
+    const result = change(db, input('В роботі', { assignmentIds: ['a', id] }))
     assert.equal(result.ok, false); assert.equal(snapshot(db), before)
   }
 })
@@ -76,25 +78,25 @@ test('Wrong year or missing ID rejects the entire batch', t => {
 test('Invalid status, IDs, year and payment dates are rejected without writes', t => {
   const { db } = fixture(t); const before = snapshot(db)
   const invalid = [null, {}, input('Невідомий статус'), input('В роботі', { assignmentIds: [] }), input('В роботі', { assignmentIds: ['a', 'a'] }), input('В роботі', { assignmentIds: [1] }), input('В роботі', { year: '2027' }), input('В роботі', { year: 1999 }), ...[undefined, '', '2027-02-29', '2027-02-31', '29.02.2028', '0000-01-01', '2027-01-02T00:00:00Z'].map(paidOn => input('Виплачено', { paidOn }))]
-  for (const request of invalid) { const result = changeAssignmentStatuses(db, request); assert.equal(result.ok, false); assert.equal(result.reason, 'validation'); assert.equal(snapshot(db), before) }
+  for (const request of invalid) { const result = change(db, request); assert.equal(result.ok, false); assert.equal(result.reason, 'validation'); assert.equal(snapshot(db), before) }
 })
 
 test('SQL failure on the second row rolls back the first row and releases the transaction', t => {
   const { db } = fixture(t); const before = snapshot(db)
   db.exec("CREATE TRIGGER fail_batch BEFORE UPDATE ON assignments WHEN OLD.id='b' BEGIN SELECT RAISE(ABORT, 'isolated test failure'); END")
-  const result = changeAssignmentStatuses(db, input('В роботі'))
+  const result = change(db, input('В роботі'))
   assert.equal(result.ok, false); assert.equal(result.reason, 'storage'); assert.equal(snapshot(db), before)
   db.exec('DROP TRIGGER fail_batch')
-  assert.equal(changeAssignmentStatuses(db, input('В роботі')).ok, true)
+  assert.equal(change(db, input('В роботі')).ok, true)
 })
 
 test('No-op statuses retain updated_at and are counted separately', t => {
   const { db } = fixture(t, ['В роботі', 'Призначено'])
   const before = db.prepare("SELECT * FROM assignments WHERE id='a'").get()
-  assert.deepEqual(changeAssignmentStatuses(db, input('В роботі')), { ok: true, updatedCount: 1, unchangedCount: 1 })
+  assert.deepEqual(change(db, input('В роботі')), { ok: true, updatedCount: 1, unchangedCount: 1 })
   assert.deepEqual(db.prepare("SELECT * FROM assignments WHERE id='a'").get(), before)
   const after = snapshot(db)
-  assert.deepEqual(changeAssignmentStatuses(db, input('В роботі')), { ok: true, updatedCount: 0, unchangedCount: 2 })
+  assert.deepEqual(change(db, input('В роботі')), { ok: true, updatedCount: 0, unchangedCount: 2 })
   assert.equal(snapshot(db), after)
 })
 
@@ -103,15 +105,15 @@ test('Legacy payment rows are preserved, unpaid status clears assignment paid_on
   db.prepare('INSERT INTO payouts(id,assignment_id,amount_minor,paid_on,created_at) VALUES(?,?,?,?,?)').run('legacy', 'a', 1000000, '2027-01-03', '2027-01-03T00:00:00.000Z')
   db.prepare("UPDATE assignments SET paid_on='2027-01-03' WHERE id='a'").run()
   const payments = JSON.stringify(db.prepare('SELECT * FROM payouts').all())
-  assert.equal(changeAssignmentStatuses(db, input('В роботі')).ok, true)
+  assert.equal(change(db, input('В роботі')).ok, true)
   assert.equal(db.prepare("SELECT paid_on FROM assignments WHERE id='a'").get().paid_on, null)
-  assert.equal(changeAssignmentStatuses(db, input('Виплачено', { paidOn: '2027-03-04' })).ok, true)
+  assert.equal(change(db, input('Виплачено', { paidOn: '2027-03-04' })).ok, true)
   assert.equal(JSON.stringify(db.prepare('SELECT * FROM payouts').all()), payments)
 })
 
 test('Successful change survives closing and reopening the isolated database', t => {
   const { db, reopen } = fixture(t)
-  assert.equal(changeAssignmentStatuses(db, input('Виплачено', { paidOn: '2027-04-05' })).ok, true)
+  assert.equal(change(db, input('Виплачено', { paidOn: '2027-04-05' })).ok, true)
   db.close()
   const reopened = reopen()
   assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM assignments WHERE status='Виплачено' AND paid_on='2027-04-05'").get().n, 2)

@@ -7,8 +7,9 @@ import FormattedInput from './components/FormattedInput'
 import { fieldFormatError, fieldFormatHints, isFormattedField, validUkrainianIban } from '../electron/field-formats'
 import { assignmentStatusColor } from '../electron/assignment-model'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
-import { AlertTriangle, Check, Copy, X, Eye, MapPin, Pencil, Plus, UserRound, Trash2 } from 'lucide-react'
+import { AlertTriangle, Check, CircleAlert, CircleCheck, CircleHelp, ContactRound, Copy, Eye, Landmark, MapPin, Pencil, Plus, ShieldCheck, Trash2, UserRound, X } from 'lucide-react'
 import type { AssignmentRecord, BankRecord, DeletePreview, DuplicateMatch, RecipientInput, RecipientRecord, RecipientSaveResult, RecipientSummary } from '../electron/api-contract'
 import { bankRepository } from './services/bankRepository'
 import BankFormModal from './components/BankFormModal'
@@ -172,6 +173,7 @@ export function RecipientFormModal({ initial = emptyRecipient, editingId, expect
 }) {
   const [form, setForm] = useState<RecipientInput>(() => ({ ...initial }))
   const addressErrorId = useId()
+  const formId = useId()
   const initialFormRef = useRef(JSON.stringify(initial))
   const formRef = useRef<HTMLFormElement>(null)
   const [fieldErrors, setFieldErrors] = useState<RecipientErrors>({})
@@ -183,6 +185,7 @@ export function RecipientFormModal({ initial = emptyRecipient, editingId, expect
   const [bankChoice, setBankChoice] = useState<string | null>(null)
   const [showBankForm, setShowBankForm] = useState(false)
   const [addressEditor, setAddressEditor] = useState<'registeredAddress' | 'address' | null>(null)
+  const [fieldTooltip, setFieldTooltip] = useState<{ left: number; top: number; text: string } | null>(null)
   useEffect(() => {
     let active = true
     setBanksLoading(true)
@@ -253,61 +256,66 @@ export function RecipientFormModal({ initial = emptyRecipient, editingId, expect
     setFieldErrors(current => ({ ...current, [key]: undefined }))
     setDuplicate(null); setError('')
   }
+  const showFieldTooltip = (target: HTMLElement, text: string) => {
+    const rect = target.getBoundingClientRect()
+    const width = Math.min(280, window.innerWidth - 24)
+    const left = Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12))
+    const top = rect.bottom + 88 <= window.innerHeight - 8 ? rect.bottom + 8 : Math.max(8, rect.top - 80)
+    setFieldTooltip({ left, top, text })
+  }
   const addressCard = (key: 'registeredAddress' | 'address') => {
     const registration = key === 'registeredAddress'
     const label = registration ? 'Адреса реєстрації' : 'Адреса проживання'
     const parts = registration ? form.registeredAddressParts : form.addressParts
     const value = formatAddress(parts) || form[key]
+    const sourceParts = registration ? form.addressParts : form.registeredAddressParts
+    const sourceValid = validateAddress(sourceParts).ok
+    const tooltipId = `${addressErrorId}${key}-help`
     return <div className={'recipient-address-card' + (fieldErrors[key] ? ' recipient-address-invalid' : '')} data-recipient-field={key}>
-      <strong>{label}{registration && <> <RequiredMark/></>}</strong><p>{value || 'Адресу ще не зазначено.'}</p>
-      <div className="recipient-address-actions"><button type="button" className="secondary-button" data-address-edit disabled={saving} aria-label={(value ? 'Змінити: ' : 'Додати: ') + label} aria-invalid={!!fieldErrors[key]} aria-describedby={fieldErrors[key] ? addressErrorId + key : undefined} onClick={() => setAddressEditor(key)}><Pencil size={15}/>{value ? 'Змінити' : 'Додати'}</button>
-        {!registration && value && <button type="button" className="table-action danger-action" disabled={saving} onClick={() => applyAddress('address', null)}><X size={15}/>Очистити</button>}
-        {!registration && <button type="button" className="table-action recipient-address-copy" disabled={saving || !validateAddress(form.registeredAddressParts).ok} onClick={() => { if (form.registeredAddressParts) applyAddress('address', copyAddress(form.registeredAddressParts)) }}><Copy size={15}/>Скопіювати адресу реєстрації</button>}
+      <strong className="recipient-address-heading"><span>{label} <RequiredMark/></span>{!registration && <FieldHelpButton id={tooltipId} label="Пояснення щодо адреси проживання" disabled={saving} text="Адреса проживання використовується під час формування персональних списків виплат для органів Казначейства." onShow={showFieldTooltip} onHide={() => setFieldTooltip(null)}/>}</strong>
+      <div className="recipient-address-info"><MapPin size={15} aria-hidden="true"/><div><p>{value || 'Адресу ще не зазначено'}</p>{!value && <small>Додайте або скопіюйте адресу.</small>}</div></div>
+      <div className="recipient-address-actions"><div className="recipient-address-primary-actions"><button type="button" className="secondary-button recipient-address-edit" data-address-edit disabled={saving} aria-label={(value ? 'Змінити: ' : 'Додати: ') + label} aria-invalid={!!fieldErrors[key]} aria-describedby={fieldErrors[key] ? addressErrorId + key : undefined} onClick={() => setAddressEditor(key)}>{value ? <Pencil size={14}/> : <Plus size={14}/>}<span>{value ? 'Змінити' : 'Додати'}</span></button>
+        <button type="button" className="secondary-button danger-action recipient-address-clear" disabled={saving || !(value || parts)} onClick={() => applyAddress(key, null)}><Trash2 size={14}/><span>Очистити</span></button></div>
+        <button type="button" className="secondary-button recipient-address-copy" disabled={saving || !sourceValid} onClick={() => { if (sourceParts && sourceValid) applyAddress(key, copyAddress(sourceParts)) }}><Copy size={14}/><span>Копіювати з адреси {registration ? 'проживання' : 'реєстрації'}</span></button>
       </div>{fieldErrors[key] && <span className="recipient-field-error" id={addressErrorId + key} role="alert">{fieldErrors[key]}</span>}
     </div>
   }
-  const textField = (key: RecipientTextField, options: { type?: string; autoComplete?: string; inputMode?: 'text' | 'numeric' | 'tel' } = {}) => <TextField
+  const textField = (key: RecipientTextField, options: { type?: string; autoComplete?: string; inputMode?: 'text' | 'numeric' | 'tel'; placeholder?: string; hideHint?: boolean; help?: string; fixedPrefix?: string } = {}) => <TextField
     field={key} {...recipientTextFields[key]} value={form[key]} error={fieldErrors[key]} disabled={saving}
-    onChange={(value) => updateField(key, value)} {...options}/>
+    onChange={(value) => updateField(key, value)} showTooltip={showFieldTooltip} hideTooltip={() => setFieldTooltip(null)} {...options}/>
   const checkIban = () => setIbanCheck(validUkrainianIban(form.bankAccount.replace(/\s/g, '')) ? 'valid' : 'invalid')
   return <>
-    <Modal title={editingId ? 'Редагування картки' : 'Нова картка отримувача'} description="Заповніть відомості про отримувача матеріальної допомоги." onClose={closeForm} dirty={!saving && dirty} busy={saving} size="large" className="recipient-card-modal">
-      <form ref={formRef} className="recipient-card-form" noValidate onSubmit={(event) => { event.preventDefault(); void save() }}>
-        <fieldset className="recipient-fieldset"><legend>ПІБ</legend><div className="recipient-form-grid">
-          {textField('lastName', { autoComplete: 'family-name' })}
-          {textField('firstName', { autoComplete: 'given-name' })}
-          {textField('patronymic', { autoComplete: 'additional-name' })}
-        </div></fieldset>
-        <fieldset className="recipient-fieldset"><legend>Паспорт і РНОКПП</legend><div className="recipient-form-grid">
-          {textField('passport')}
-          {textField('rnokpp', { inputMode: 'numeric' })}
-        </div></fieldset>
-        <fieldset className="recipient-fieldset"><legend>Додаткові дані</legend><div className="recipient-form-grid">
+    <Modal title={editingId ? 'Редагування картки' : 'Нова картка отримувача'} description="Заповніть відомості про отримувача матеріальної допомоги." onClose={closeForm} dirty={!saving && dirty} busy={saving} size="large" className="recipient-card-modal recipient-editor-modal" footer={<div className="recipient-form-actions recipient-card-actions"><span className="recipient-required-note"><RequiredMark/> {editingId ? 'Обов’язкові поля картки.' : 'Обов’язкові поля для створення картки.'}</span><button type="button" className="secondary-button assignment-cancel-button" onClick={() => confirmModalClose(dirty, closeForm)} disabled={saving}><X size={17} aria-hidden="true"/>Скасувати</button><button className="primary-button" type="submit" form={formId} disabled={saving}><Check size={17} aria-hidden="true"/>{saving ? 'Збереження…' : editingId ? 'Зберегти зміни' : 'Створити картку'}</button></div>}>
+      <form id={formId} ref={formRef} className="recipient-card-form" noValidate onSubmit={(event) => { event.preventDefault(); void save() }}>
+        <fieldset className="recipient-fieldset"><legend><UserRound size={16} aria-hidden="true"/>Особисті дані</legend><div className="recipient-form-grid recipient-personal-grid">
+          {textField('lastName', { autoComplete: 'family-name', placeholder: 'Введіть прізвище' })}
+          {textField('firstName', { autoComplete: 'given-name', placeholder: 'Введіть ім’я' })}
+          {textField('patronymic', { autoComplete: 'additional-name', placeholder: 'Введіть по батькові' })}
+          {textField('passport', { placeholder: 'Введіть номер паспорта', hideHint: true, help: 'Паспорт-книжечка: дві українські літери та шість цифр (АА123456). ID-картка: дев’ять цифр.' })}
+          {textField('rnokpp', { inputMode: 'numeric', placeholder: 'Введіть РНОКПП', hideHint: true, help: 'Реєстраційний номер облікової картки платника податків складається з 10 цифр.' })}
           <div className="recipient-field" data-recipient-field="sex"><span aria-hidden="true">Стать <RequiredMark/></span><Select label="Стать" required disabled={saving} error={fieldErrors.sex} value={form.sex} onChange={(value) => updateField('sex', value)} placeholder="Оберіть значення" options={[{ value: 'Чоловік', label: 'Чоловік' }, { value: 'Жінка', label: 'Жінка' }]}/></div>
           <div className="recipient-field" data-recipient-field="isVpo"><span aria-hidden="true">Внутрішньо переміщена особа <RequiredMark/></span><Select label="Внутрішньо переміщена особа" required disabled={saving} error={fieldErrors.isVpo} value={form.isVpo === null ? '' : form.isVpo ? 'yes' : 'no'} onChange={(value) => updateField('isVpo', value === '' ? null : value === 'yes')} placeholder="Оберіть значення" options={[{ value: 'no', label: 'Ні' }, { value: 'yes', label: 'Так' }]}/></div>
         </div></fieldset>
-        <fieldset className="recipient-fieldset"><legend>Адреси</legend><div className="recipient-form-grid">
+        <fieldset className="recipient-fieldset"><legend><MapPin size={16} aria-hidden="true"/>Адреси</legend><div className="recipient-form-grid recipient-address-grid">
           {addressCard('registeredAddress')}
           {addressCard('address')}
         </div></fieldset>
-        <fieldset className="recipient-fieldset"><legend>Контакти</legend><div className="recipient-form-grid">
-          {textField('phone', { type: 'tel', autoComplete: 'tel' })}
-          {textField('email', { autoComplete: 'email' })}
+        <fieldset className="recipient-fieldset"><legend><ContactRound size={16} aria-hidden="true"/>Контактні дані</legend><div className="recipient-form-grid recipient-contact-grid">
+          {textField('phone', { type: 'tel', autoComplete: 'tel', placeholder: 'XX XXX XX XX', hideHint: true, fixedPrefix: '+380' })}
+          {textField('email', { autoComplete: 'email', placeholder: 'Введіть електронну пошту', hideHint: true, help: 'Наприклад: name@example.com' })}
         </div></fieldset>
-        <fieldset className="recipient-fieldset"><legend>Банківські реквізити</legend><div className="recipient-form-grid">
-          <div className="recipient-iban-field"><TextField
+        <fieldset className="recipient-fieldset"><legend><Landmark size={16} aria-hidden="true"/>Банківські реквізити</legend><div className="recipient-form-grid recipient-bank-grid">
+          <div className="recipient-iban-field" data-iban-check={ibanCheck || undefined}><TextField
             field="bankAccount" {...recipientTextFields.bankAccount} value={form.bankAccount} error={fieldErrors.bankAccount} disabled={saving}
-            onChange={(value) => updateField('bankAccount', value)} action={<button type="button" className="secondary-button assignment-create-button" title="Перевірити IBAN" aria-label="Перевірити IBAN" disabled={saving || !form.bankAccount.trim()} onClick={checkIban}><Check size={18}/></button>}/>
-            {ibanCheck && <span className={ibanCheck === 'valid' ? 'recipient-field-hint recipient-iban-success' : 'recipient-field-error'} role="status">{ibanCheck === 'valid' ? 'Формат і контрольна сума IBAN коректні' : 'Некоректний IBAN. Перевірте номер рахунку'}</span>}
+            onChange={(value) => updateField('bankAccount', value)} showTooltip={showFieldTooltip} hideTooltip={() => setFieldTooltip(null)} placeholder="XX XXXXXX XXXXXXXXXXXXXXXXXXX" hideHint fixedPrefix="UA" help="Український IBAN складається з коду UA та 27 цифр." action={<button type="button" className="secondary-button recipient-iban-check" disabled={saving || !form.bankAccount.trim()} onClick={checkIban}><ShieldCheck size={17}/><span>Перевірити</span></button>}/>
+            {ibanCheck && <span className={`recipient-iban-feedback ${ibanCheck === 'valid' ? 'recipient-iban-success' : 'recipient-iban-failure'}`} role="status">{ibanCheck === 'valid' ? <><CircleCheck size={15} aria-hidden="true"/>Формат і контрольна сума IBAN коректні.</> : <><CircleAlert size={15} aria-hidden="true"/>IBAN має некоректний формат або контрольну суму.</>}</span>}
           </div>
           <div className="recipient-field" data-recipient-field={!selectedBankId ? 'bankDetailsId' : undefined}><span aria-hidden="true">Найменування банку <RequiredMark/></span><div className="recipient-bank-picker"><Select label="Найменування банку" required searchable disabled={saving || banksLoading} value={selectedBankId} error={!selectedBankId ? fieldErrors.bankDetailsId : undefined} placeholder={banksLoading ? 'Завантаження…' : 'Оберіть банк'} options={banks.map(bank => ({ value: bank.id, label: bank.name, description: bank.details.length + ' наборів реквізитів', searchText: bankSearchText(bank) }))} onChange={id => { if (id === selectedBankId) return; const bank = banks.find(item => item.id === id); setBankChoice(id); updateField('bankDetailsId', onlyBankDetail(bank)) }}/><button type="button" className="secondary-button assignment-create-button" aria-label="Створити новий банк" title="Створити новий банк" disabled={saving || banksLoading} onClick={() => setShowBankForm(true)}><Plus size={18}/></button></div></div>
-          <div className="recipient-field recipient-bank-detail-picker" data-recipient-field="bankDetailsId"><span aria-hidden="true">Банківські реквізити <RequiredMark/></span><Select label="Банківські реквізити" required searchable value={form.bankDetailsId} disabled={saving || !selectedBank || selectedBank.details.length === 1} error={selectedBankId ? fieldErrors.bankDetailsId : undefined} placeholder={selectedBank ? 'Оберіть пару МФО та ЄДРПОУ' : 'Спочатку оберіть банк'} options={(selectedBank?.details ?? []).map(detail => ({ value: detail.id, label: 'МФО ' + detail.mfo + ' · ЄДРПОУ ' + detail.edrpou }))} onChange={id => updateField('bankDetailsId', id)}/></div>
-          {selectedDetail && <dl className="recipient-bank-values"><div><dt>Код МФО банку</dt><dd>{selectedDetail.mfo}</dd></div><div><dt>Код банку за ЄДРПОУ</dt><dd>{selectedDetail.edrpou}</dd></div></dl>}
-          {bankError && <Alert variant="error" className="recipient-bank-detail-picker" action={<button type="button" onClick={() => setBankRevision(current => current + 1)}>Оновити банки</button>}>{bankError}</Alert>}
+          <div className="recipient-field recipient-bank-detail-picker" data-recipient-field="bankDetailsId"><span aria-hidden="true">Банківські реквізити <RequiredMark/></span><Select label="Банківські реквізити" required searchable value={form.bankDetailsId} disabled={saving || !selectedBank || selectedBank.details.length <= 1} error={selectedBankId ? fieldErrors.bankDetailsId : undefined} placeholder={selectedBank ? selectedBank.details.length ? 'Оберіть пару МФО та ЄДРПОУ' : 'Набори реквізитів відсутні' : 'Спочатку оберіть банк'} options={(selectedBank?.details ?? []).map(detail => ({ value: detail.id, label: `МФО ${detail.mfo} · ЄДРПОУ ${detail.edrpou}` }))} renderValue={option => <BankPair label={option.label}/>} renderOption={option => <BankPair label={option.label}/>} onChange={id => updateField('bankDetailsId', id)}/></div>
+          {bankError && <Alert variant="error" className="recipient-bank-error" action={<button type="button" onClick={() => setBankRevision(current => current + 1)}>Оновити банки</button>}>{bankError}</Alert>}
         </div></fieldset>
         {error && <Alert variant="error">{error}</Alert>}
         {duplicate && <DuplicateNotice result={duplicate} onView={openDetails} onCreateSeparate={() => void save(true)} saving={saving} onUseExisting={onUseExisting ? (id) => confirmModalClose(dirty, () => onUseExisting(id)) : undefined}/>}
-        <div className="recipient-form-actions recipient-card-actions"><span className="recipient-required-note"><RequiredMark/> Обов'язкові поля для створення картки.</span><button type="button" className="secondary-button assignment-cancel-button" onClick={() => confirmModalClose(dirty, closeForm)} disabled={saving}><X size={17} aria-hidden="true"/>Скасувати</button><button className="primary-button" type="submit" disabled={saving}><Check size={17} aria-hidden="true"/>{saving ? 'Збереження…' : editingId ? 'Зберегти зміни' : 'Створити картку'}</button></div>
       </form>
     </Modal>
     {viewing && <RecipientDetails recipient={viewing} history={history} historyLoading={false} historyError={historyError} onClose={() => setViewing(null)}/>}
@@ -316,13 +324,14 @@ export function RecipientFormModal({ initial = emptyRecipient, editingId, expect
       setBanks(current => [...current.filter(item => item.id !== bank.id), bank].sort((a, b) => a.name.localeCompare(b.name, 'uk')))
       setBankChoice(bank.id); updateField('bankDetailsId', onlyBankDetail(bank)); setShowBankForm(false)
     }}/>}
+    {fieldTooltip && createPortal(<span className="recipient-address-tooltip" role="tooltip" aria-hidden="true" style={{ left: fieldTooltip.left, top: fieldTooltip.top }}>{fieldTooltip.text}</span>, document.body)}
   </>
 }
 
 function RequiredMark() { return <span className="recipient-required-mark" aria-hidden="true">*</span> }
 
-function TextField({ field, label, value, onChange, maxLength, required, error, disabled, type = 'text', autoComplete, inputMode, action }: {
-  field: RecipientTextField; label: string; value: string; onChange: (value: string) => void; maxLength: number; required: boolean; error?: string; disabled: boolean; type?: string; autoComplete?: string; inputMode?: 'text' | 'numeric' | 'tel'; action?: ReactNode
+function TextField({ field, label, value, onChange, maxLength, required, error, disabled, type = 'text', autoComplete, inputMode, placeholder, hideHint = false, help, fixedPrefix, action, showTooltip, hideTooltip }: {
+  field: RecipientTextField; label: string; value: string; onChange: (value: string) => void; maxLength: number; required: boolean; error?: string; disabled: boolean; type?: string; autoComplete?: string; inputMode?: 'text' | 'numeric' | 'tel'; placeholder?: string; hideHint?: boolean; help?: string; fixedPrefix?: string; action?: ReactNode; showTooltip: (target: HTMLElement, text: string) => void; hideTooltip: () => void
 }) {
   const id = useId()
   const [touched, setTouched] = useState(false)
@@ -332,14 +341,18 @@ function TextField({ field, label, value, onChange, maxLength, required, error, 
   const controlId = 'recipient-input-' + id
   const formatted = isFormattedField(field)
   const message = error || (touched && formatted ? fieldFormatError(field, value) : '')
-  const hint = formatted ? fieldFormatHints[field] : ''
-  const props = { id: controlId, name: field, type, value, maxLength, required, disabled, 'aria-labelledby': labelId, 'aria-invalid': Boolean(message), 'aria-describedby': [hint ? hintId : '', message ? errorId : ''].filter(Boolean).join(' ') || undefined, autoComplete, inputMode, onBlur: () => setTouched(true), onChange }
-  const input = action ? <FormattedInput {...props} kind={field as 'bankAccount'}/> : formatted ? <FormattedInput {...props} kind={field}/> : <input {...props} onChange={event => onChange(event.target.value)}/>
-  const labelContent = <><span id={labelId}>{label}{required && <> <RequiredMark/></>}</span></>
+  const hint = formatted && !hideHint ? fieldFormatHints[field] : ''
+  const props = { id: controlId, name: field, type, value, maxLength, required, disabled, placeholder, 'aria-labelledby': labelId, 'aria-invalid': Boolean(message), 'aria-describedby': [hint ? hintId : '', message ? errorId : ''].filter(Boolean).join(' ') || undefined, autoComplete, inputMode, onBlur: () => setTouched(true), onChange }
+  const input = action ? <FormattedInput {...props} kind={field as 'bankAccount'} showPlaceholderOnEmpty={Boolean(placeholder)} separatePrefix={Boolean(fixedPrefix)}/> : formatted ? <FormattedInput {...props} kind={field} showPlaceholderOnEmpty={Boolean(placeholder)} separatePrefix={Boolean(fixedPrefix)}/> : <input {...props} onChange={event => onChange(event.target.value)}/>
+  const labelContent = <div className="recipient-field-label"><label id={labelId} htmlFor={controlId}>{label}{required && <> <RequiredMark/></>}</label>{help && <FieldHelpButton id={hintId} label={`Пояснення: ${label}`} disabled={disabled} text={help} onShow={showTooltip} onHide={hideTooltip}/>}</div>
+  const prefixKind = field === 'bankAccount' ? 'iban' : field
+  const renderedInput = fixedPrefix ? <span className={`recipient-prefixed-input recipient-prefixed-${prefixKind}${message ? ' recipient-prefixed-invalid' : ''}`}><span className="recipient-input-prefix" aria-hidden="true" onClick={event => event.currentTarget.parentElement?.querySelector('input')?.focus()}>{fixedPrefix}</span>{input}</span> : input
   return action
-    ? <div className="recipient-field" data-recipient-field={field}><label id={labelId} htmlFor={controlId}>{labelContent}</label><div className="recipient-iban-input-row">{input}{action}</div>{hint && <span className="recipient-field-hint" id={hintId}>{hint}</span>}{message && <span id={errorId} className="recipient-field-error" role="alert">{message}</span>}</div>
-    : <label className="recipient-field" data-recipient-field={field}>{labelContent}{input}{hint && <span className="recipient-field-hint" id={hintId}>{hint}</span>}{message && <span id={errorId} className="recipient-field-error" role="alert">{message}</span>}</label>
+    ? <div className="recipient-field" data-recipient-field={field}>{labelContent}<div className="recipient-iban-input-row">{renderedInput}{action}</div>{hint && <span className="recipient-field-hint" id={hintId}>{hint}</span>}{message && <span id={errorId} className="recipient-field-error" role="alert">{message}</span>}</div>
+    : <div className="recipient-field" data-recipient-field={field}>{labelContent}{renderedInput}{hint && <span className="recipient-field-hint" id={hintId}>{hint}</span>}{message && <span id={errorId} className="recipient-field-error" role="alert">{message}</span>}</div>
 }
+function FieldHelpButton({ id, label, text, disabled, onShow, onHide }: { id: string; label: string; text: string; disabled: boolean; onShow: (target: HTMLElement, text: string) => void; onHide: () => void }) { return <span className="recipient-address-help-wrap"><button type="button" className="recipient-address-help" aria-label={label} aria-describedby={id} disabled={disabled} onPointerEnter={event => onShow(event.currentTarget, text)} onPointerLeave={event => { if (!event.currentTarget.matches(':focus-visible')) onHide() }} onFocus={event => onShow(event.currentTarget, text)} onBlur={onHide}><CircleHelp size={15} aria-hidden="true"/></button><span className="visually-hidden" id={id}>{text}</span></span> }
+function BankPair({ label }: { label: string }) { const match = /^МФО (.*?) · ЄДРПОУ (.*)$/.exec(label); if (!match) return <span>{label}</span>; return <span className="recipient-bank-pair"><span><strong>МФО</strong> <b>{match[1]}</b></span><span><strong>ЄДРПОУ</strong> <b>{match[2]}</b></span></span> }
 function DuplicateNotice({ result, onView, onCreateSeparate, saving, onUseExisting }: {
   result: Extract<RecipientSaveResult, { ok: false }>; onView: (id: string) => void; onCreateSeparate: () => void; saving: boolean; onUseExisting?: (id: string) => void
 }) {

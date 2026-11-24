@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto'
 import { compareVersions, checkLatestRelease, downloadVerifiedArtifact, parseStableVersion, safeReleaseNotes, validateReleaseManifest } from './release-updates.mjs'
 
 const digest = value => createHash('sha256').update(value).digest('hex')
-const manifest = (version = '1.2.0') => ({ formatVersion: 1, version, platform: 'win32', architecture: 'x64', compatibility: { installer: 'hromadaaid-universal-nsis-v1', installModes: ['Client-only', 'Server-only', 'Combined'], api: { contract: 'hromadaaid-rest', version: 1 }, manager: { versionPolicy: 'same-release-version', apiContract: 'hromadaaid-rest', apiContractVersion: 1 } }, artifacts: [
+const manifest = (version = '1.2.0') => ({ formatVersion: 1, version, platform: 'win32', architecture: 'x64', compatibility: { installer: 'hromadaaid-universal-nsis-v1', installModes: ['Client-only', 'Server-only', 'Combined'], api: { contract: 'hromadaaid-rest', version: 1, targetVersion: 2 }, manager: { versionPolicy: 'same-release-version', apiContract: 'hromadaaid-rest', apiContractVersion: 1, targetApiContractVersion: 2 } }, artifacts: [
   { component: 'installer', name: `HromadaAID-Setup-${version}.exe`, sha256: 'a'.repeat(64), sizeBytes: 100 },
   { component: 'server', name: `HromadaAID-Server-v${version}-win-x64.zip`, sha256: 'b'.repeat(64), sizeBytes: 200, packageIntegrity: 'embedded-package-integrity-v1' },
 ] })

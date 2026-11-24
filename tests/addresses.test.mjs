@@ -14,6 +14,8 @@ import { registerRecipientFixture } from './fakes/recipient-fixture.ts'
 import { readStatementRows } from '../electron/statement-data.ts'
 import { handlers } from './fakes/ipc-security.mjs'
 import { testAddress, testAddressInput } from './fakes/address.mjs'
+import { createApp } from '../server/src/app.ts'
+import { createFirstAdministrator } from '../server/src/auth.ts'
 
 const stamp = '2026-10-01T10:00:00.000Z'
 const expected = "52151, Дніпропетровська область, Кам'янський район, с-ще Вишневе, вул. Центральна, буд. 105, кв. 10"
@@ -148,17 +150,75 @@ test('IPC stores components, ignores forged display text and restores both addre
   assert.equal(updated.bankAccount, value.bankAccount)
 })
 
-test('Registration is mandatory, partial residence is rejected, and optional residence can be explicitly cleared', t => {
-  const { input, call } = fixture(t)
+test('Both address sets are mandatory and clearing either one is rejected without changing SQLite', t => {
+  const { db, input, call } = fixture(t)
   const value = input()
-  assert.equal(call('recipients:save', { ...value, registeredAddressParts: null }).reason, 'validation')
+  const noRegistration = call('recipients:save', { ...value, registeredAddressParts: null })
+  assert.equal(noRegistration.reason, 'validation')
+  assert.equal(noRegistration.message, 'Зазначте адресу реєстрації отримувача.')
+  const noResidence = call('recipients:save', { ...value, addressParts: null, address: '' })
+  assert.equal(noResidence.reason, 'validation')
+  assert.equal(noResidence.message, 'Зазначте адресу проживання отримувача.')
+  assert.equal(call('recipients:save', { ...value, registeredAddressParts: null, registeredAddress: '  ', addressParts: null, address: '' }).reason, 'validation')
+  assert.equal(call('recipients:save', { ...value, registeredAddressParts: {}, addressParts: {} }).reason, 'validation')
   assert.equal(call('recipients:save', { ...value, addressParts: { ...value.addressParts, building: '' } }).reason, 'validation')
   assert.equal(call('recipients:save', { ...value, addressParts: null, address: 'Старий текст без складових' }).reason, 'validation')
   const created = call('recipients:save', value)
   assert.equal(created.ok, true)
-  const cleared = call('recipients:save', { ...value, addressParts: null, address: '' }, created.recipient.id, false, created.recipient.updatedAt)
-  assert.equal(cleared.ok, true); assert.equal(cleared.recipient.address, null); assert.equal(cleared.recipient.addressParts, null)
-  assert.equal(cleared.recipient.registeredAddress, formatAddress(value.registeredAddressParts))
+  const before = db.prepare('SELECT * FROM recipients WHERE id=?').get(created.recipient.id)
+  for (const patch of [{ addressParts: null, address: '' }, { registeredAddressParts: null, registeredAddress: '' }]) {
+    const rejected = call('recipients:save', patch, created.recipient.id, false, created.recipient.updatedAt)
+    assert.equal(rejected.reason, 'validation')
+    assert.deepEqual(db.prepare('SELECT * FROM recipients WHERE id=?').get(created.recipient.id), before)
+  }
+})
+
+test('Partial API update validates the merged final recipient state and preserves omitted address fields', t => {
+  const { db, call, input } = fixture(t)
+  const created = call('recipients:save', input())
+  assert.equal(created.ok, true)
+  const changed = call('recipients:save', { firstName: 'Оновлений' }, created.recipient.id, false, created.recipient.updatedAt)
+  assert.equal(changed.ok, true, changed.message)
+  assert.equal(changed.recipient.firstName, 'Оновлений')
+  assert.deepEqual(changed.recipient.registeredAddressParts, created.recipient.registeredAddressParts)
+  assert.deepEqual(changed.recipient.addressParts, created.recipient.addressParts)
+  const before = db.prepare('SELECT * FROM recipients WHERE id=?').get(created.recipient.id)
+  const rejected = call('recipients:save', { addressParts: null }, created.recipient.id, false, changed.recipient.updatedAt)
+  assert.equal(rejected.reason, 'validation')
+  assert.deepEqual(db.prepare('SELECT * FROM recipients WHERE id=?').get(created.recipient.id), before)
+})
+
+test('Direct recipient API enforces both required addresses and rejects a partial clear atomically', async t => {
+  const { db, input } = fixture(t)
+  const createdAdmin = await createFirstAdministrator(db, { username: 'address-admin', password: 'synthetic password' })
+  assert.equal(createdAdmin.ok, true)
+  const app = createApp(db); app.log.level = 'silent'
+  t.after(async () => app.close())
+  const login = await app.inject({ method: 'POST', url: '/auth/login', payload: { username: 'address-admin', password: 'synthetic password' } })
+  assert.equal(login.statusCode, 200)
+  const headers = { authorization: `Bearer ${login.json().token}` }
+  const valid = input()
+  for (const payload of [
+    { ...valid, registeredAddressParts: null, registeredAddress: '' },
+    { ...valid, addressParts: null, address: '' },
+    { ...valid, registeredAddressParts: {}, addressParts: {} },
+  ]) {
+    const response = await app.inject({ method: 'POST', url: '/api/recipients', headers, payload: { input: payload } })
+    assert.equal(response.statusCode, 400)
+    assert.equal(response.json().ok, false)
+  }
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM recipients').get().n, 0)
+  const inserted = await app.inject({ method: 'POST', url: '/api/recipients', headers, payload: { input: valid } })
+  assert.equal(inserted.statusCode, 200, inserted.body)
+  const recipient = inserted.json().recipient
+  const before = db.prepare('SELECT * FROM recipients WHERE id=?').get(recipient.id)
+  const rejected = await app.inject({ method: 'PUT', url: `/api/recipients/${recipient.id}`, headers, payload: { input: { addressParts: null, address: '' }, expectedUpdatedAt: recipient.updatedAt } })
+  assert.equal(rejected.statusCode, 400)
+  assert.deepEqual(db.prepare('SELECT * FROM recipients WHERE id=?').get(recipient.id), before)
+  const partial = await app.inject({ method: 'PUT', url: `/api/recipients/${recipient.id}`, headers, payload: { input: { firstName: 'Оновлено' }, expectedUpdatedAt: recipient.updatedAt } })
+  assert.equal(partial.statusCode, 200, partial.body)
+  assert.equal(partial.json().recipient.address, recipient.address)
+  assert.deepEqual(partial.json().recipient.addressParts, recipient.addressParts)
 })
 
 test('Failure while writing address components rolls back other recipient changes too', t => {
@@ -219,8 +279,9 @@ test('Shared editor applies only on Save; cancel, dirty guard and all recipient 
   assert.match(editor, /formatAddress\(draft\)/)
   const form = readFileSync(new URL('../src/RecipientRegistry.tsx', import.meta.url), 'utf8')
   assert.match(form, /addressCard\('registeredAddress'\)/); assert.match(form, /addressCard\('address'\)/)
-  assert.match(form, /applyAddress\('address', copyAddress\(form.registeredAddressParts\)\)/)
-  assert.match(form, /applyAddress\('address', null\)/)
+  assert.match(form, /applyAddress\(key, copyAddress\(sourceParts\)\)/)
+  assert.match(form, /applyAddress\(key, null\)/)
+  assert.match(form, /CircleHelp/)
   assert.match(form, /onSave=\{parts => \{ applyAddress\(addressEditor, parts\); setAddressEditor\(null\) \}\}/)
   for (const file of ['AidRegistry', 'DecisionRegistry']) assert.match(readFileSync(new URL(`../src/${file}.tsx`, import.meta.url), 'utf8'), /<RecipientFormModal/)
 })

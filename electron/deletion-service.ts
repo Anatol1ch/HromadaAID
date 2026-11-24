@@ -23,9 +23,13 @@ export function previewDeletion(database: DatabaseSync, entity: DeleteEntity, id
   let row: Row | undefined
   let name: string | null = null
   let dependencies: DeletePreview['dependencies'] = []
+  let status: DeletePreview['status']
   if (entity === 'assignment') {
     name = assignmentLabel(database, id)
-    if (name) dependencies = assignmentCounts(database, 'a.id=?', id)
+    if (name) {
+      status = (database.prepare('SELECT status FROM assignments WHERE id=?').get(id) as { status: DeletePreview['status'] }).status
+      dependencies = assignmentCounts(database, 'a.id=?', id)
+    }
   } else if (entity === 'recipient') {
     row = database.prepare(`SELECT last_name||' '||first_name||COALESCE(' '||patronymic,'') AS name FROM recipients WHERE id=?`).get(id) as Row | undefined
     name = row ? String(row.name) : null
@@ -69,7 +73,7 @@ export function previewDeletion(database: DatabaseSync, entity: DeleteEntity, id
       if (orphanApprovals) dependencies.push({ label: 'Реквізити затвердження, пов’язані лише з цією програмою', count: orphanApprovals })
     }
   }
-  return name === null ? null : { entity, id, name, dependencies, confirmationToken: createHash('sha256').update(JSON.stringify({ entity, id, name, dependencies })).digest('hex') }
+  return name === null ? null : { entity, id, name, dependencies, confirmationToken: createHash('sha256').update(JSON.stringify({ entity, id, name, dependencies, ...(status ? { status } : {}) })).digest('hex'), ...(status ? { status } : {}) }
 }
 
 function removeAssignments(database: DatabaseSync, where: string, value: string) {
@@ -83,12 +87,20 @@ function removeAssignments(database: DatabaseSync, where: string, value: string)
   }
 }
 
-export function executeDeletion(database: DatabaseSync, entity: DeleteEntity, id: string, confirmationToken?: unknown) {
+export function executeDeletion(database: DatabaseSync, entity: DeleteEntity, id: string, confirmationToken?: unknown, protectFinancialAssignment = false) {
   try {
     database.exec('BEGIN IMMEDIATE')
     const current = previewDeletion(database, entity, id)
-    if (!current) { database.exec('ROLLBACK'); return { ok: false, message: 'Запис уже видалено або його не знайдено. Оновіть список.' } }
-    if (typeof confirmationToken !== 'string' || confirmationToken !== current.confirmationToken) { database.exec('ROLLBACK'); return { ok: false, message: 'Пов’язані дані змінилися. Оновіть попередній перегляд перед видаленням.' } }
+    if (!current) { database.exec('ROLLBACK'); return { ok: false, reason: 'not-found' as const, message: 'Запис уже видалено або його не знайдено. Оновіть список.' } }
+    if (protectFinancialAssignment && entity === 'assignment') {
+      const assignment = database.prepare('SELECT status FROM assignments WHERE id=?').get(id) as { status: string } | undefined
+      const payouts = Number((database.prepare('SELECT COUNT(*) AS count FROM payouts WHERE assignment_id=?').get(id) as { count: number }).count)
+      if (assignment?.status === 'Виплачено' || payouts > 0) {
+        database.exec('ROLLBACK')
+        return { ok: false, reason: 'status' as const, message: 'Це призначення має статус «Виплачено» або пов’язаний історичний запис виплати. Фахівець з призначень не може його видалити.' }
+      }
+    }
+    if (typeof confirmationToken !== 'string' || confirmationToken !== current.confirmationToken) { database.exec('ROLLBACK'); return { ok: false, reason: 'changed' as const, message: 'Призначення або пов’язані дані змінилися. Оновіть попередній перегляд перед видаленням.' } }
     if (entity === 'assignment') removeAssignments(database, 'id=?', id)
     if (entity === 'recipient') {
       removeAssignments(database, 'recipient_id=?', id)
@@ -123,7 +135,7 @@ export function executeDeletion(database: DatabaseSync, entity: DeleteEntity, id
     return { ok: true }
   } catch {
     try { database.exec('ROLLBACK') } catch { /* transaction already closed */ }
-    return { ok: false, message: 'Не вдалося видалити запис; усі зміни транзакції скасовано.' }
+    return { ok: false, reason: 'operation' as const, message: 'Не вдалося видалити запис; усі зміни транзакції скасовано.' }
   }
 }
 

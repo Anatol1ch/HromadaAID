@@ -45,7 +45,7 @@ test('bank-aware IPC generation uses fresh server snapshots and rolls back faile
   await createFirstAdministrator(db, { username: 'synthetic-admin', password: 'synthetic test password' })
   server = createApp(db); server.log.level = 'silent'
   const health = await server.inject({ url: '/health' })
-  assert.equal(health.json().apiContractVersion, 1)
+  assert.equal(health.json().apiContractVersion, 2)
   const login = await server.inject({ method: 'POST', url: '/auth/login', payload: { username: 'synthetic-admin', password: 'synthetic test password' } })
   assert.equal(login.statusCode, 200)
   const headers = { authorization: 'Bearer ' + login.json().token }

@@ -1,5 +1,6 @@
 import { win32 } from 'node:path'
 import type { CheckStatus, InspectionDiagnostic, InspectionCheck, InspectionSnapshot, InstallationStatus, InspectedConfiguration, ServiceStatus } from './inspection-types.js'
+import { CURRENT_SERVER_API_CONTRACT_VERSION, LEGACY_SERVER_API_CONTRACT_VERSION } from './api-compatibility.js'
 
 export const HROMADAAID_SERVICE_NAME = 'HromadaAIDApi'
 export const LOCAL_API_ORIGIN = 'http://127.0.0.1:4310'
@@ -402,9 +403,11 @@ export async function inspectEnvironment(adapters: InspectionAdapters): Promise<
       else if (response.kind === 'invalid_response' || response.redirected) api = { status: 'invalid_response', message: 'API повернув перенаправлення або некоректну відповідь health endpoint.', contractVersion: null }
       else {
         const body = response.body as Record<string, unknown> | null
-        const valid = response.status === 200 && !!body && typeof body === 'object' && body.status === 'ok' && body.service === 'hromada-aid-api' && body.apiContractVersion === 1
+        const contractVersion = body && typeof body === 'object' ? body.apiContractVersion : null
+        // Manager 1.1 must recognize v1 installations to update them and confirm rollback.
+        const valid = response.status === 200 && !!body && typeof body === 'object' && body.status === 'ok' && body.service === 'hromada-aid-api' && (contractVersion === LEGACY_SERVER_API_CONTRACT_VERSION || contractVersion === CURRENT_SERVER_API_CONTRACT_VERSION)
         api = valid
-          ? { status: 'available', message: 'Health endpoint HromadaAID відповів коректно.', contractVersion: 1 }
+          ? { status: 'available', message: 'Health endpoint HromadaAID відповів коректно.', contractVersion: contractVersion as number }
           : { status: 'invalid_response', message: 'Відповідь не відповідає контракту health endpoint HromadaAID.', contractVersion: typeof body?.apiContractVersion === 'number' ? body.apiContractVersion : null }
       }
     } catch { api = { status: 'unavailable', message: 'Перевірка API завершилася технічною помилкою.', contractVersion: null } }

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { fieldFormatError, normalizeField, validUkrainianIban } from '../electron/field-formats.ts'
-import { caretForDigit, cleanPassportInput, displayMask, editMask, formatMask } from '../src/lib/inputMasks.ts'
+import { caretForDigit, cleanPassportInput, displayMask, editMask, formatMask, visibleMaskCaret, visibleMaskPosition, visibleMaskValue } from '../src/lib/inputMasks.ts'
 
 test('Passport input mask caps booklet at two letters/six digits and ID at nine digits', () => {
   for (const [input, expected] of [
@@ -70,4 +70,22 @@ test('IBAN mask supports replacement in every digit position without losing pref
     const result=editMask('bankAccount',display,start,end,'5')
     assert.equal(result.value,'UA'+original.slice(0,index)+'5'+original.slice(index+1))
   }
+})
+
+test('Separated recipient prefixes leave editable mask digits and caret positions prefix-independent', () => {
+  const phone = displayMask('phone', '+380501234567')
+  assert.equal(visibleMaskValue('phone', phone), '50 123 45 67')
+  const phoneStart = visibleMaskPosition('phone', phone, 3)
+  const phoneEdit = editMask('phone', phone, phoneStart, phoneStart + 1, '9')
+  assert.equal(phoneEdit.value, '+380509234567')
+  assert.equal(visibleMaskCaret('phone', displayMask('phone', phoneEdit.value), phoneEdit.caret), 4)
+
+  const iban = displayMask('bankAccount', 'UA620000000000000000000000001')
+  assert.equal(visibleMaskValue('bankAccount', iban), '62 000000 0000000000000000001')
+  const ibanStart = visibleMaskPosition('bankAccount', iban, 0)
+  const ibanEdit = editMask('bankAccount', iban, ibanStart, ibanStart + 1, '9')
+  assert.equal(ibanEdit.value, 'UA920000000000000000000000001')
+  assert.equal(normalizeField('bankAccount', ibanEdit.value), 'UA920000000000000000000000001')
+  assert.equal(visibleMaskValue('phone', displayMask('phone', '')), '')
+  assert.equal(visibleMaskValue('bankAccount', displayMask('bankAccount', '')), '')
 })

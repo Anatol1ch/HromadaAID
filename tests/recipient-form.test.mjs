@@ -20,7 +20,7 @@ const complete = {
   phone: '+380000000000', email: 'fictional@example.invalid',
   bankAccount: 'UA620000000000000000000000001', bankDetailsId: 'test-detail',
 }
-const required = [...Object.keys(recipientTextFields).filter(key => recipientTextFields[key].required), 'registeredAddressParts', 'sex', 'isVpo']
+const required = [...Object.keys(recipientTextFields).filter(key => recipientTextFields[key].required), 'registeredAddressParts', 'addressParts', 'sex', 'isVpo']
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'hromada-aid-recipient-test-'))
   const db = openTestDatabase(root)
@@ -49,12 +49,12 @@ test('Recipient IPC creates, reads and edits all fields without losing text iden
   assert.equal(call('recipients:list').length, 1)
 })
 
-test('Optional address, phone and email can be blank; required strings are trimmed', t => {
+test('Both addresses are required while optional phone and email can be blank', t => {
   const { call } = fixture(t)
-  const result = call('recipients:save', { ...complete, lastName: '  Тестовий  ', address: ' ', addressParts: null, phone: '', email: '' })
+  const result = call('recipients:save', { ...complete, lastName: '  Тестовий  ', phone: '', email: '' })
   assert.equal(result.ok, true)
   assert.equal(result.recipient.lastName, 'Тестовий')
-  for (const key of ['address', 'phone', 'email']) assert.equal(result.recipient[key], null)
+  for (const key of ['phone', 'email']) assert.equal(result.recipient[key], null)
   assert.equal(result.recipient.isVpo, false)
 })
 
@@ -168,6 +168,28 @@ test('Shared form layout and data bindings match both registry and nested creati
   assert.match(source, /first\?\.querySelector<HTMLElement>\('input, button'\)\?\.focus\(\)/)
   assert.match(source, /confirmModalClose\(dirty, closeForm\)/)
   assert.match(source, /dirty=\{!saving && dirty\} busy=\{saving\}/)
+  for (const label of ['Особисті дані', 'Адреси', 'Контактні дані', 'Банківські реквізити']) assert.ok(source.includes(label), `four-section form contains ${label}`)
+  for (const example of ['Введіть номер паспорта', 'Введіть РНОКПП', 'XX XXX XX XX', 'Введіть електронну пошту', 'XX XXXXXX XXXXXXXXXXXXXXXXXXX']) assert.ok(source.includes(example), `neutral placeholder ${example}`)
+  for (const hint of ['Паспорт-книжечка: дві українські літери та шість цифр', 'складається з 10 цифр', 'Наприклад: name@example.com', 'складається з коду UA та 27 цифр']) assert.ok(source.includes(hint), `field tooltip ${hint}`)
+  assert.match(source, /textField\('phone', \{[^}]*fixedPrefix: '\+380'/)
+  assert.match(source, /fixedPrefix="UA"/)
+  assert.match(source, /ShieldCheck/)
+  assert.match(source, /recipient-address-info/)
+  assert.match(source, /Копіювати з адреси/)
+  assert.match(source, /recipient-address-clear/)
+  assert.match(source, /separatePrefix=\{Boolean\(fixedPrefix\)\}/)
+  const formattedInput = readFileSync(new URL('../src/components/FormattedInput.tsx', import.meta.url), 'utf8')
+  assert.match(formattedInput, /onCopy=\{event =>/)
+  assert.match(formattedInput, /wholeValue \? display : visibleDisplay/)
+  const select = readFileSync(new URL('../src/components/Select.tsx', import.meta.url), 'utf8')
+  assert.match(select, /renderValue\?\.\(selected\)/)
+  assert.match(select, /renderOption\?\.\(option\)/)
+  assert.match(source, /if \(key === 'bankAccount'\) setIbanCheck\(''\)/)
+  assert.match(source, /data-iban-check=\{ibanCheck \|\| undefined\}/)
+  assert.match(source, /CircleCheck/)
+  assert.match(source, /CircleAlert/)
+  assert.match(source, /МФО/)
+  assert.match(source, /showPlaceholderOnEmpty=\{Boolean\(placeholder\)\}/)
   assert.doesNotMatch(source, /\(за наявності\)|Усі поля необов/)
   for (const file of ['AidRegistry', 'DecisionRegistry']) {
     const entry = readFileSync(new URL(`../src/${file}.tsx`, import.meta.url), 'utf8')

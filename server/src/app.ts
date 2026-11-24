@@ -241,6 +241,12 @@ export function createApp(database: DatabaseSync, administration?: BackupAdminis
 
   app.get<{ Params: { entity: string; id: string } }>('/api/deletion/:entity/:id', async (request) => isDeleteEntity(request.params.entity) ? previewDeletion(database, request.params.entity, request.params.id) : null)
   app.post<{ Params: { entity: string; id: string }; Body: { confirmationToken?: unknown } }>('/api/deletion/:entity/:id', async (request, reply) => { if (!isDeleteEntity(request.params.entity)) return reply.status(400).send({ ok:false,message:'Некоректний тип запису.' }); const result=executeDeletion(database, request.params.entity, request.params.id, request.body?.confirmationToken); return reply.status(result.ok?200:409).send(result) })
+  app.get<{ Params: { id: string } }>('/api/assignments/:id/deletion-preview', async (request) => previewDeletion(database, 'assignment', request.params.id))
+  app.post<{ Params: { id: string }; Body: { confirmationToken?: unknown } }>('/api/assignments/:id/delete', async (request, reply) => {
+    const elevated = hasPermission(currentApiSession(request).user.roles, 'protected_entities.delete')
+    const result = executeDeletion(database, 'assignment', request.params.id, request.body?.confirmationToken, !elevated)
+    return reply.status(result.ok || result.reason === 'operation' ? 200 : result.reason === 'not-found' ? 404 : 409).send(result)
+  })
 
   app.get('/api/program-approvals', async (): Promise<ProgramApproval[]> => listProgramApprovals(database))
   app.post<{ Body: unknown }>('/api/program-approvals', async (request, reply) => {

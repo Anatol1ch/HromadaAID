@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 
 const source = readFileSync(new URL('../electron/inspection-engine.ts', import.meta.url), 'utf8')
+  .replace("import { CURRENT_SERVER_API_CONTRACT_VERSION, LEGACY_SERVER_API_CONTRACT_VERSION } from './api-compatibility.js'", 'const CURRENT_SERVER_API_CONTRACT_VERSION = 2; const LEGACY_SERVER_API_CONTRACT_VERSION = 1;')
 const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText
 const { inspectEnvironment, HROMADAAID_SERVICE_NAME } = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
 const ipcSource = readFileSync(new URL('../electron/inspection-ipc.ts', import.meta.url), 'utf8')
@@ -62,6 +63,21 @@ test('detects a complete installed service, reads only metadata and validates ac
   assert.equal(f.trace.lastUrl, 'http://127.0.0.1:4310/health')
   assert.equal(f.trace.timeout, 4000)
   assert.equal(result.checkedAt, '2026-10-24T10:30:00.000Z')
+})
+
+test('Manager recognizes legacy v1 for maintenance rollback, current v2, and rejects unsupported contract versions', async () => {
+  for (const [version, expected] of [[1, 'available'], [2, 'available'], [3, 'invalid_response'], [null, 'invalid_response']]) {
+    const f = fixture({ api: { kind: 'response', status: 200, redirected: false, body: { status: 'ok', service: 'hromada-aid-api', ...(version === null ? {} : { apiContractVersion: version }) } } })
+    assert.equal((await inspectEnvironment(f.adapter)).api.status, expected, `contract ${version}`)
+  }
+})
+
+test('Manager current contract policy stays aligned with shared Client/Server contract version', async () => {
+  const shared = readFileSync(new URL('../../shared/api-compatibility.ts', import.meta.url), 'utf8')
+  const manager = readFileSync(new URL('../electron/api-compatibility.ts', import.meta.url), 'utf8')
+  const sharedVersion = Number(/HROMADAAID_API_CONTRACT_VERSION\s*=\s*(\d+)/.exec(shared)?.[1])
+  const managerVersion = Number(/CURRENT_SERVER_API_CONTRACT_VERSION\s*=\s*(\d+)/.exec(manager)?.[1])
+  assert.equal(managerVersion, sharedVersion)
 })
 
 test('distinguishes a genuinely missing service from a service query failure', async () => {

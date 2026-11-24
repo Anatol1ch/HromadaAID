@@ -1,5 +1,42 @@
 # HromadaAID — поточний checkpoint
 
+## Stage 10.7.3 — Stable 1.1.0 (публікація в роботі)
+
+Поточний Stable, підтверджений власником: **1.0.2**. Цільові версії Client,
+API Server і Server Manager: **1.1.0**; API Contract: **v2**. Версії root і
+`server/package.json` синхронізовані; Manager, Setup і component/release manifests
+отримують SemVer з root package під час пакування. Залежності й lockfile не змінені.
+
+Stage 10.1–10.7.2 завершені й прийняті власником. Погоджений текст Release Notes
+зафіксований у [release-notes/1.1.0.md](release-notes/1.1.0.md). Client отримує
+опис із GitHub Release body. Публікація Stable 1.1.0 ще не підтверджена; до неї
+останнім опублікованим Stable залишається 1.0.2.
+
+Для переходу з 1.0.2: створити штатну резервну копію, завершити Client, оновити
+Server Manager, потім API Server, потім усі Client; перевірити підключення після
+збігу контракту v2. Contract v1 і v2 несумісні для звичайної роботи. У release
+manifest збережені v1 bootstrap-маркери, щоб старий updater 1.0.2 міг отримати
+новий Manager; окремі target markers визначають фактичний контракт v2. Це не
+дозволяє Client v1 працювати з API v2 або Client v2 з API v1. Новий Manager
+розпізнає v1 для переходу й підтвердження старого пакета після штатного rollback;
+поведінку реального Windows deployment у VM тут не перевіряли.
+
+Stage 10.7.2: версійні джерела й package/release metadata звірені; цільові
+release-manifest та GitHub Release metadata тести — 12 PASS; `git diff --check` —
+PASS. Для Stage 10.7.3 CI виконує Windows packaging, перевірку production ZIP і
+маніфесту до запуску publish job; самі артефакти треба підтвердити за результатом
+workflow. Локальний seed та SQLite залишаються поза Git через `.git/info/exclude`
+і `.gitignore`; `server:seed` у root package відсутній. Це не твердження про факт
+публікації Stable 1.1.0.
+
+## Історичний checkpoint Stage 10.7.2 — підготовка Stable 1.1.0
+
+На момент завершення Stage 10.7.2 Stable 1.0.2 залишався останнім опублікованим;
+версії 1.1.0, документацію та Release Notes підготували локально, без commit,
+push, тегу, пакування чи публікації. Цей стан замінено поточним checkpoint вище.
+
+## Історичний checkpoint 1.0.2 — стан на час підготовки персональних списків
+
 ## Checkpoint 1.0.2 — локальне виправлення персональних списків
 
 Дата: 30.10.2026. Root/server version: **1.0.2**. Виправлення виконано поверх

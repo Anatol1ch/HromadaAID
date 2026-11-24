@@ -88,3 +88,15 @@ Stage 9.2 завершено та прийнято власником у Windows
 [stage-9.2-manual-testing.md](../docs/stage-9.2-manual-testing.md). Автоматичні
 перевірки поточного коду та результати VM-приймання — окремі види доказів.
 Поточний стан проєкту описано в [HANDOFF.md](../docs/HANDOFF.md).
+
+## API Contract Stable 1.1.0
+
+Stable 1.1.0 використовує `hromadaaid-rest` contract v2; API повідомляє фактичну
+версію полем `apiContractVersion` у `/health`. Client і API Server мають
+відповідати одному контракту: v1 та v2 несумісні для звичайної роботи, а
+несумісність відображається наявним повідомленням Client. Для переходу зі Stable
+1.0.2 оновлюють Manager до 1.1.0, далі API Server до 1.1.0, а потім усі Client
+до 1.1.0. Старі v1 bootstrap-поля релізного маніфесту потрібні лише для
+отримання нового Manager; вони не змінюють версію API, з якою працює Client.
+Порядок і практичні кроки наведено в
+[інструкції встановлення й адміністрування](../docs/installation-and-administration.md).

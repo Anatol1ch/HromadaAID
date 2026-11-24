@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { lstat, readFile, readdir, realpath } from 'node:fs/promises'
 import { relative, resolve, sep, join } from 'node:path'
 import type { ServerUpdatePreview, ServerUpdateStage, ServerUpdateProgress, ServerUpdateResult } from './server-update-contract.js'
+import { CURRENT_SERVER_API_CONTRACT_VERSION } from './api-compatibility.js'
 
 export type { ServerUpdatePreview, ServerUpdateStage, ServerUpdateProgress, ServerUpdateResult } from './server-update-contract.js'
 export type ServerUpdateEnvironment = {
@@ -200,7 +201,11 @@ export async function readInstalledPackageIdentity(root: string): Promise<string
   return hash.digest('hex')
 }
 
-export type PreparedServerUpdate = { preview: ServerUpdatePreview; extractedRoot: string; cleanupRoot: string; environment: ServerUpdateEnvironment; activePackageIdentity: string; candidatePackageIdentity: string }
+export type PreparedServerUpdate = { preview: ServerUpdatePreview; extractedRoot: string; cleanupRoot: string; environment: ServerUpdateEnvironment; activePackageIdentity: string; candidatePackageIdentity: string; candidateApiContractVersion: number }
+
+function isSupportedApiContractUpdate(current: number, candidate: number): boolean {
+  return candidate === current || (current === 1 && candidate === CURRENT_SERVER_API_CONTRACT_VERSION)
+}
 
 export async function prepareServerUpdate(zipPath: string, adapters: ServerUpdateAdapters): Promise<PreparedServerUpdate> {
   if (!zipPath || !zipPath.toLocaleLowerCase('en-US').endsWith('.zip')) throw fail('UPDATE_ARCHIVE_INVALID', 'Виберіть ZIP-файл серверного пакета.')
@@ -213,7 +218,7 @@ export async function prepareServerUpdate(zipPath: string, adapters: ServerUpdat
   try {
     await adapters.extract(zipPath, extractedRoot)
     const metadata = await verifyUpdatePackage(extractedRoot)
-    if (metadata.apiContract !== environment.apiContractVersion) throw fail('API_CONTRACT_INCOMPATIBLE', 'Пакет використовує несумісний API contract.')
+    if (!isSupportedApiContractUpdate(environment.apiContractVersion, metadata.apiContract)) throw fail('API_CONTRACT_INCOMPATIBLE', 'Пакет використовує несумісний API contract.')
     if (parseSemVer(metadata.version).prerelease !== null) throw fail('UPDATE_PRERELEASE_UNSUPPORTED', 'Попередні версії сервера не підтримуються звичайним оновленням. Виберіть стабільний пакет.')
     const versionOrder = compareSemVer(metadata.version, environment.serverVersion)
     if (versionOrder === 0) throw fail('UPDATE_VERSION_ALREADY_INSTALLED', 'Ця версія сервера вже встановлена. Оновлення не потрібне.')
@@ -222,7 +227,7 @@ export async function prepareServerUpdate(zipPath: string, adapters: ServerUpdat
     const activePackageIdentity = await adapters.readActivePackageIdentity(environment)
     const candidatePackageIdentity = await readPackageManifestIdentity(extractedRoot)
     if (currentSchema < metadata.schema.minimum || currentSchema > metadata.schema.maximum) throw fail('SQLITE_SCHEMA_INCOMPATIBLE', 'Поточна схема SQLite не підтримується вибраним серверним пакетом.')
-    return { cleanupRoot, extractedRoot, environment, activePackageIdentity, candidatePackageIdentity, preview: { id: adapters.nowId(), sourceName: zipPath.split(/[\\/]/).pop() || 'server.zip', currentVersion: environment.serverVersion, newVersion: metadata.version, apiContract: `hromadaaid-rest v${metadata.apiContract}`, sqliteRange: metadata.schema, currentSchema, sameVersion: metadata.version === environment.serverVersion, authenticity: metadata.authenticity } }
+    return { cleanupRoot, extractedRoot, environment, activePackageIdentity, candidatePackageIdentity, candidateApiContractVersion: metadata.apiContract, preview: { id: adapters.nowId(), sourceName: zipPath.split(/[\\/]/).pop() || 'server.zip', currentVersion: environment.serverVersion, newVersion: metadata.version, apiContract: `hromadaaid-rest v${metadata.apiContract}`, sqliteRange: metadata.schema, currentSchema, sameVersion: metadata.version === environment.serverVersion, authenticity: metadata.authenticity } }
   } catch (error) { await adapters.cleanup(cleanupRoot).catch(() => undefined); throw error }
 }
 
@@ -233,7 +238,7 @@ export async function applyServerUpdate(prepared: PreparedServerUpdate, adapters
     report('compatibility', 'Повторно перевіряємо інсталяцію та стан транзакції.')
     const current = await environmentFrom(await adapters.inspect(), adapters)
     if (await adapters.readActivePackageIdentity(current) !== prepared.activePackageIdentity) throw fail('INSTALLATION_CHANGED', 'Вміст установленого пакета змінився після перевірки ZIP. Виберіть пакет повторно.')
-    if (current.programDirectory !== prepared.environment.programDirectory || current.dataDirectory !== prepared.environment.dataDirectory || current.databasePath !== prepared.environment.databasePath || current.serverVersion !== prepared.environment.serverVersion) throw fail('INSTALLATION_CHANGED', 'Стан інсталяції змінився після перевірки пакета. Перевірте середовище й виберіть пакет повторно.')
+    if (current.programDirectory !== prepared.environment.programDirectory || current.dataDirectory !== prepared.environment.dataDirectory || current.databasePath !== prepared.environment.databasePath || current.serverVersion !== prepared.environment.serverVersion || current.apiContractVersion !== prepared.environment.apiContractVersion) throw fail('INSTALLATION_CHANGED', 'Стан інсталяції змінився після перевірки пакета. Перевірте середовище й виберіть пакет повторно.')
     const program = resolve(current.programDirectory), data = resolve(current.dataDirectory)
     for (const path of [...forbiddenStagingNames.map(name => join(program, name)), join(data, updateJournalName)]) if (await adapters.pathExists(path)) throw fail('UPDATE_RECOVERY_REQUIRED', 'Знайдено залишки іншої транзакції; оновлення зупинено.')
     report('prepare', 'Копіюємо перевірений пакет у Server.next та повторно звіряємо файли.')
@@ -242,7 +247,7 @@ export async function applyServerUpdate(prepared: PreparedServerUpdate, adapters
     await adapters.runInstaller(current, report)
     report('health', 'Перевіряємо фактичний стан служби й API.')
     const final = await adapters.inspect()
-    if (final.installation.status !== 'installed' || final.service.status !== 'running' || final.api.status !== 'available' || final.configuration.serverVersion !== prepared.preview.newVersion) throw fail('UPDATE_HEALTH_FAILED', 'Новий пакет не пройшов перевірку служби та API. Перегляньте стан відкату й діагностику.')
+    if (final.installation.status !== 'installed' || final.service.status !== 'running' || final.api.status !== 'available' || final.api.contractVersion !== prepared.candidateApiContractVersion || final.configuration.serverVersion !== prepared.preview.newVersion) throw fail('UPDATE_HEALTH_FAILED', 'Новий пакет не пройшов перевірку служби та API. Перегляньте стан відкату й діагностику.')
     if (await adapters.readActivePackageIdentity(current) !== prepared.candidatePackageIdentity) throw fail('UPDATE_PACKAGE_NOT_ACTIVE', 'Фактично встановлений пакет не відповідає підтвердженому ZIP, навіть якщо версія та API збігаються.')
     for (const path of [...forbiddenStagingNames.map(name => join(program, name)), join(data, updateJournalName)]) if (await adapters.pathExists(path)) throw fail('UPDATE_NOT_FINALIZED', 'Служба працює, але транзакція оновлення не завершена. Службові файли збережено для перевірки.')
     report('complete', 'Сервер оновлено, служба працює, API доступний.')

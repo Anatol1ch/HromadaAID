@@ -60,6 +60,9 @@ export const API_ROUTE_POLICIES: readonly ApiRoutePolicy[] = [
   { method: 'PUT', url: '/api/assignments/:id', permissions: ['assignments.manage', 'personal_data.read'] },
   { method: 'POST', url: '/api/assignments/change-statuses', permissions: ['assignments.change_financial_status', 'personal_data.read'] },
 
+  { method: 'GET', url: '/api/assignments/:id/deletion-preview', permissions: ['assignments.delete', 'assignments.read'] },
+  { method: 'POST', url: '/api/assignments/:id/delete', permissions: ['assignments.delete', 'assignments.read'] },
+
   { method: 'GET', url: '/api/statements', permissions: ['statements.generate', 'personal_data.read'] },
   { method: 'POST', url: '/api/statements/snapshot', permissions: ['statements.generate', 'personal_data.read'] },
   { method: 'POST', url: '/api/statements/bank-snapshot', permissions: ['statements.generate', 'personal_data.read'] },

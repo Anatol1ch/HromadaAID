@@ -71,7 +71,7 @@ export async function packageRelease(root = projectRoot) {
     if (identity.version !== version) throw new Error('Extracted ZIP version does not match release version.')
     const setupName = `HromadaAID-Setup-${version}.exe`
     await copyFile(join(release, setupName), join(staged, setupName))
-    const manifest = await writeReleaseManifest(staged, version)
+    const manifest = await writeReleaseManifest(staged, version, apiVersion)
     await verifyReleaseManifest(staged, manifest)
     await rename(staged, output)
     console.log(`Verified release package: ${output}`)

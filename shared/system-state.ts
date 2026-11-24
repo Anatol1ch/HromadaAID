@@ -21,7 +21,7 @@ export function classifyHealthResponse(status: number, body: unknown): 'availabl
   if (isMaintenanceResponse(status, body)) return 'maintenance'
   if (status !== 200 || !body || typeof body !== 'object') return 'unavailable'
   const value = body as Record<string, unknown>
-  const contractVersion = Object.hasOwn(value, 'apiContractVersion') ? value.apiContractVersion : HROMADAAID_API_CONTRACT_VERSION
+  const contractVersion = value.apiContractVersion
   return value.status === 'ok' && value.service === 'hromada-aid-api' && contractVersion === HROMADAAID_API_CONTRACT_VERSION ? 'available' : 'unavailable'
 }
 

@@ -178,7 +178,7 @@ test('one fixed IPv4 HTTP listener accepts current config, preserves SQLite, rej
     assert.deepEqual(listener.address(), { address: '0.0.0.0', family: 'IPv4', port: 4310 })
     const response = await fetch('http://127.0.0.1:4310/health')
     assert.equal(response.status, 200)
-    assert.deepEqual(await response.json(), { status: 'ok', service: 'hromada-aid-api', apiContractVersion: 1 })
+    assert.deepEqual(await response.json(), { status: 'ok', service: 'hromada-aid-api', apiContractVersion: 2 })
     assert.equal((await fetch('http://127.0.0.2:4310/health')).status, 200)
     for (const policy of API_ROUTE_POLICIES) {
       const path = policy.url.replace(/:[^/]+/g, 'synthetic-missing')

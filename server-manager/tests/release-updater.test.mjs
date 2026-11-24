@@ -13,7 +13,7 @@ const setup = Buffer.from('synthetic setup payload')
 const server = Buffer.from('synthetic server zip payload')
 const digest = value => createHash('sha256').update(value).digest('hex')
 const version = '0.1.3'
-const manifest = { formatVersion: 1, version, platform: 'win32', architecture: 'x64', compatibility: { installer: 'hromadaaid-universal-nsis-v1', installModes: ['Client-only', 'Server-only', 'Combined'], api: { contract: 'hromadaaid-rest', version: 1 }, manager: { versionPolicy: 'same-release-version', apiContract: 'hromadaaid-rest', apiContractVersion: 1 } }, artifacts: [
+const manifest = { formatVersion: 1, version, platform: 'win32', architecture: 'x64', compatibility: { installer: 'hromadaaid-universal-nsis-v1', installModes: ['Client-only', 'Server-only', 'Combined'], api: { contract: 'hromadaaid-rest', version: 1, targetVersion: 2 }, manager: { versionPolicy: 'same-release-version', apiContract: 'hromadaaid-rest', apiContractVersion: 1, targetApiContractVersion: 2 } }, artifacts: [
   { component: 'installer', name: `HromadaAID-Setup-${version}.exe`, sizeBytes: setup.length, sha256: digest(setup) },
   { component: 'server', name: `HromadaAID-Server-v${version}-win-x64.zip`, sizeBytes: server.length, sha256: digest(server), packageIntegrity: 'embedded-package-integrity-v1' },
 ] }

@@ -16,6 +16,18 @@ export function cleanPassportInput(value: string): string {
 export type MaskKind = 'phone' | 'bankAccount'
 export const maskPrefix = (kind: MaskKind) => kind === 'phone' ? '+380' : 'UA'
 export const maskLength = (kind: MaskKind) => kind === 'phone' ? 9 : 27
+export function visibleMaskValue(kind: MaskKind, display: string): string {
+  const prefixLength = maskPrefix(kind).length
+  return display.slice(prefixLength + (display.length > prefixLength && display[prefixLength] === ' ' ? 1 : 0))
+}
+export function visibleMaskPosition(kind: MaskKind, display: string, position: number): number {
+  const prefixLength = maskPrefix(kind).length
+  return prefixLength + (display.length > prefixLength && display[prefixLength] === ' ' ? 1 : 0) + position
+}
+export function visibleMaskCaret(kind: MaskKind, display: string, position: number): number {
+  const prefixLength = maskPrefix(kind).length
+  return Math.max(0, position - prefixLength - (display.length > prefixLength && display[prefixLength] === ' ' ? 1 : 0))
+}
 export function formatMask(kind: MaskKind, digits: string): string {
   const groups = kind === 'phone' ? [2, 3, 2, 2] : [2, 6, 19]
   let offset = 0

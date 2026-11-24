@@ -58,6 +58,7 @@ export const PERMISSIONS = [
   'assignments.read',
   'assignments.manage',
   'assignments.change_financial_status',
+  'assignments.delete',
   'dashboard.read',
   'reports.read',
   'planning.read',
@@ -78,7 +79,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   assignment_specialist: [
     'catalogs.read', 'personal_data.read', 'recipients.manage', 'banks.manage',
     'decisions.read', 'decisions.manage', 'assignments.read', 'assignments.manage',
-    'dashboard.read',
+    'assignments.delete', 'dashboard.read',
   ],
   payment_specialist: [
     'personal_data.read', 'dashboard.read', 'statements.generate',

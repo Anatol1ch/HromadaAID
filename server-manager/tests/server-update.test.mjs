@@ -53,23 +53,23 @@ async function fixturePackage(directory, { version = '0.1.0', apiVersion = 1, sc
   }))
 }
 
-function snapshot({ service = 'running', installation = 'installed', confidence = 'confirmed', api = 'available', version = '0.1.0' } = {}) {
+function snapshot({ service = 'running', installation = 'installed', confidence = 'confirmed', api = 'available', version = '0.1.0', apiContractVersion = 1 } = {}) {
   return {
-    installation: { status: installation }, service: { status: service }, api: { status: api, contractVersion: api === 'available' ? 1 : null },
+    installation: { status: installation }, service: { status: service }, api: { status: api, contractVersion: api === 'available' ? apiContractVersion : null },
     configuration: { programDirectory: 'C:\\Program Files\\HromadaAID', dataDirectory: 'D:\\HromadaAID Data', backupDirectory: 'E:\\HromadaAID Backups', databasePath: 'D:\\HromadaAID Data\\Database\\hromada-aid.sqlite', serverVersion: version },
     discovery: { confidence },
   }
 }
 
-function adapters({ current = snapshot(), conflict = false, final, events = [], packageVersion = '0.1.1' } = {}) {
+function adapters({ current = snapshot(), conflict = false, final, events = [], packageVersion = '0.1.1', packageApiVersion = 1 } = {}) {
   let installerCompleted = false
   let candidateIdentity = ''
-  const finalSnapshot = final ?? snapshot({ version: packageVersion })
+  const finalSnapshot = final ?? snapshot({ version: packageVersion, apiContractVersion: packageApiVersion })
   return {
     inspect: async () => installerCompleted ? finalSnapshot : current,
-    extract: async (_zip, destination) => { await mkdir(destination, { recursive: true }); await fixturePackage(destination, { version: packageVersion }) },
+    extract: async (_zip, destination) => { await mkdir(destination, { recursive: true }); await fixturePackage(destination, { version: packageVersion, apiVersion: packageApiVersion }) },
     readCurrentSchema: async () => 4,
-    readInstalledApiContract: async () => 1,
+    readInstalledApiContract: async () => current.api.contractVersion ?? 1,
     readActivePackageIdentity: async () => installerCompleted ? candidateIdentity : 'original-package-identity',
     prepare: async (_environment, extracted) => { candidateIdentity = await readPackageManifestIdentity(extracted); events.push('adapter:prepare') },
     runInstaller: async (_env, report) => { events.push('adapter:installer'); report('stop', 'Штатна зупинка'); report('switch', 'Перемикання'); report('health', 'Перевірка API'); installerCompleted = true },
@@ -142,14 +142,42 @@ test('SemVer precedence handles numeric components, prereleases, numeric identif
 
 test('incompatible contract and outstanding transaction stop before package preparation', async t => {
   const root = await mkdtemp(join(tmpdir(), 'hromada-update-negative-')); t.after(() => rm(root, { recursive: true, force: true }))
-  const incompatible = adapters()
-  incompatible.extract = async (_zip, destination) => { await mkdir(destination, { recursive: true }); await fixturePackage(destination, { apiVersion: 2 }) }
+  const incompatible = adapters({ packageApiVersion: 3 })
   await assert.rejects(prepareServerUpdate(join(root, 'package.zip'), incompatible), { code: 'API_CONTRACT_INCOMPATIBLE' })
   let extracted = false
   const conflict = adapters({ conflict: true })
   conflict.extract = async () => { extracted = true }
   await assert.rejects(prepareServerUpdate(join(root, 'package.zip'), conflict), { code: 'UPDATE_RECOVERY_REQUIRED' })
   assert.equal(extracted, false)
+})
+
+test('Manager upgrades installed API contract v1 to v2 and verifies the target health contract', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'hromada-update-contract-v2-')); t.after(() => rm(root, { recursive: true, force: true }))
+  const io = adapters({ current: snapshot({ version: '1.0.2', apiContractVersion: 1 }), packageVersion: '1.1.0', packageApiVersion: 2 })
+  const prepared = await prepareServerUpdate(join(root, 'server-v2.zip'), io)
+  assert.equal(prepared.preview.currentVersion, '1.0.2')
+  assert.equal(prepared.preview.apiContract, 'hromadaaid-rest v2')
+  const result = await applyServerUpdate(prepared, io, 'contract-v2-update', () => undefined)
+  assert.equal(result.success, true)
+
+  const wrongHealth = adapters({ current: snapshot({ version: '1.0.2', apiContractVersion: 1 }), packageVersion: '1.1.0', packageApiVersion: 2, final: snapshot({ version: '1.1.0', apiContractVersion: 1 }) })
+  const wrongPrepared = await prepareServerUpdate(join(root, 'server-v2-wrong-health.zip'), wrongHealth)
+  const wrongResult = await applyServerUpdate(wrongPrepared, wrongHealth, 'contract-v2-wrong-health', () => undefined)
+  assert.equal(wrongResult.success, false)
+  assert.equal(wrongResult.manualRecoveryRequired, true)
+})
+
+test('a contract change after preview invalidates execution before installer invocation', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'hromada-update-contract-drift-')); t.after(() => rm(root, { recursive: true, force: true }))
+  const io = adapters({ current: snapshot({ version: '1.0.2', apiContractVersion: 1 }), packageVersion: '1.1.0', packageApiVersion: 2 })
+  const prepared = await prepareServerUpdate(join(root, 'server-v2.zip'), io)
+  let installerCalled = false
+  io.inspect = async () => snapshot({ version: '1.0.2', apiContractVersion: 2 })
+  io.runInstaller = async () => { installerCalled = true }
+  const result = await applyServerUpdate(prepared, io, 'contract-v2-drift', () => undefined)
+  assert.equal(result.success, false)
+  assert.equal(result.failureKind, 'preparation')
+  assert.equal(installerCalled, false)
 })
 
 test('partial or uncertain installation is never treated as an update target', async t => {
@@ -169,7 +197,7 @@ test('failed API confirmation reports failure and never reports update success',
 
 test('installer rollback outcome remains distinct from success and manual recovery', async t => {
   const root = await mkdtemp(join(tmpdir(), 'hromada-update-rollback-')); t.after(() => rm(root, { recursive: true, force: true }))
-  const io = adapters()
+  const io = adapters({ current: snapshot({ version: '1.0.2', apiContractVersion: 1 }), packageVersion: '1.1.0', packageApiVersion: 2 })
   io.runInstaller = async () => { throw Object.assign(new Error('Нове оновлення не пройшло перевірку. Попередній серверний пакет відновлено: service failed'), { rollbackConfirmed: true }) }
   const prepared = await prepareServerUpdate(join(root, 'package.zip'), io)
   const result = await applyServerUpdate(prepared, io, 'update-rollback', () => undefined)
