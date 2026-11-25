@@ -18,6 +18,7 @@ $activeServer = Join-Path $ProgramDirectory 'Server'
 $previousServer = Join-Path $ProgramDirectory 'Server.previous'
 $failedServer = Join-Path $ProgramDirectory 'Server.failed'
 $journalPath = Join-Path $DataDirectory '.hromadaaid-update-state.json'
+$residueResolutionLock = Join-Path $ProgramDirectory '.hromadaaid-update-residue-resolution.lock'
 $config = Join-Path $DataDirectory 'server.json'
 $key = Join-Path $BackupDirectory '.hromadaaid-backup-key.dpapi'
 $pendingAdminPath = Join-Path $DataDirectory '.hromadaaid-first-admin-pending.json'
@@ -25,6 +26,7 @@ $aclSnapshots = @{}
 $newServiceRegistered = $false
 $hadOldPackage = [IO.Directory]::Exists($activeServer)
 $initialInstallRetry = $false
+$finalizationFailed = $false
 $wasServiceRunning = $false
 $configurationValidated = $false
 $oldSchemaMaximum = 0
@@ -419,6 +421,7 @@ if ($RecoverUpdate) {
 }
 
 try {
+  if ([IO.File]::Exists($residueResolutionLock) -or [IO.Directory]::Exists($residueResolutionLock)) { throw 'Триває безпечне архівування залишкових файлів оновлення. Встановлення не розпочато.' }
   Set-InstallStage 'validate-inputs'
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
   $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -611,7 +614,14 @@ try {
     $finalizeArguments = if ($initialInstallRetry) { @('--initial-retry', 'true') } else { @() }
     Set-InstallStage 'finalize-update'
     Invoke-PackageTransaction $activeServer 'finalize' $finalizeArguments
-  } catch { [Console]::Error.WriteLine('Сервер пройшов health-перевірку, але попередній пакет або журнал залишено для наступного контрольованого прибирання.') }
+  } catch {
+    $finalizationFailed = $true
+    [Console]::Error.WriteLine('Сервер пройшов health-перевірку, але завершальне очищення не підтверджено. Пакети та журнал залишено без змін для контрольованої перевірки.')
+  }
+  if ($finalizationFailed) {
+    [Console]::Error.WriteLine('Оновлення не позначено як успішне. Не виконуйте повторне оновлення, доки Server Manager не перевірить журнал і службові каталоги.')
+    exit 1
+  }
   Write-Output 'Службу HromadaAIDApi зареєстровано, запущено й перевірено. Попередній пакет видаляється лише після успішної перевірки.'
 } catch {
   $caught = $_

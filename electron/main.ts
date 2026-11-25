@@ -1,17 +1,21 @@
 import { cleanupGeneratedReports, registerReportExportIpc } from './report-export-ipc.js'
 import { app, BrowserWindow, dialog, Menu, screen, shell } from 'electron'
+import { readFile } from 'node:fs/promises'
 import { RemoteAuthSession } from './auth-session.js'
 import { readLastLogin, saveLastLoginAfterSuccessfulLogin } from './client-preferences.js'
 import type { AuthActionResult, ClientAuthState } from '../shared/auth-contract.js'
+import { HROMADAAID_API_CONTRACT_VERSION } from '../shared/api-compatibility.js'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { cleanupGeneratedStatements, registerStatementsIpc } from './statements-ipc.js'
 import { createClientUpdateService } from './client-update-service.js'
+import { createReleaseHistoryService } from './release-history-service.js'
 import { configureIpcSecurity, isTrustedAppUrl, trustedIpcMain } from './ipc-security.js'
 import { ElectronRuntimeConfigError, enforceTlsCertificateValidation, readElectronRuntimeConfig, readSavedConnectionConfig, validateServerBaseUrl, type ElectronRuntimeConfig } from './runtime-config.js'
 import { HttpClient, HttpClientError } from './http-client.js'
 import { getClientWindowAction } from './window-shortcuts.js'
 import { checkServerAddress, switchRemoteServer, type ServerConnectionState } from './connection-config.js'
+import { applyClientZoomAction, isValidClientZoomFactor, readClientZoomPreference, setClientWindowZoomFactor, writeClientZoomPreference } from './client-zoom-preference.js'
 import type { AnnualAidPlan, AnnualPlanEntry, AssignmentListResult, AssignmentRecord, BankDetail, BankRecord, CatalogList, DashboardData, DecisionRecord, DecisionSummary, ProgramApproval, RecipientRecord, RecipientSummary, ReportPeriod, ReportSourceRow, ReportSummary } from './api-contract.js'
 import { isAnnualAidPlanList, isAnnualPlanEntryList, isAssignmentChangeResult, isAssignmentListResult, isAssignmentRecordList, isAssignmentSaveResult, isBankDetailList, isBankRecordList, isBankSaveResult, isCatalogList, isCatalogOrderResult, isCatalogSaveResult, isDashboardData, isDecisionSaveResult, isDecisionSummaryList, isNullableBankRecord, isNullableDecisionRecord, isNullableRecipientRecord, isProgramApprovalList, isProgramApprovalSaveResult, isRecipientSaveResult, isRecipientSummaryList, isReportSourceRowList, isReportSummary, isStatementListResult } from '../shared/api-contract.js'
 
@@ -31,7 +35,16 @@ let remoteHttp: HttpClient | undefined
 let connectionStatus: ServerConnectionState['status'] = 'unknown'
 let connectionMessage: string | undefined
 let connectionFailureReason: ServerConnectionState['failureReason']
+let connectionApiContractVersion: number | undefined
 let savedApiUrl: string | null = null
+let preferredZoomFactor = 1
+let zoomPreferencePath = ''
+let zoomPreferenceWrite = Promise.resolve()
+function persistZoomFactor(factor: number) {
+  if (!zoomPreferencePath || !isValidClientZoomFactor(factor)) return Promise.resolve()
+  zoomPreferenceWrite = zoomPreferenceWrite.catch(() => undefined).then(() => writeClientZoomPreference(zoomPreferencePath, factor))
+  return zoomPreferenceWrite
+}
 const appPageUrl = isDev ? devServerUrl : pathToFileURL(join(currentDirectory, '../../dist/index.html')).href
 configureIpcSecurity(() => mainWindow, appPageUrl)
 
@@ -75,6 +88,15 @@ function createWindow() {
       },
     })
     mainWindow = window
+    window.webContents.setZoomFactor(preferredZoomFactor)
+    window.webContents.on('zoom-changed', () => {
+      if (window.isDestroyed() || window.webContents.isDestroyed()) return
+      const factor = window.webContents.getZoomFactor()
+      if (!isValidClientZoomFactor(factor)) return
+      preferredZoomFactor = factor
+      void persistZoomFactor(factor).catch(error => console.warn('[HromadaAid] Не вдалося зберегти локальний масштаб інтерфейсу.', error))
+      window.webContents.send('window-settings:zoom-changed', factor)
+    })
     window.webContents.on('page-title-updated', event => {
       event.preventDefault()
       if (!window.isDestroyed()) window.setTitle(clientWindowTitle)
@@ -96,9 +118,11 @@ function createWindow() {
       const action = getClientWindowAction(input)
       if (!action) return
       event.preventDefault()
-      if (action === 'zoom-in') window.webContents.setZoomLevel(window.webContents.getZoomLevel() + 0.5)
-      else if (action === 'zoom-out') window.webContents.setZoomLevel(window.webContents.getZoomLevel() - 0.5)
-      else if (action === 'zoom-reset') window.webContents.setZoomLevel(0)
+      if (action === 'zoom-in' || action === 'zoom-out' || action === 'zoom-reset') {
+        const factor = applyClientZoomAction(window.webContents, action === 'zoom-in' ? 'increase' : action === 'zoom-out' ? 'decrease' : 'reset')
+        preferredZoomFactor = factor
+        void persistZoomFactor(factor).catch(error => console.warn('[HromadaAid] Не вдалося зберегти локальний масштаб інтерфейсу.', error))
+      }
       else window.webContents[action]()
     })
     // Leave PDF subframe navigation and Vite's resource/WebSocket requests alone.
@@ -153,10 +177,27 @@ if (!hasSingleInstanceLock) {
       // Remove Electron's default File/Edit/View/Window menu in both dev and packaged Client.
       Menu.setApplicationMenu(null)
       const userDataPath = app.getPath('userData')
+      zoomPreferencePath = userDataPath
+      preferredZoomFactor = await readClientZoomPreference(userDataPath)
+      const releaseChannelPath = app.isPackaged
+        ? join(process.resourcesPath, 'release-channel.json')
+        : join(currentDirectory, '../../assets/release-channel.json')
       const clientUpdates = createClientUpdateService({
-        currentVersion: app.getVersion(), resourcesPath: process.resourcesPath, userDataPath,
+        currentVersion: app.getVersion(), currentApiContractVersion: HROMADAAID_API_CONTRACT_VERSION, resourcesPath: process.resourcesPath, releaseChannelPath, isDevelopment: !app.isPackaged, userDataPath,
         executablePath: app.getPath('exe'), processId: process.pid,
         publish: state => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('client-update:state', state) },
+        probeServerApiContract: async () => {
+          const apiUrl = runtimeConfig?.apiUrl?.origin
+          if (!apiUrl) return { reachable: false }
+          try {
+            const result = await checkServerAddress(apiUrl)
+            if (runtimeConfig?.apiUrl?.origin !== apiUrl) return { reachable: false }
+            const verifiedContract = result.apiContractVersion !== undefined && (result.ok || result.failureReason === 'incompatible')
+            return verifiedContract
+              ? { reachable: true, apiContractVersion: result.apiContractVersion }
+              : { reachable: false }
+          } catch { return { reachable: false } }
+        },
       })
       await clientUpdates.restore()
       trustedIpcMain.handle('client-update:get-state', () => clientUpdates.getState())
@@ -167,6 +208,18 @@ if (!hasSingleInstanceLock) {
         if (result.ok) setTimeout(() => { clientUpdates.markRestarting(); app.quit() }, 300)
         return result
       })
+      let releaseRepository = ''
+      try {
+        const releaseChannel = JSON.parse(await readFile(releaseChannelPath, 'utf8')) as { repository?: unknown }
+        if (typeof releaseChannel.repository === 'string') releaseRepository = releaseChannel.repository
+      } catch { /* Local embedded history remains available if channel metadata cannot be read. */ }
+      const releaseHistory = createReleaseHistoryService({
+        repository: releaseRepository,
+        embeddedHistoryPath: join(currentDirectory, 'release-history.json'),
+        cachePath: join(userDataPath, 'release-history-cache.json'),
+      })
+      trustedIpcMain.handle('release-history:get-local', () => releaseHistory.getLocal())
+      trustedIpcMain.handle('release-history:refresh', () => releaseHistory.refresh())
       setTimeout(() => { void clientUpdates.check() }, 0)
       const updateCheckInterval = setInterval(() => { void clientUpdates.check() }, 3 * 60 * 60 * 1000)
       updateCheckInterval.unref()
@@ -174,9 +227,24 @@ if (!hasSingleInstanceLock) {
       savedApiUrl = savedConnection.config?.apiUrl ?? null
       runtimeConfig = readElectronRuntimeConfig(process.env, savedConnection)
       trustedIpcMain.handle('app:get-version', async () => app.getVersion())
+      trustedIpcMain.handle('window-settings:get-zoom', async () => mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents.getZoomFactor() : preferredZoomFactor)
+      trustedIpcMain.handle('window-settings:set-zoom', async (_event, value: unknown) => {
+        const window = mainWindow
+        if (!window || window.isDestroyed() || window.webContents.isDestroyed()) throw new Error('Вікно застосунку недоступне.')
+        preferredZoomFactor = await setClientWindowZoomFactor(window, value, persistZoomFactor)
+        return preferredZoomFactor
+      })
+      trustedIpcMain.handle('window-settings:adjust-zoom', async (_event, value: unknown) => {
+        if (value !== 'decrease' && value !== 'increase' && value !== 'reset') throw new Error('Недопустима дія зміни масштабу.')
+        const window = mainWindow
+        if (!window || window.isDestroyed() || window.webContents.isDestroyed()) throw new Error('Вікно застосунку недоступне.')
+        preferredZoomFactor = applyClientZoomAction(window.webContents, value)
+        await persistZoomFactor(preferredZoomFactor)
+        return preferredZoomFactor
+      })
       trustedIpcMain.handle('app:open-external', async (_event, value: unknown): Promise<boolean> => {
         if (typeof value !== 'string' || value.length > 300) return false
-        const safe = /^(?:tel:\+380\d{9}|mailto:(?:tech\.vishnsrada@ukr\.net|myronenko\.anatoliu@gmail\.com)|https:\/\/t\.me\/antlmrnnk)$/i.test(value)
+        const safe = /^(?:tel:\+380\d{9}|mailto:(?:tech\.vishnsrada@ukr\.net|myronenko\.anatoliu@gmail\.com)|https:\/\/t\.me\/antlmrnnk)$/i.test(value) || value === 'https://github.com/Anatol1ch/HromadaAID'
         if (!safe) return false
         try { await shell.openExternal(value); return true } catch { return false }
       })
@@ -193,6 +261,7 @@ if (!hasSingleInstanceLock) {
         ...(runtimeConfig?.lockedReason ? { lockedReason: runtimeConfig.lockedReason } : {}),
         status: connectionStatus,
         ...(connectionFailureReason ? { failureReason: connectionFailureReason } : {}),
+        ...(connectionApiContractVersion !== undefined ? { apiContractVersion: connectionApiContractVersion } : {}),
         ...(connectionMessage || runtimeConfig?.configurationError ? { message: connectionMessage ?? runtimeConfig?.configurationError } : {}),
       })
       const publishConnectionState = () => {
@@ -213,6 +282,7 @@ if (!hasSingleInstanceLock) {
         if (activeUrl === normalized.origin) {
           connectionStatus = 'checking'
           connectionFailureReason = undefined
+          connectionApiContractVersion = undefined
           connectionMessage = 'Перевірка підключення…'
           publishConnectionState()
         }
@@ -221,6 +291,7 @@ if (!hasSingleInstanceLock) {
         if (currentUrl === result.apiUrl) {
           connectionStatus = result.status
           connectionFailureReason = result.ok ? undefined : result.failureReason
+          connectionApiContractVersion = result.apiContractVersion
           connectionMessage = result.message
           publishConnectionState()
         }
@@ -236,11 +307,12 @@ if (!hasSingleInstanceLock) {
         try { normalized = validateServerBaseUrl(value) }
         catch (error) { return { ok: false, state: current, message: error instanceof Error ? error.message : 'Некоректна адреса сервера.' } }
         if (!remoteHttp || !remoteAuth) return { ok: false, state: current, message: 'Не вдалося підготувати віддалене підключення.' }
-        const switched = await switchRemoteServer(userDataPath, normalized.origin, remoteHttp, remoteAuth, (url) => {
+        const switched = await switchRemoteServer(userDataPath, normalized.origin, remoteHttp, remoteAuth, (url, apiContractVersion) => {
           runtimeConfig = { apiUrl: url, source: 'saved' }
           savedApiUrl = url.origin
           connectionStatus = 'available'
           connectionFailureReason = undefined
+          connectionApiContractVersion = apiContractVersion
           connectionMessage = 'Сервер доступний.'
         })
         if (!switched.ok) return { ok: false, state: connectionState(), message: switched.message }
@@ -268,6 +340,7 @@ if (!hasSingleInstanceLock) {
           if (runtimeConfig?.apiUrl?.origin !== result.apiUrl) return
           connectionStatus = result.status
           connectionFailureReason = result.ok ? undefined : result.failureReason
+          connectionApiContractVersion = result.apiContractVersion
           connectionMessage = result.message
           publishConnectionState()
           if (!result.ok && session?.currentState.status !== 'authenticated' && session?.currentState.status !== 'password-change-required') session?.setUnavailable(result.message)

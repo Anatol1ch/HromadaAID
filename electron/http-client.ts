@@ -92,7 +92,7 @@ export class HttpClient {
       this.checkConnectionGeneration(requestGeneration)
       const timedOut = error instanceof DOMException && error.name === 'TimeoutError'
       const message = safeTransportErrorMessage(error, timedOut) ?? 'Не вдалося підключитися до сервера.'
-      const failureReason = timedOut ? 'timeout' : message !== 'Не вдалося підключитися до сервера.' ? 'incompatible' : 'network'
+      const failureReason = timedOut ? 'timeout' : 'network'
       this.options.onConnectionStatus?.('unavailable', failureReason)
       if (diagnosePasswordChange) console.info('[HromadaAID test] password-change: transport error (no confirmed response)')
       throw new HttpClientError(message)

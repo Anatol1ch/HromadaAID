@@ -5,15 +5,15 @@ import { HttpClient, HttpClientError } from './http-client.js'
 import { checkServerAddress } from './connection-config.js'
 
 test('system status distinguishes maintenance from connectivity and ordinary HTTP errors', () => {
-  assert.equal(classifyHealthFailure(200, { status: 'ok', service: 'hromada-aid-api' }), 'incompatible')
+  assert.equal(classifyHealthFailure(200, { status: 'ok', service: 'hromada-aid-api' }), 'http')
   assert.equal(classifyHealthFailure(200, { status: 'ok', service: 'hromada-aid-api', apiContractVersion: 1 }), 'incompatible')
   assert.equal(classifyHealthResponse(200, { status: 'ok', service: 'hromada-aid-api', apiContractVersion: 2 }), 'available')
   assert.equal(classifyHealthFailure(200, { status: 'ok', service: 'hromada-aid-api', apiContractVersion: 3 }), 'incompatible')
-  assert.equal(classifyHealthFailure(200, { status: 'ok', service: 'hromada-aid-api', apiContractVersion: null }), 'incompatible')
+  assert.equal(classifyHealthFailure(200, { status: 'ok', service: 'hromada-aid-api', apiContractVersion: null }), 'http')
   assert.equal(classifyHealthResponse(503, { code: RESTORE_MAINTENANCE_CODE, message: 'Сервер у режимі відновлення.' }), 'maintenance')
   assert.equal(classifyHealthResponse(503, { message: 'Інша помилка сервера.' }), 'unavailable')
   assert.equal(classifyHealthFailure(500, { message: 'failure' }), 'http')
-  assert.equal(classifyHealthFailure(200, { status: 'ok', service: 'other' }), 'incompatible')
+  assert.equal(classifyHealthFailure(200, { status: 'ok', service: 'other' }), 'http')
   assert.equal(classifyHealthFailure(503, { code: RESTORE_MAINTENANCE_CODE }), 'maintenance')
   assert.equal(classifyHttpReachability(401, {}), 'available')
   assert.equal(classifyHttpReachability(403, {}), 'available')

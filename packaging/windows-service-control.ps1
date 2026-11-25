@@ -10,6 +10,8 @@ $serverDirectory = Join-Path $ProgramDirectory 'Server'
 $wrapper = Join-Path $serverDirectory 'service\HromadaAIDService.exe'
 
 try {
+  $residueResolutionLock = Join-Path $ProgramDirectory '.hromadaaid-update-residue-resolution.lock'
+  if ([IO.File]::Exists($residueResolutionLock) -or [IO.Directory]::Exists($residueResolutionLock)) { throw 'Триває безпечне архівування залишкових файлів оновлення. Повторіть операцію пізніше.' }
   if ($Action -eq 'stop-before-update') {
     if ($UpdateJournalPath -and [IO.File]::Exists($UpdateJournalPath)) { throw 'Виявлено журнал попередньої операції сервера. Інсталяцію зупинено без змін; потрібне контрольоване відновлення за журналом.' }
     $staleStage = Join-Path $ProgramDirectory 'Server.next'

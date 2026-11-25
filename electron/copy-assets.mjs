@@ -1,16 +1,22 @@
-import { copyFileSync, mkdirSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildEmbeddedReleaseHistory } from '../scripts/build-release-history.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const outputShared = join(root, 'dist-electron', 'shared')
 mkdirSync(outputShared, { recursive: true })
 copyFileSync(join(root, 'shared/server-base-url.mjs'), join(outputShared, 'server-base-url.mjs'))
 copyFileSync(join(root, 'shared', 'release-updates.mjs'), join(outputShared, 'release-updates.mjs'))
+copyFileSync(join(root, 'shared', 'release-history.mjs'), join(outputShared, 'release-history.mjs'))
 copyFileSync(join(root, 'shared', 'windows-update-launcher.mjs'), join(outputShared, 'windows-update-launcher.mjs'))
 const output = join(root, 'dist-electron', 'electron')
 const outputReference = join(output, 'reference')
 mkdirSync(outputReference, { recursive: true })
+const currentReleaseVersion = process.env.HROMADAAID_EMBED_CURRENT_RELEASE === 'true'
+  ? JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
+  : undefined
+await buildEmbeddedReleaseHistory({ outputPath: join(output, 'release-history.json'), currentReleaseVersion })
 copyFileSync(join(root, 'electron', 'excel-templates.ps1'), join(output, 'excel-templates.ps1'))
 copyFileSync(join(root, 'electron', 'excel-privatbank.ps1'), join(output, 'excel-privatbank.ps1'))
 copyFileSync(join(root, 'electron', 'excel-report.ps1'), join(output, 'excel-report.ps1'))

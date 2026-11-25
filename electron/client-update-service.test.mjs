@@ -21,6 +21,29 @@ const manifest = { formatVersion: 1, version: '0.1.3', platform: 'win32', archit
 ] }
 const response = (url, json) => ({ ok: true, status: 200, url: String(url), json: async () => json, text: async () => JSON.stringify(json) })
 
+function nextContractRelease(targetApiContractVersion = 3) {
+  const nextManifest = structuredClone(manifest)
+  nextManifest.compatibility.api.targetVersion = targetApiContractVersion
+  nextManifest.compatibility.manager.targetApiContractVersion = targetApiContractVersion
+  return nextManifest
+}
+
+function updateFetch(nextManifest) {
+  return async url => {
+    if (String(url).endsWith('/releases/latest')) return response(url, release)
+    if (String(url).endsWith('release-manifest.json')) return response(url, nextManifest)
+    return { ...response(url), body: Readable.from([bytes]) }
+  }
+}
+
+async function createTransitionService(root, { nextManifest = nextContractRelease(), probeServerApiContract, spawnProcess } = {}) {
+  const resourcesPath = join(root, 'resources'), userDataPath = join(root, 'userdata')
+  await mkdir(resourcesPath, { recursive: true }); await mkdir(userDataPath, { recursive: true })
+  await writeFile(join(resourcesPath, 'release-channel.json'), JSON.stringify({ repository: 'owner/repo' }))
+  await writeFile(join(resourcesPath, 'client-update-launcher.ps1'), 'fixture')
+  return createClientUpdateService({ currentVersion: '0.1.2', resourcesPath, userDataPath, executablePath: join(root, 'HromadaAID.exe'), processId: 99, publish: () => {}, fetchImpl: updateFetch(nextManifest), probeServerApiContract, spawnProcess })
+}
+
 test('client update serializes checks, persists confirmed updates, verifies downloads, and prepares the launcher', async () => {
   const root = await mkdtemp(join(tmpdir(), 'hromada-client-update-'))
   const resourcesPath = join(root, 'resources'), userDataPath = join(root, 'userdata')
@@ -95,5 +118,119 @@ test('client update serializes checks, persists confirmed updates, verifies down
     assert.equal(failedLauncher.getState().status, 'error')
     const failedEvents = (await readFile(join(userDataPath, 'updates', 'installer-launcher.log'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
     assert.ok(failedEvents.some(event => event.stage === 'powershell-process-error'))
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('missing development release channel is reported neutrally without exposing a local path', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hromada-client-update-dev-channel-'))
+  const resourcesPath = join(root, 'resources'), userDataPath = join(root, 'userdata')
+  await mkdir(resourcesPath)
+  const service = createClientUpdateService({ currentVersion: '1.1.1', resourcesPath, releaseChannelPath: join(root, 'assets', 'release-channel.json'), isDevelopment: true, userDataPath, executablePath: 'unused', processId: 47, publish: () => {} })
+  try {
+    const result = await service.check()
+    assert.equal(result.status, 'error')
+    assert.equal(result.error, 'Перевірка оновлень недоступна в режимі розробки.')
+    assert.equal(result.error.includes(root), false)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('missing production release channel remains an installation error without exposing a local path', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hromada-client-update-prod-channel-'))
+  const resourcesPath = join(root, 'resources'), userDataPath = join(root, 'userdata')
+  await mkdir(resourcesPath)
+  const service = createClientUpdateService({ currentVersion: '1.1.1', resourcesPath, userDataPath, executablePath: 'unused', processId: 48, publish: () => {} })
+  try {
+    const result = await service.check()
+    assert.equal(result.status, 'error')
+    assert.match(result.error ?? '', /конфігурацію оновлень/)
+    assert.equal(result.error?.includes(root), false)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('a future API contract is deferred while the current compatible server remains usable, then allowed after server upgrade', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hromada-update-contract-wait-'))
+  let serverContract = 2
+  try {
+    const service = await createTransitionService(root, { probeServerApiContract: async () => ({ reachable: true, apiContractVersion: serverContract }) })
+    let state = await service.check()
+    assert.equal(state.status, 'waiting-for-server')
+    assert.equal(state.confirmed, false)
+    assert.equal(state.updateDeferralReason, 'server-contract')
+    assert.equal(state.canContinue, true)
+    serverContract = 3
+    state = await service.check()
+    assert.equal(state.status, 'available')
+    assert.equal(state.confirmed, true)
+    assert.equal(state.targetVersion, '0.1.3')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('a future-contract update is deferred when the API is unavailable', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hromada-update-contract-offline-'))
+  try {
+    const service = await createTransitionService(root, { probeServerApiContract: async () => ({ reachable: false }) })
+    const state = await service.check()
+    assert.equal(state.status, 'waiting-for-server')
+    assert.equal(state.confirmed, false)
+    assert.equal(state.updateDeferralReason, 'server-unavailable')
+    assert.equal(state.canContinue, false)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('a future-contract update is allowed when the fresh server probe confirms its contract, including to resolve current incompatibility', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hromada-update-contract-ready-'))
+  try {
+    const service = await createTransitionService(root, { probeServerApiContract: async () => ({ reachable: true, apiContractVersion: 3 }) })
+    const state = await service.check()
+    assert.equal(state.status, 'available')
+    assert.equal(state.confirmed, true)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('an existing automatic or manual check revalidates a confirmed cross-contract update', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hromada-update-contract-recheck-'))
+  let serverContract = 3
+  try {
+    const service = await createTransitionService(root, { probeServerApiContract: async () => ({ reachable: true, apiContractVersion: serverContract }) })
+    assert.equal((await service.check()).status, 'available')
+    serverContract = 2
+    const deferred = await service.check()
+    assert.equal(deferred.status, 'waiting-for-server')
+    assert.equal(deferred.confirmed, false)
+    serverContract = 3
+    assert.equal((await service.check()).status, 'available')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('missing or invalid target contract metadata never confirms an update', async () => {
+  for (const target of [null, Number.MAX_SAFE_INTEGER + 1]) {
+    const root = await mkdtemp(join(tmpdir(), 'hromada-update-contract-invalid-'))
+    try {
+      const nextManifest = nextContractRelease(target)
+      const service = await createTransitionService(root, { nextManifest, probeServerApiContract: async () => ({ reachable: true, apiContractVersion: 3 }) })
+      const state = await service.check()
+      assert.equal(state.status, 'error')
+      assert.equal(state.confirmed, false)
+    } finally { await rm(root, { recursive: true, force: true }) }
+  }
+})
+
+test('install rechecks the server contract after download and refuses if it changed', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hromada-update-contract-race-'))
+  let serverContract = 3
+  let spawnCalls = 0
+  try {
+    const service = await createTransitionService(root, {
+      probeServerApiContract: async () => ({ reachable: true, apiContractVersion: serverContract }),
+      spawnProcess: () => { spawnCalls++; throw new Error('must not launch') },
+    })
+    assert.equal((await service.check()).status, 'available')
+    assert.equal((await service.download()).status, 'ready')
+    serverContract = 2
+    const result = await service.install()
+    assert.equal(result.ok, false)
+    assert.equal(result.state?.status, 'waiting-for-server')
+    assert.equal(result.state?.confirmed, false)
+    assert.equal(spawnCalls, 0)
   } finally { await rm(root, { recursive: true, force: true }) }
 })

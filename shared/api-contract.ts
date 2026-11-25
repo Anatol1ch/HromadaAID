@@ -301,20 +301,28 @@ export type ServerConnectionState = {
   status: import('./system-state.js').ConnectionStatus
   failureReason?: import('./system-state.js').ConnectionFailureReason
   message?: string
+  apiContractVersion?: number
 }
-export type ServerConnectionCheckResult = { ok: true; apiUrl: string; message: string; status: 'available' } | { ok: false; apiUrl?: string; message: string; status: 'unavailable' | 'maintenance'; failureReason: import('./system-state.js').ConnectionFailureReason }
+export type ServerConnectionCheckResult = { ok: true; apiUrl: string; message: string; status: 'available'; apiContractVersion?: number } | { ok: false; apiUrl?: string; message: string; status: 'unavailable' | 'maintenance'; failureReason: import('./system-state.js').ConnectionFailureReason; apiContractVersion?: number }
 export type ServerConnectionSaveResult = { ok: true; state: ServerConnectionState; message?: string } | { ok: false; state: ServerConnectionState; message: string }
 
 export type HromadaAidApi = {
   appName: string; platform: string
   appInfo: { getVersion: () => Promise<string>; openExternal: (url: string) => Promise<boolean> }
+  windowSettings: {
+    getZoomFactor: () => Promise<number>
+    setZoomFactor: (factor: number) => Promise<number>
+    adjustZoom: (action: 'decrease' | 'increase' | 'reset') => Promise<number>
+    onZoomChange: (listener: (factor: number) => void) => () => void
+  }
   clientUpdates: {
     getState: () => Promise<ClientUpdateState>
     check: () => Promise<ClientUpdateState>
     download: () => Promise<ClientUpdateState>
-    install: () => Promise<{ ok: boolean; message?: string }>
+    install: () => Promise<{ ok: boolean; message?: string; state?: ClientUpdateState }>
     onStateChange: (listener: (state: ClientUpdateState) => void) => () => void
   }
+  releaseHistory: { getLocal: () => Promise<ReleaseHistorySnapshot>; refresh: () => Promise<ReleaseHistorySnapshot> }
   auth: {
     getState: () => Promise<ClientAuthState>
     getLastLogin: () => Promise<string | null>
@@ -352,7 +360,7 @@ export type HromadaAidApi = {
 }
 
 export type ClientUpdateState = {
-  status: 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'verifying' | 'ready' | 'preparing' | 'installing' | 'restarting' | 'error'
+  status: 'idle' | 'checking' | 'up-to-date' | 'waiting-for-server' | 'available' | 'downloading' | 'verifying' | 'ready' | 'preparing' | 'installing' | 'restarting' | 'error'
   currentVersion: string
   checkedAt?: string
   targetVersion?: string
@@ -360,5 +368,10 @@ export type ClientUpdateState = {
   receivedBytes?: number
   totalBytes?: number
   error?: string
+  updateDeferralReason?: 'server-contract' | 'server-unavailable' | 'compatibility-unconfirmed'
+  canContinue?: boolean
   confirmed: boolean
 }
+
+export type ReleaseHistoryEntry = { version: string; name: string; publishedAt?: string; body: string }
+export type ReleaseHistorySnapshot = { entries: ReleaseHistoryEntry[]; source: 'github' | 'cache' | 'embedded' | 'empty'; refreshedAt?: string; refreshError?: string }

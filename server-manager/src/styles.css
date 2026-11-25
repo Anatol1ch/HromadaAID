@@ -105,6 +105,41 @@
 .sm-discovery-summary strong { color: #173f32; }
 .sm-discovery-summary p { grid-column: 1 / -1; margin: 0; color: #60736c; overflow-wrap: anywhere; }
 .sm-muted { color: var(--color-text-secondary); font-size: 13px; line-height: 1.6; margin: 0; }
+.sm-update-artifacts-notice { align-items: flex-start; }
+.sm-update-artifacts-notice .ui-alert-content { display: grid; min-width: 0; gap: 10px; }
+.sm-update-artifacts-notice h2 { margin: 0; color: var(--feedback-warning-text); font-size: 15px; line-height: 1.4; }
+.sm-update-artifacts-notice p { margin: 0; }
+.sm-update-artifact-details { display: grid; min-width: 0; gap: 8px; padding-top: 10px; border-top: 1px solid var(--feedback-warning-border); }
+.sm-update-artifact-details > strong { font-size: 12px; }
+.sm-update-artifact-details ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.sm-update-artifact-details li { display: grid; min-width: 0; gap: 2px; }
+.sm-update-artifact-details code, .sm-update-journal-state code { color: var(--color-text-control); font: 12px/1.45 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; user-select: text; }
+.sm-update-artifact-details small { color: var(--color-text-secondary); font-size: 11px; }
+.sm-update-journal-state { overflow-wrap: anywhere; }
+.sm-update-artifact-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.sm-update-artifact-actions .secondary-button { display: inline-flex; align-items: center; gap: 7px; height: 34px; min-height: 34px; padding: 0 10px; font-size: 12px; }
+.sm-update-artifact-actions .secondary-button:disabled { opacity: .55; cursor: not-allowed; }
+.sm-update-artifact-feedback { color: var(--feedback-info-text); font-size: 12px; }
+.sm-residue-confirmation .sm-modal-body { display: grid; gap: 18px; }
+.sm-residue-confirmation-content { display: grid; gap: 18px; min-width: 0; }
+.sm-residue-intro { color: var(--color-text-control); font-size: 13px; line-height: 1.55; }
+.sm-residue-section { display: grid; gap: 8px; min-width: 0; }
+.sm-residue-section h3, .sm-residue-preservation h3 { margin: 0; color: var(--color-text-control); font-size: 13px; font-weight: 650; line-height: 1.4; }
+.sm-residue-artifact-list { display: grid; gap: 0; min-width: 0; margin: 0; padding: 0; overflow: hidden; list-style: none; border: 1px solid var(--border-surface); border-radius: var(--radius-control); background: var(--surface-card); }
+.sm-residue-artifact-list li { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 10px; min-width: 0; padding: 10px 12px; }
+.sm-residue-artifact-list li + li { border-top: 1px solid var(--border-surface); }
+.sm-residue-artifact-list li > svg { margin-top: 2px; color: var(--color-text-secondary); }
+.sm-residue-artifact-text { display: grid; gap: 3px; min-width: 0; }
+.sm-residue-artifact-text strong { color: var(--color-text-control); font-size: 12px; font-weight: 650; line-height: 1.4; }
+.sm-residue-artifact-text code, .sm-residue-path code { min-width: 0; color: var(--color-text-secondary); font: 11px/1.5 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; word-break: break-word; user-select: text; }
+.sm-residue-path { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 10px; min-width: 0; padding: 10px 12px; border: 1px solid var(--border-surface); border-radius: var(--radius-control); background: var(--surface-panel); }
+.sm-residue-path > svg { margin-top: 1px; color: var(--color-text-secondary); }
+.sm-residue-preservation { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 10px; min-width: 0; padding: 12px 14px; border: 1px solid var(--feedback-success-border); border-radius: var(--radius-control); background: var(--feedback-success-bg); color: var(--feedback-success-text); }
+.sm-residue-preservation > svg { margin-top: 1px; color: var(--feedback-success-text); }
+.sm-residue-preservation h3 { color: var(--feedback-success-text); }
+.sm-residue-preservation p { margin: 3px 0 0; color: var(--feedback-success-text); font-size: 12px; line-height: 1.5; }
+.sm-residue-confirmation .sm-modal-footer > button { min-height: 36px; height: 36px; gap: 7px; padding: 0 13px; border-radius: var(--button-radius); font-size: 12px; }
+.sm-residue-confirmation .sm-modal-footer > .primary-button { font-weight: 650; }
 .sm-table-wrap { min-width: 0; width: 100%; }
 .sm-events { width: 100%; table-layout: fixed; border-collapse: collapse; text-align: left; }
 .sm-events th { background: var(--surface-app); color: var(--color-text-control); font-size: 12px; font-weight: 500; padding: 8px; }

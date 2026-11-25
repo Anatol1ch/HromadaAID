@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { cp, lstat, mkdir, readFile, rm, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -6,8 +7,11 @@ import { inspectEnvironment, parseServerConfiguration } from './inspection-engin
 import { createWindowsInspectionAdapters } from './windows-inspection.js'
 import type { ServerUpdateAdapters, ServerUpdateEnvironment } from './server-update.js'
 import type { ServerUpdateStage } from './server-update-contract.js'
-import { verifyUpdatePackage, readInstalledPackageIdentity } from './server-update.js'
+import { verifyUpdatePackage, readInstalledPackageIdentity, readPackageManifestIdentity } from './server-update.js'
 import { parseInstallerDiagnostic } from './server-install-diagnostic.js'
+
+const updateJournalName = '.hromadaaid-update-state.json'
+const residueResolutionLockName = '.hromadaaid-update-residue-resolution.lock'
 
 const extractionScript = String.raw`
 $ErrorActionPreference = 'Stop'
@@ -136,6 +140,13 @@ export function normalizePowerShellDiagnostic(value: string): string {
   return decoded.join('\n').trim().replace(/(password|token|secret|recovery.?key|private.?key|dpapi.?key|bearer)(\s*[:=]\s*)[^\s,;]+/gi, '$1$2[redacted]')
 }
 
+async function verifiedInstalledIdentity(root: string): Promise<string> {
+  const script = `import {join} from 'node:path';import {pathToFileURL} from 'node:url';const root=process.argv[1];const {verifyServerPackage}=await import(pathToFileURL(join(root,'installer/verify-server-package.mjs')).href);await verifyServerPackage(root);console.log('PACKAGE_VERIFIED');`
+  const result = await run(join(root, 'runtime', 'node.exe'), ['--input-type=module', '--eval', script, root], join(root, 'app'), 120_000)
+  if (result.stdout.trim() !== 'PACKAGE_VERIFIED') throw new Error('Не вдалося підтвердити цілісність активного серверного пакета.')
+  return readInstalledPackageIdentity(root)
+}
+
 export function createWindowsServerUpdateAdapters(options: { installerScriptPath?: string } = {}): ServerUpdateAdapters {
   return {
     inspect: () => inspectEnvironment(createWindowsInspectionAdapters()),
@@ -175,10 +186,21 @@ export function createWindowsServerUpdateAdapters(options: { installerScriptPath
       const root = join(environment.programDirectory, 'Server')
       // Reuse the installed verifier to hash-check all declared program files;
       // generated WinSW XML is intentionally outside the archive manifests.
-      const script = `import {join} from 'node:path';import {pathToFileURL} from 'node:url';const root=process.argv[1];const {verifyServerPackage}=await import(pathToFileURL(join(root,'installer/verify-server-package.mjs')).href);await verifyServerPackage(root);console.log('PACKAGE_VERIFIED');`
-      const result = await run(join(root, 'runtime', 'node.exe'), ['--input-type=module', '--eval', script, root], join(root, 'app'), 120_000)
-      if (result.stdout.trim() !== 'PACKAGE_VERIFIED') throw new Error('Не вдалося підтвердити цілісність установленого пакета сервера.')
-      return readInstalledPackageIdentity(root)
+      return verifiedInstalledIdentity(root)
+    },
+    discardPreparedStage: async (environment, expectedActiveIdentity, expectedCandidateIdentity) => {
+      const activeStage = join(environment.programDirectory, 'Server.next')
+      for (const path of [join(environment.programDirectory, 'Server.previous'), join(environment.programDirectory, 'Server.failed'), join(environment.programDirectory, residueResolutionLockName), join(environment.dataDirectory, updateJournalName)]) {
+        if (await lstat(path).then(() => true, error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error })) throw new Error('Знайдено іншу транзакцію; підготовлений пакет не видалено.')
+      }
+      if (await verifiedInstalledIdentity(join(environment.programDirectory, 'Server')) !== expectedActiveIdentity) throw new Error('Активний пакет змінився; Server.next збережено.')
+      const info = await lstat(activeStage)
+      if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Server.next не є звичайним каталогом; файли залишено.')
+      if (await readPackageManifestIdentity(activeStage) !== expectedCandidateIdentity) throw new Error('Server.next не збігається з перевіреним пакетом; файли залишено.')
+      const serviceXml = await readFile(join(activeStage, 'service', 'HromadaAIDService.xml'))
+      await verifyUpdatePackage(activeStage, { serviceXmlSha256: createHash('sha256').update(serviceXml).digest('hex') })
+      await rm(activeStage, { recursive: true, force: false })
+      if (await lstat(activeStage).then(() => true, error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error })) throw new Error('Не вдалося підтвердити очищення підготовленого Server.next.')
     },
     prepare: async (environment, extractedPackage) => {
       const verified = await verifyUpdatePackage(extractedPackage)

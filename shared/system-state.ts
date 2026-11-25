@@ -28,7 +28,11 @@ export function classifyHealthResponse(status: number, body: unknown): 'availabl
 export function classifyHealthFailure(status: number, body: unknown): Exclude<ConnectionFailureReason, 'network' | 'timeout'> {
   if (isMaintenanceResponse(status, body)) return 'maintenance'
   if (status !== 200) return 'http'
-  return classifyHealthResponse(status, body) === 'available' ? 'http' : 'incompatible'
+  if (!body || typeof body !== 'object') return 'http'
+  const value = body as Record<string, unknown>
+  return value.status === 'ok' && value.service === 'hromada-aid-api' && Number.isSafeInteger(value.apiContractVersion) && value.apiContractVersion !== HROMADAAID_API_CONTRACT_VERSION
+    ? 'incompatible'
+    : 'http'
 }
 
 /** Coalesces user-triggered and scheduled checks into one in-flight probe. */

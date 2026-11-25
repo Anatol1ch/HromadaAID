@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld('hromadaManager', Object.freeze({
     return () => ipcRenderer.removeListener('manager:release-update-state', handler)
   },
   recoveryStatus: () => ipcRenderer.invoke('manager:recovery-status'),
+  openUpdateArtifactsDirectory: () => ipcRenderer.invoke('manager:open-update-artifacts-directory'),
+  copyUpdateDiagnostics: text => ipcRenderer.invoke('manager:copy-update-diagnostics', text),
+  prepareUpdateResidueResolution: () => ipcRenderer.invoke('manager:prepare-update-residue-resolution'),
+  resolveUpdateResidues: confirmed => ipcRenderer.invoke('manager:resolve-update-residues', confirmed),
   recoverOperation: (kind, confirmed) => ipcRenderer.invoke('manager:recover-operation', { kind, confirmed }),
   onRecoveryProgress: listener => {
     const handler = (_event, value) => listener(value)

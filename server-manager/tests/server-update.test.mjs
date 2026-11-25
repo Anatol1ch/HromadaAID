@@ -391,7 +391,7 @@ test('Windows PowerShell 5.1 emits parseable Ukrainian structured install diagno
 
 test('existing service installer stops only after validations and keeps failures before transaction from stopping service', async () => {
   const source = (await readFile(join(process.cwd(), 'packaging/install-server-service.ps1'), 'utf8')).replace(/\r\n/g, '\n')
-  const normal = source.slice(source.indexOf("\ntry {\n  Set-InstallStage 'validate-inputs'"))
+  const normal = source.slice(source.indexOf("\ntry {\n  if ([IO.File]::Exists($residueResolutionLock)"))
   assert.ok(normal.indexOf("Set-InstallStage 'inspect-database-and-create-admin'") < normal.indexOf("Set-InstallStage 'stop-service'"))
   assert.ok(normal.indexOf("Set-InstallStage 'stop-service'") < normal.indexOf("Set-InstallStage 'prepare-package-journal'"))
   assert.match(source, /\$transactionStarted = .*\$previousServer.*\$failedServer.*\$newServiceRegistered/)

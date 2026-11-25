@@ -21,7 +21,7 @@ export async function checkServerAddress(value: unknown, timeoutMs = 3_500): Pro
   } catch (error) {
     const timedOut = error instanceof DOMException && error.name === 'TimeoutError'
     const transportMessage = safeTransportErrorMessage(error, timedOut)
-    return { ok: false, apiUrl: base.origin, status: 'unavailable', failureReason: transportMessage && !timedOut ? 'incompatible' : timedOut ? 'timeout' : 'network', message: transportMessage ?? 'Не вдалося підключитися до сервера.' }
+    return { ok: false, apiUrl: base.origin, status: 'unavailable', failureReason: timedOut ? 'timeout' : 'network', message: transportMessage ?? 'Не вдалося підключитися до сервера.' }
   }
   let body: unknown
   try { body = await response.json() }
@@ -29,13 +29,16 @@ export async function checkServerAddress(value: unknown, timeoutMs = 3_500): Pro
     const timedOut = error instanceof DOMException && error.name === 'TimeoutError'
     return { ok: false, apiUrl: base.origin, status: 'unavailable', failureReason: timedOut ? 'timeout' : 'http', message: timedOut ? 'Сервер не відповів у встановлений час.' : 'Сервер повернув некоректну відповідь.' }
   }
+  const apiContractVersion = body && typeof body === 'object' && Number.isSafeInteger((body as Record<string, unknown>).apiContractVersion)
+    ? (body as { apiContractVersion: number }).apiContractVersion
+    : undefined
   const status = classifyHealthResponse(response.status, body)
-  if (status === 'maintenance') return { ok: false, apiUrl: base.origin, status, failureReason: 'maintenance', message: 'Сервер тимчасово виконує технічне обслуговування.' }
+  if (status === 'maintenance') return { ok: false, apiUrl: base.origin, status, failureReason: 'maintenance', message: 'Сервер тимчасово виконує технічне обслуговування.', ...(apiContractVersion !== undefined ? { apiContractVersion } : {}) }
   if (status !== 'available') {
     const failureReason = classifyHealthFailure(response.status, body)
-    return { ok: false, apiUrl: base.origin, status: 'unavailable', failureReason, message: failureReason === 'http' ? 'Сервер відповів помилкою під час перевірки доступності.' : 'За цією адресою не виявлено сумісний сервер HromadaAID.' }
+    return { ok: false, apiUrl: base.origin, status: 'unavailable', failureReason, message: failureReason === 'http' ? 'Сервер відповів помилкою під час перевірки доступності.' : 'За цією адресою не виявлено сумісний сервер HromadaAID.', ...(apiContractVersion !== undefined ? { apiContractVersion } : {}) }
   }
-  return { ok: true, apiUrl: base.origin, status, message: 'Сервер доступний.' }
+  return { ok: true, apiUrl: base.origin, status, message: 'Сервер доступний.', ...(apiContractVersion !== undefined ? { apiContractVersion } : {}) }
 }
 
 /** Atomically replaces a URL-only client config in Electron userData. */
@@ -60,7 +63,7 @@ export async function saveServerAddress(userDataPath: string, apiUrl: string): P
 }
 
 /** Checks a new origin without credentials, revokes the old session, then commits and activates it. */
-export async function switchRemoteServer(userDataPath: string, value: string, http: HttpClient, session: RemoteAuthSession, onConfigured: (url: URL) => void): Promise<{ ok: true; apiUrl: string; message?: string } | { ok: false; message: string }> {
+export async function switchRemoteServer(userDataPath: string, value: string, http: HttpClient, session: RemoteAuthSession, onConfigured: (url: URL, apiContractVersion?: number) => void): Promise<{ ok: true; apiUrl: string; message?: string; apiContractVersion?: number } | { ok: false; message: string }> {
   const checked = await checkServerAddress(value)
   if (!checked.ok) return { ok: false, message: checked.message }
   const nextUrl = validateServerBaseUrl(checked.apiUrl)
@@ -74,12 +77,13 @@ export async function switchRemoteServer(userDataPath: string, value: string, ht
       return { ok: false, message }
     }
     http.setBaseUrl(nextUrl)
-    onConfigured(nextUrl)
+    onConfigured(nextUrl, checked.apiContractVersion)
     const logoutWarning = !logoutResult.ok ? 'Адресу змінено. Старий сервер був недоступний для відкликання сесії; увійдіть до нового сервера.' : undefined
     await session.serverChanged(logoutWarning)
     return {
       ok: true,
       apiUrl: nextUrl.origin,
+      ...(checked.apiContractVersion !== undefined ? { apiContractVersion: checked.apiContractVersion } : {}),
       ...(logoutWarning ? { message: logoutWarning } : {}),
     }
   } finally {

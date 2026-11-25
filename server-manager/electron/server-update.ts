@@ -16,6 +16,7 @@ export type ServerUpdateAdapters = {
   readInstalledApiContract(programDirectory: string): Promise<number>
   readActivePackageIdentity(environment: ServerUpdateEnvironment): Promise<string>
   prepare(environment: ServerUpdateEnvironment, extractedPackage: string): Promise<void>
+  discardPreparedStage(environment: ServerUpdateEnvironment, activeIdentity: string, candidateIdentity: string): Promise<void>
   runInstaller(environment: ServerUpdateEnvironment, report: (stage: ServerUpdateStage, message: string) => void): Promise<void>
   cleanup(path: string): Promise<void>
   pathExists(path: string): Promise<boolean>
@@ -24,6 +25,7 @@ export type ServerUpdateAdapters = {
 
 const forbiddenStagingNames = ['Server.next', 'Server.previous', 'Server.failed'] as const
 const updateJournalName = '.hromadaaid-update-state.json'
+const residueResolutionLockName = '.hromadaaid-update-residue-resolution.lock'
 const expectedFiles = [
   'runtime/node.exe', 'service/HromadaAIDService.exe', 'service/HromadaAIDService.xml.template',
   'app/package.json', 'app/dist/server/src/create-admin.js', 'app/dist/electron/database.js', 'app/dist/shared/api-compatibility.js',
@@ -211,7 +213,7 @@ export async function prepareServerUpdate(zipPath: string, adapters: ServerUpdat
   if (!zipPath || !zipPath.toLocaleLowerCase('en-US').endsWith('.zip')) throw fail('UPDATE_ARCHIVE_INVALID', 'Виберіть ZIP-файл серверного пакета.')
   const environment = await environmentFrom(await adapters.inspect(), adapters)
   const program = resolve(environment.programDirectory), data = resolve(environment.dataDirectory)
-  const conflicts = [...forbiddenStagingNames.map(name => join(program, name)), join(data, updateJournalName)]
+  const conflicts = [...forbiddenStagingNames.map(name => join(program, name)), join(program, residueResolutionLockName), join(data, updateJournalName)]
   for (const path of conflicts) if (await adapters.pathExists(path)) throw fail('UPDATE_RECOVERY_REQUIRED', 'Виявлено залишки попереднього оновлення. Спершу перевірте стан сервера у розділі «Діагностика».')
   const cleanupRoot = resolve(join(process.env.TEMP || process.env.TMP || '.', `HromadaAID-Update-${adapters.nowId()}`))
   const extractedRoot = join(cleanupRoot, 'package')
@@ -240,7 +242,7 @@ export async function applyServerUpdate(prepared: PreparedServerUpdate, adapters
     if (await adapters.readActivePackageIdentity(current) !== prepared.activePackageIdentity) throw fail('INSTALLATION_CHANGED', 'Вміст установленого пакета змінився після перевірки ZIP. Виберіть пакет повторно.')
     if (current.programDirectory !== prepared.environment.programDirectory || current.dataDirectory !== prepared.environment.dataDirectory || current.databasePath !== prepared.environment.databasePath || current.serverVersion !== prepared.environment.serverVersion || current.apiContractVersion !== prepared.environment.apiContractVersion) throw fail('INSTALLATION_CHANGED', 'Стан інсталяції змінився після перевірки пакета. Перевірте середовище й виберіть пакет повторно.')
     const program = resolve(current.programDirectory), data = resolve(current.dataDirectory)
-    for (const path of [...forbiddenStagingNames.map(name => join(program, name)), join(data, updateJournalName)]) if (await adapters.pathExists(path)) throw fail('UPDATE_RECOVERY_REQUIRED', 'Знайдено залишки іншої транзакції; оновлення зупинено.')
+    for (const path of [...forbiddenStagingNames.map(name => join(program, name)), join(program, residueResolutionLockName), join(data, updateJournalName)]) if (await adapters.pathExists(path)) throw fail('UPDATE_RECOVERY_REQUIRED', 'Знайдено залишки іншої транзакції; оновлення зупинено.')
     report('prepare', 'Копіюємо перевірений пакет у Server.next та повторно звіряємо файли.')
     await adapters.prepare(current, prepared.extractedRoot)
     installerInvoked = true
@@ -249,7 +251,7 @@ export async function applyServerUpdate(prepared: PreparedServerUpdate, adapters
     const final = await adapters.inspect()
     if (final.installation.status !== 'installed' || final.service.status !== 'running' || final.api.status !== 'available' || final.api.contractVersion !== prepared.candidateApiContractVersion || final.configuration.serverVersion !== prepared.preview.newVersion) throw fail('UPDATE_HEALTH_FAILED', 'Новий пакет не пройшов перевірку служби та API. Перегляньте стан відкату й діагностику.')
     if (await adapters.readActivePackageIdentity(current) !== prepared.candidatePackageIdentity) throw fail('UPDATE_PACKAGE_NOT_ACTIVE', 'Фактично встановлений пакет не відповідає підтвердженому ZIP, навіть якщо версія та API збігаються.')
-    for (const path of [...forbiddenStagingNames.map(name => join(program, name)), join(data, updateJournalName)]) if (await adapters.pathExists(path)) throw fail('UPDATE_NOT_FINALIZED', 'Служба працює, але транзакція оновлення не завершена. Службові файли збережено для перевірки.')
+    for (const path of [...forbiddenStagingNames.map(name => join(program, name)), join(program, residueResolutionLockName), join(data, updateJournalName)]) if (await adapters.pathExists(path)) throw fail('UPDATE_NOT_FINALIZED', 'Служба працює, але транзакція оновлення не завершена. Службові файли збережено для перевірки.')
     report('complete', 'Сервер оновлено, служба працює, API доступний.')
     return { operationId, success: true, rolledBack: false, manualRecoveryRequired: false, message: `Сервер оновлено до версії ${prepared.preview.newVersion}. Windows Service працює, API доступний.` }
   } catch (error) {
@@ -268,6 +270,12 @@ export async function applyServerUpdate(prepared: PreparedServerUpdate, adapters
       originalConfirmed = current.programDirectory === prepared.environment.programDirectory && current.dataDirectory === prepared.environment.dataDirectory && current.backupDirectory === prepared.environment.backupDirectory && current.databasePath === prepared.environment.databasePath && current.serverVersion === prepared.environment.serverVersion && current.serviceStatus === prepared.environment.serviceStatus && (current.serviceStatus === 'stopped' || snapshot.api.status === 'available') && await adapters.readActivePackageIdentity(current) === prepared.activePackageIdentity
     } catch { stateReadable = false }
     const preparationFailed = (!installerInvoked || evidence.preservedBeforeSwitch === true) && stateReadable && !criticalArtifactsRemain && originalConfirmed
+    if (preparationFailed && stagedPackageRemains) {
+      try {
+        await adapters.discardPreparedStage(prepared.environment, prepared.activePackageIdentity, prepared.candidatePackageIdentity)
+        stagedPackageRemains = await adapters.pathExists(join(program, 'Server.next'))
+      } catch { /* Keep any unverified staged package for administrator review. */ }
+    }
     const rolledBack = installerInvoked && evidence.rollbackConfirmed === true && stateReadable && !criticalArtifactsRemain && !stagedPackageRemains && originalConfirmed
     const manualRecoveryRequired = !preparationFailed && !rolledBack
     const message = preparationFailed

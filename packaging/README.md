@@ -11,3 +11,22 @@ WinSW 2.12 registers `HromadaAIDApi` under LocalService. The installer enables t
 For upgrades, the previous service is stopped before its files are replaced. Since WinSW 2.12 has no `refresh` command, the installer unregisters and re-registers the service using the updated XML. It records whether the old service was running and attempts to restore registration/state if an install step fails. Ordinary uninstall stops and unregisters the service, then removes program files only; SQLite, configuration, logs, DPAPI key, backups, and stored install paths remain in their selected locations.
 
 This repository stage does not run an installer or modify the current machine's services, ACLs, or firewall. A power loss during the short interval between service unregister/register or during initial key/database publication can leave a service stopped or an incomplete data pair. The next run fails closed and preserves files; an administrator must inspect logs/state before manually resuming. Verify these interrupted-install cases, the actual LocalService ACLs, DPAPI read access, port conflicts, startup recovery, and uninstall preservation on a disposable Windows 10/11 VM before release.
+
+## Update residue and recovery
+
+The installed Server Manager inspects only the known transaction paths
+`Server.next`, `Server.previous`, `Server.failed` and the update journal. If these
+directories remain without a journal, automatic recovery is disabled. The
+diagnostic action may archive them only after checking the active package, service,
+API health, trusted paths and operation lock, and after administrator confirmation.
+Archiving moves files into a separate archive; it is not a general server repair.
+Do not manually delete transaction directories or fabricate a journal. Cancelling
+a prepared candidate may remove only the verified candidate owned by that active
+transaction; ambiguous files are preserved.
+
+## Stable 1.1.1 preparation status
+
+Stable 1.1.0 remains the latest published release. Stable 1.1.1 is under
+preparation. The current installer architecture remains Universal Setup plus
+Server ZIP: no component-specific Setup, shared Electron runtime, localization
+trimming, compression change or differential update was adopted in Stage 11.5.

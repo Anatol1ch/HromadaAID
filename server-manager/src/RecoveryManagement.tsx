@@ -4,6 +4,7 @@ import Alert from '../../src/components/Alert'
 import type { InspectionSnapshot } from '../electron/inspection-types'
 import type { RecoveryKind, RecoveryStatus } from '../electron/recovery-contract'
 import { Modal, OperationProgress, OperationResult } from './ManagerUI'
+import UpdateArtifactsNotice from './UpdateArtifactsNotice'
 import { apiDisplay, serviceDisplay } from './inspection-presentation'
 
 const labels: Record<RecoveryKind, string> = { update: 'Відновити сервер', 'resume-restore': 'Продовжити відновлення', 'return-database': 'Повернути попередню базу' }
@@ -13,7 +14,7 @@ const explanations: Record<RecoveryKind, string> = {
   'return-database': 'Поточну базу буде замінено збереженою попередньою базою. Повернення виконається лише якщо повторна офлайн-перевірка підтвердить відсутність змін після restore. Обидві бази залишаться збереженими.',
 }
 
-export default function RecoveryManagement({ inspection, section, externalBusy, onBusyChange, onInspection }: { inspection: InspectionSnapshot | null; section: string; externalBusy: boolean; onBusyChange: (value: boolean) => void; onInspection: (value: InspectionSnapshot) => void }) {
+export default function RecoveryManagement({ inspection, section, externalBusy, onBusyChange, onInspection, managerVersion }: { inspection: InspectionSnapshot | null; section: string; externalBusy: boolean; onBusyChange: (value: boolean) => void; onInspection: (value: InspectionSnapshot) => void; managerVersion: string }) {
   const api = window.hromadaManager
   const [status, setStatus] = useState<RecoveryStatus | null>(null)
   const [kind, setKind] = useState<RecoveryKind | null>(null)
@@ -41,8 +42,20 @@ export default function RecoveryManagement({ inspection, section, externalBusy, 
   const choose = (value: RecoveryKind) => { if (!externalBusy && !inFlight.current) { setKind(value); setResult(null); setMessage('') } }
   const showUpdate = ['updates', 'overview'].includes(section)
   const showRestore = ['backups', 'overview'].includes(section)
+  const orphanedUpdateArtifacts = status?.update.pending && status.update.journal?.exists === false && Boolean(status.update.artifacts?.length)
+  const resolveResidues = async () => {
+    const outcome = await api.resolveUpdateResidues(true)
+    try {
+      onInspection(await api.inspectEnvironment())
+      setStatus(await api.recoveryStatus())
+    } catch {
+      return { ...outcome, success: false, message: `${outcome.message} Повторну інспекцію не завершено; перевірте стан ще раз.` }
+    }
+    return outcome
+  }
   return <>
-    {showUpdate && status?.update.pending && <Alert variant="warning"><p>{status.update.reason}</p><button className="secondary-button" type="button" disabled={externalBusy || !status.update.canRecover || status.restore.pending} onClick={() => choose('update')}><RotateCcw size={16}/>Відновити сервер</button></Alert>}
+    {showUpdate && orphanedUpdateArtifacts && status && <UpdateArtifactsNotice status={status.update} managerVersion={managerVersion} serverVersion={inspection?.configuration.serverVersion} onOpenDirectory={() => api.openUpdateArtifactsDirectory()} onCopyDiagnostics={text => api.copyUpdateDiagnostics(text)} onPrepareResolution={() => api.prepareUpdateResidueResolution()} onResolveResidues={resolveResidues}/>}
+    {showUpdate && status?.update.pending && !orphanedUpdateArtifacts && <Alert variant="warning"><p>{status.update.reason}</p>{status.update.canRecover && <button className="secondary-button" type="button" disabled={externalBusy || status.restore.pending} onClick={() => choose('update')}><RotateCcw size={16}/>Відновити сервер</button>}</Alert>}
     {showRestore && status?.restore.pending && <Alert variant="warning"><p>{status.restore.reason}</p><button className="secondary-button" type="button" disabled={externalBusy || status.update.pending} onClick={() => choose('resume-restore')}><RotateCcw size={16}/>Продовжити відновлення</button></Alert>}
     {showRestore && !status?.restore.pending && status?.restore.canReturn && <Alert variant="warning"><p>{status.restore.reason}</p><button className="danger-button" type="button" disabled={externalBusy || status.update.pending} onClick={() => choose('return-database')}><RotateCcw size={16}/>Повернути попередню базу</button></Alert>}
     {showRestore && status?.restore.reason && !status.restore.pending && !status.restore.canReturn && <Alert variant="warning">{status.restore.reason}</Alert>}

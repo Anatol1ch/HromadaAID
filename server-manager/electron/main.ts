@@ -9,7 +9,7 @@ import { createExclusiveOperation } from './exclusive-operation.js'
 import { spawn } from 'node:child_process'
 import { pipeline } from 'node:stream/promises'
 import { Readable, Transform } from 'node:stream'
-import { join, dirname } from 'node:path'
+import { join, dirname, win32 } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { inspectEnvironment } from './inspection-engine.js'
 import { createInspectionRequestHandler } from './inspection-ipc.js'
@@ -25,6 +25,8 @@ import { prepareServerUpdate, applyServerUpdate, type PreparedServerUpdate } fro
 import { buildInstallerInvocation, createWindowsServerUpdateAdapters } from './windows-server-update.js'
 import { isServerBackupList, type ServerBackupList } from './backup-contract.js'
 import type { RecoveryKind, RecoveryStatus } from './recovery-contract.js'
+import { inspectUpdateArtifacts, validateUpdateArtifactsDirectory } from './update-artifact-diagnostics.mjs'
+import { archiveUpdateResidues, clearStaleResidueLock, residueResolutionBlockReason, UPDATE_RESIDUE_ARCHIVE_NAME, UPDATE_RESIDUE_LOCK_NAME } from './update-residue-resolution.mjs'
 import { parseInstallerDiagnostic } from './server-install-diagnostic.js'
 import { assertRecoveryApiPermission, assertWindowsRecoveryAdministrator } from './recovery-authorization.js'
 import { createReleaseUpdater, setReleaseUpdaterQuit } from './release-updater.js'
@@ -120,10 +122,13 @@ async function recoveryStatus(): Promise<RecoveryStatus> {
   const snapshot = await inspectEnvironment(createWindowsInspectionAdapters()), c = snapshot.configuration
   const result: RecoveryStatus = { update: { pending: false, canRecover: false, reason: '' }, restore: { pending: false, canReturn: false, reason: '' } }
   if (!c.programDirectory || !c.dataDirectory || !c.databasePath || !c.backupDirectory) return result
-  const journal = await pathExists(join(c.dataDirectory, '.hromadaaid-update-state.json'))
-  const previous = await pathExists(join(c.programDirectory, 'Server.previous')), failed = await pathExists(join(c.programDirectory, 'Server.failed'))
-  const staged = snapshot.installation.status !== 'ready_to_configure' && await pathExists(join(c.programDirectory, 'Server.next'))
-  result.update = { pending: journal || previous || failed || staged, canRecover: journal, reason: journal ? 'Виявлено незавершене оновлення. Перед змінами пакети й сумісність бази буде перевірено повторно.' : previous || failed || staged ? 'Службові каталоги є, але журнал відсутній. Автоматичне recovery заборонено; файли збережено.' : '' }
+  const diagnostic = await inspectUpdateArtifacts(c.programDirectory, c.dataDirectory)
+  const residueResolutionActive = await clearStaleResidueLock(c.programDirectory)
+  const journal = diagnostic.journal.exists
+  const previous = diagnostic.artifacts.some(item => item.name === 'Server.previous')
+  const failed = diagnostic.artifacts.some(item => item.name === 'Server.failed')
+  const staged = snapshot.installation.status !== 'ready_to_configure' && diagnostic.artifacts.some(item => item.name === 'Server.next')
+  result.update = { pending: journal || previous || failed || staged || residueResolutionActive, canRecover: journal, reason: journal ? 'Виявлено незавершене оновлення. Перед змінами пакети й сумісність бази буде перевірено повторно.' : residueResolutionActive ? 'Виконується інша операція з архівування файлів оновлення. Дочекайтеся її завершення.' : previous || failed || staged ? 'Виявлено службові каталоги, але журнал відповідної операції відсутній. Автоматичне відновлення недоступне. Файли залишено без змін з міркувань безпеки. Перед наступним серверним оновленням необхідно перевірити стан службових каталогів.' : '', journal: diagnostic.journal, artifacts: diagnostic.artifacts }
   if (journal) {
     try {
       const record = JSON.parse(await readFile(join(c.dataDirectory, '.hromadaaid-update-state.json'), 'utf8')) as { formatVersion?: unknown; hadPreviousPackage?: unknown }
@@ -148,6 +153,68 @@ async function recoveryStatus(): Promise<RecoveryStatus> {
     result.restore = value as RecoveryStatus['restore']
   }
   return result
+}
+
+async function assertUpdateResidueResolutionSafe(operationBusy: boolean) {
+  if (process.platform !== 'win32') throw new Error('Усунення службових файлів доступне лише у Windows.')
+  const snapshot = await inspectEnvironment(createWindowsInspectionAdapters()), c = snapshot.configuration
+  if (!c.programDirectory || !c.dataDirectory || !c.backupDirectory || !c.databasePath || !c.serverVersion) throw new Error('Не вдалося підтвердити каталоги та версію встановленого сервера.')
+  const diagnostic = await inspectUpdateArtifacts(c.programDirectory, c.dataDirectory)
+  const restorePending = await pathExists(`${c.databasePath}.restore-journal.json`) || await pathExists(`${c.databasePath}.maintenance.json`)
+  const administrator = await (async () => {
+    const executable = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    const script = '$p=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent());if($p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){exit 0}else{exit 5}'
+    const check = await runRestoreCli([executable, '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], undefined, dirname(executable))
+    return check.code === 0
+  })()
+  const activePackagePath = win32.resolve(c.programDirectory, 'Server')
+  const activePackageDirectory = snapshot.activePackageDirectory ? win32.resolve(snapshot.activePackageDirectory) : ''
+  const adapter = createWindowsServerUpdateAdapters()
+  const installedContract = await adapter.readInstalledApiContract(c.programDirectory).catch(() => null)
+  const environment = { programDirectory: c.programDirectory, dataDirectory: c.dataDirectory, backupDirectory: c.backupDirectory, databasePath: c.databasePath, serverVersion: c.serverVersion, apiContractVersion: installedContract ?? -1, serviceStatus: snapshot.service.status as 'running' | 'stopped' }
+  let activePackageIntegrityVerified = false
+  let activePackageIdentity: string | null = null
+  if (snapshot.installation.status === 'installed' && snapshot.service.status === 'running' && snapshot.api.status === 'available' && installedContract !== null && snapshot.api.contractVersion === installedContract && activePackageDirectory.toLocaleLowerCase('en-US') === activePackagePath.toLocaleLowerCase('en-US')) {
+    try {
+      activePackageIdentity = await adapter.readActivePackageIdentity(environment)
+      activePackageIntegrityVerified = /^[a-f0-9]{64}$/i.test(activePackageIdentity)
+    } catch { activePackageIntegrityVerified = false }
+  }
+  const checks = {
+    operationBusy,
+    journalExists: diagnostic.journal.exists,
+    restorePending,
+    administrator,
+    installationInstalled: snapshot.installation.status === 'installed',
+    discoveryConfirmed: snapshot.discovery.source === 'windows_service' && snapshot.discovery.confidence === 'confirmed',
+    serviceRunning: snapshot.service.status === 'running',
+    serviceUsesActivePackage: activePackageDirectory.toLocaleLowerCase('en-US') === activePackagePath.toLocaleLowerCase('en-US'),
+    apiAvailable: snapshot.api.status === 'available',
+    apiContractMatches: installedContract !== null && snapshot.api.contractVersion === installedContract,
+    activePackageIntegrityVerified,
+    lockExists: await clearStaleResidueLock(c.programDirectory),
+  }
+  const reason = residueResolutionBlockReason(checks)
+  if (reason) throw new Error(reason)
+  if (!diagnostic.artifacts.length) throw new Error('Залишкових службових каталогів більше не виявлено.')
+  if (diagnostic.artifacts.some(item => item.kind !== 'directory')) throw new Error('Знайдено об’єкт, який не є звичайним каталогом. Файли залишено для ручної перевірки.')
+  return { programDirectory: c.programDirectory, dataDirectory: c.dataDirectory, artifacts: diagnostic.artifacts, checks, activePackageIdentity }
+}
+
+async function recheckUpdateResidueService(plan: Awaited<ReturnType<typeof assertUpdateResidueResolutionSafe>>) {
+  const snapshot = await inspectEnvironment(createWindowsInspectionAdapters()), c = snapshot.configuration
+  const diagnostic = await inspectUpdateArtifacts(plan.programDirectory, plan.dataDirectory)
+  if (!c.programDirectory || !c.dataDirectory || !c.backupDirectory || !c.databasePath || !c.serverVersion || win32.resolve(c.programDirectory).toLocaleLowerCase('en-US') !== win32.resolve(plan.programDirectory).toLocaleLowerCase('en-US') || win32.resolve(c.dataDirectory).toLocaleLowerCase('en-US') !== win32.resolve(plan.dataDirectory).toLocaleLowerCase('en-US') || diagnostic.journal.exists || (await pathExists(`${c.databasePath}.restore-journal.json`)) || (await pathExists(`${c.databasePath}.maintenance.json`))) return 'Під час операції змінилися шляхи або з’явився журнал оновлення чи бази. Переміщення зупинено.'
+  const expected = win32.resolve(plan.programDirectory, 'Server').toLocaleLowerCase('en-US')
+  if (snapshot.installation.status !== 'installed' || snapshot.service.status !== 'running' || snapshot.api.status !== 'available' || snapshot.discovery.confidence !== 'confirmed' || !snapshot.activePackageDirectory || win32.resolve(snapshot.activePackageDirectory).toLocaleLowerCase('en-US') !== expected || !c.serverVersion) return 'Справність активної служби або API більше не підтверджується. Переміщення зупинено.'
+  const adapter = createWindowsServerUpdateAdapters()
+  const contract = await adapter.readInstalledApiContract(plan.programDirectory).catch(() => null)
+  if (contract === null || snapshot.api.contractVersion !== contract) return 'Контракт API змінився або більше не відповідає активному пакету. Переміщення зупинено.'
+  const identity = await adapter.readActivePackageIdentity({ programDirectory: c.programDirectory, dataDirectory: c.dataDirectory, backupDirectory: c.backupDirectory, databasePath: c.databasePath, serverVersion: c.serverVersion, apiContractVersion: contract, serviceStatus: 'running' }).catch(() => '')
+  if (!plan.activePackageIdentity || identity !== plan.activePackageIdentity) return 'Цілісність або ідентичність активного пакета змінилася. Переміщення зупинено.'
+  const names = new Set(plan.artifacts.map(item => item.name))
+  if (diagnostic.artifacts.some(item => !names.has(item.name))) return 'Під час операції виявлено новий службовий каталог. Переміщення зупинено.'
+  return ''
 }
 
 async function authorizeLocalRecovery(snapshot: InspectionSnapshot, databaseOperation: boolean): Promise<void> {
@@ -219,7 +286,8 @@ async function inspectWithUpdateReadiness(): Promise<InspectionSnapshot> {
   await markInitialSetupReadiness(snapshot, request => createWindowsInstallationAdapters().canResume!(request))
   let updateReadiness: NonNullable<InspectionSnapshot['updateReadiness']> = { ready: false, reason: 'Оновлення доступне лише для підтвердженої встановленої служби.' }
   if (snapshot.installation.status === 'installed' && ['running', 'stopped'].includes(snapshot.service.status) && ['confirmed', 'corroborated'].includes(snapshot.discovery.confidence) && configuration.programDirectory && configuration.dataDirectory) {
-    const conflicts = [join(configuration.programDirectory, 'Server.next'), join(configuration.programDirectory, 'Server.previous'), join(configuration.programDirectory, 'Server.failed'), join(configuration.dataDirectory, '.hromadaaid-update-state.json')]
+    await clearStaleResidueLock(configuration.programDirectory)
+    const conflicts = [join(configuration.programDirectory, 'Server.next'), join(configuration.programDirectory, 'Server.previous'), join(configuration.programDirectory, 'Server.failed'), join(configuration.programDirectory, UPDATE_RESIDUE_LOCK_NAME), join(configuration.dataDirectory, '.hromadaaid-update-state.json')]
     try {
       const existing = []
       for (const path of conflicts) {
@@ -313,6 +381,59 @@ else {
     if (recoveryInspectionInProgress || backupOperationInProgress || activeInstallId || activeUpdateId || serviceOperationInProgress || updatePreparationInProgress) throw new Error('Зачекайте завершення поточної операції.')
     recoveryInspectionInProgress = true
     try { return await recoveryStatus() } finally { recoveryInspectionInProgress = false }
+  })
+  ipcMain.handle('manager:open-update-artifacts-directory', async event => {
+    if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
+    if (recoveryInspectionInProgress || backupOperationInProgress || activeInstallId || activeUpdateId || serviceOperationInProgress || updatePreparationInProgress || preparedServerUpdate) throw new Error('Зачекайте завершення поточної операції.')
+    recoveryInspectionInProgress = true
+    try {
+      const snapshot = await inspectEnvironment(createWindowsInspectionAdapters()), c = snapshot.configuration
+      if (!c.programDirectory || !c.dataDirectory || !['confirmed', 'corroborated'].includes(snapshot.discovery.confidence)) throw new Error('Каталог інсталяції не підтверджено для відкриття.')
+      const diagnostic = await inspectUpdateArtifacts(c.programDirectory, c.dataDirectory)
+      if (diagnostic.journal.exists || !diagnostic.artifacts.some(item => item.kind === 'directory')) throw new Error('Службові каталоги без журналу більше не підтверджено. Повторіть перевірку стану.')
+      const allowedDirectory = await validateUpdateArtifactsDirectory(c.programDirectory)
+      const { shell } = await import('electron')
+      const error = await shell.openPath(allowedDirectory)
+      if (error) throw new Error('Не вдалося відкрити підтверджений каталог інсталяції.')
+      return true
+    } finally { recoveryInspectionInProgress = false }
+  })
+  ipcMain.handle('manager:prepare-update-residue-resolution', async event => {
+    if (!isTrustedRenderer(event)) throw new Error('UNTRUSTED_RENDERER')
+    if (recoveryInspectionInProgress || backupOperationInProgress || activeInstallId || activeUpdateId || serviceOperationInProgress || updatePreparationInProgress || preparedServerUpdate) throw new Error('Зачекайте завершення поточної операції.')
+    recoveryInspectionInProgress = true
+    try {
+      const plan = await assertUpdateResidueResolutionSafe(false)
+      return { eligible: true, artifacts: plan.artifacts, archiveDirectory: join(plan.programDirectory, UPDATE_RESIDUE_ARCHIVE_NAME) }
+    } catch (error) {
+      return { eligible: false, artifacts: [], reason: error instanceof Error ? error.message : 'Не вдалося підтвердити безпечні передумови.' }
+    } finally { recoveryInspectionInProgress = false }
+  })
+  ipcMain.handle('manager:resolve-update-residues', async (event, confirmed: unknown) => {
+    if (!isTrustedRenderer(event) || confirmed !== true) throw new Error('Потрібне підтвердження адміністратора.')
+    if (recoveryInspectionInProgress || backupOperationInProgress || activeInstallId || activeUpdateId || serviceOperationInProgress || updatePreparationInProgress || preparedServerUpdate) throw new Error('Зачекайте завершення поточної операції.')
+    recoveryInspectionInProgress = true
+    try {
+      const plan = await assertUpdateResidueResolutionSafe(false)
+      const result = await archiveUpdateResidues({
+        programDirectory: plan.programDirectory,
+        artifacts: plan.artifacts,
+        checks: plan.checks,
+        confirmed: true,
+        operationId: randomUUID(),
+        revalidate: () => recheckUpdateResidueService(plan),
+      })
+      const status = await recoveryStatus()
+      if (status.update.pending) return { success: false, message: `Каталоги переміщено до архіву ${result.archiveDirectory}, але діагностика все ще виявляє службовий стан. Файли збережено; перевірте оновлені відомості.` }
+      return { success: true, message: `Залишкові каталоги переміщено до архіву: ${result.archiveDirectory}. Активний сервер і база даних не змінювалися.` }
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : 'Файлову операцію не підтверджено; виявлені файли залишено.' }
+    } finally { recoveryInspectionInProgress = false }
+  })
+  ipcMain.handle('manager:copy-update-diagnostics', (event, text: unknown) => {
+    if (!isTrustedRenderer(event) || typeof text !== 'string' || text.length > 16_000) throw new Error('UNTRUSTED_RENDERER')
+    clipboard.writeText(text)
+    return true
   })
   ipcMain.handle('manager:recover-operation', async (event, input: unknown) => {
     if (!isTrustedRenderer(event) || !input || typeof input !== 'object') throw new Error('UNTRUSTED_RENDERER')
@@ -512,6 +633,7 @@ else {
   ipcMain.handle('manager:cancel-server-update-preview', async (event, previewId: unknown) => {
     if (!isTrustedRenderer(event) || typeof previewId !== 'string' || preparedServerUpdate?.preview.id !== previewId || activeUpdateId) return false
     const current = preparedServerUpdate
+    await updateAdapters().discardPreparedStage(current.environment, current.activePackageIdentity, current.candidatePackageIdentity)
     preparedServerUpdate = null
     await updateAdapters().cleanup(current.cleanupRoot).catch(() => undefined)
     return true
@@ -637,7 +759,11 @@ else {
     app.exit(1)
   })
   app.on('window-all-closed', () => {
-    if (preparedServerUpdate) { void updateAdapters().cleanup(preparedServerUpdate.cleanupRoot); preparedServerUpdate = null }
-    app.quit()
+    const prepared = preparedServerUpdate
+    if (!prepared) { app.quit(); return }
+    preparedServerUpdate = null
+    void updateAdapters().discardPreparedStage(prepared.environment, prepared.activePackageIdentity, prepared.candidatePackageIdentity)
+      .catch(() => undefined)
+      .finally(() => { void updateAdapters().cleanup(prepared.cleanupRoot); app.quit() })
   })
 }

@@ -16,7 +16,7 @@ const source = readFileSync(installer, 'utf8').replace(/\r\n/g, '\n')
 test('Windows PowerShell 5.1 parses the recovery branch and preserves its administrator boundary', { skip: process.platform !== 'win32' }, () => {
   const script = `$tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile('${installer.replaceAll("'", "''")}',[ref]$tokens,[ref]$errors);if($errors.Count){$errors|ForEach-Object{[Console]::Error.WriteLine($_.Message)};exit 1}`
   execFileSync(powershell, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true })
-  const recovery = source.slice(source.indexOf('if ($RecoverUpdate) {'), source.indexOf("\ntry {\n  Set-InstallStage 'validate-inputs'"))
+  const recovery = source.slice(source.indexOf('if ($RecoverUpdate) {'), source.indexOf("\ntry {\n  if ([IO.File]::Exists($residueResolutionLock)"))
   assert.ok(recovery.indexOf('WindowsBuiltInRole]::Administrator') < recovery.indexOf('recover-rollback'))
   assert.doesNotMatch(recovery, /^\s*(Configure-ServiceAccess|Set-AclChecked|initialize|createAdministrator)\b/m)
 })
@@ -53,7 +53,7 @@ for (const scenario of ['finalize', 'rollback', 'rollback-health-fails', 'ambigu
       const databasePath = join(dataDirectory, 'Database', 'hromada-aid.sqlite')
       writeFileSync(databasePath, 'database sentinel'); writeFileSync(join(backupDirectory, 'existing.hraid'), 'archive sentinel'); writeFileSync(join(backupDirectory, '.hromadaaid-backup-key.dpapi'), 'key sentinel')
       const options = { mode: 'server', programDirectory, dataDirectory, backupDirectory }
-      writeFileSync(join(dataDirectory, 'server.json'), JSON.stringify({ ...options, databasePath, host: '127.0.0.1', port: 4310 }))
+      writeFileSync(join(dataDirectory, 'server.json'), JSON.stringify({ configVersion: 3, programDirectory, databasePath, backupDirectory }))
       for (const [name, content] of [['Server', 'old'], ['Server.next', 'new']]) {
         const folder = join(programDirectory, name)
         mkdirSync(join(folder, 'runtime'), { recursive: true }); mkdirSync(join(folder, 'service')); mkdirSync(join(folder, 'app', 'dist', 'electron'), { recursive: true })

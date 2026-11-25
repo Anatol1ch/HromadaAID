@@ -39,6 +39,8 @@ export type InspectionSnapshot = {
   service: { status: ServiceStatus; message: string }
   api: { status: ApiStatus; message: string; contractVersion: number | null }
   configuration: InspectedConfiguration
+  /** Package directory derived from the registered Windows Service path. */
+  activePackageDirectory?: string | null
   discovery: { source: DiscoverySource; confidence: DiscoveryConfidence; message: string }
   updateReadiness?: { ready: boolean; reason: string }
   checks: InspectionCheck[]
@@ -55,6 +57,10 @@ export type ManagerInspectionApi = {
   downloadServerRelease(): Promise<{ preview: import('./server-update-contract.js').ServerUpdatePreview }>
   onReleaseUpdateState(listener: (value: { manager: import('./server-update-contract.js').ReleaseUpdateState; server: import('./server-update-contract.js').ServerReleaseState }) => void): () => void
   recoveryStatus(): Promise<import('./recovery-contract.js').RecoveryStatus>
+  openUpdateArtifactsDirectory(): Promise<boolean>
+  copyUpdateDiagnostics(text: string): Promise<boolean>
+  prepareUpdateResidueResolution(): Promise<{ eligible: boolean; artifacts: import('./recovery-contract.js').UpdateArtifactDiagnostic[]; archiveDirectory?: string; reason?: string }>
+  resolveUpdateResidues(confirmed: true): Promise<{ success: boolean; message: string }>
   recoverOperation(kind: import('./recovery-contract.js').RecoveryKind, confirmed: true): Promise<{ success: boolean; message: string }>
   onRecoveryProgress(listener: (value: { message: string }) => void): () => void
   inspectEnvironment(): Promise<InspectionSnapshot>

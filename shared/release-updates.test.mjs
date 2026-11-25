@@ -57,10 +57,27 @@ test('GitHub latest stable contract downloads manifest and resolves only its nam
   const result = await checkLatestRelease({ repository: 'example/app', currentVersion: '1.1.9', fetchImpl })
   assert.equal(result.available, true)
   assert.equal(result.version, '1.2.0')
+  assert.equal(result.targetApiContractVersion, 2)
   assert.equal(result.artifact.name, 'HromadaAID-Setup-1.2.0.exe')
   assert.equal((await checkLatestRelease({ repository: 'example/app', currentVersion: '1.2.0', fetchImpl })).available, false)
   await assert.rejects(checkLatestRelease({ repository: 'example/app', currentVersion: '1.1.9', fetchImpl: async () => ({ ok: false, status: 503, url: 'https://api.github.com/repos/example/app/releases/latest' }) }), /HTTP 503/)
   await assert.rejects(checkLatestRelease({ repository: 'example/app', currentVersion: '1.1.9', timeoutMs: 5, fetchImpl: (_url, options) => new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))) }), /час очікування/)
+})
+
+test('Client may inspect a future target contract while the default validator remains strict for Manager', async () => {
+  const next = manifest('1.2.0')
+  next.compatibility.api.targetVersion = 3
+  next.compatibility.manager.targetApiContractVersion = 3
+  const release = { tag_name: 'v1.2.0', prerelease: false, draft: false, body: 'Оновлення', assets: [
+    { name: 'release-manifest.json', browser_download_url: 'https://github.com/example/app/releases/download/v1.2.0/release-manifest.json' },
+    { name: 'HromadaAID-Setup-1.2.0.exe', browser_download_url: 'https://github.com/example/app/releases/download/v1.2.0/HromadaAID-Setup-1.2.0.exe' },
+    { name: 'HromadaAID-Server-v1.2.0-win-x64.zip', browser_download_url: 'https://github.com/example/app/releases/download/v1.2.0/HromadaAID-Server-v1.2.0-win-x64.zip' },
+  ] }
+  const fetchImpl = async url => { const value = String(url).endsWith('releases/latest') ? release : next; return { ok: true, status: 200, url: String(url), text: async () => JSON.stringify(value) } }
+  await assert.rejects(checkLatestRelease({ repository: 'example/app', currentVersion: '1.1.9', fetchImpl }), /Цільовий API-контракт/)
+  const result = await checkLatestRelease({ repository: 'example/app', currentVersion: '1.1.9', fetchImpl, allowTargetApiContractTransition: true })
+  assert.equal(result.available, true)
+  assert.equal(result.targetApiContractVersion, 3)
 })
 
 test('download verifies SHA-256 and exact size, removes partial and corrupt files', async () => {

@@ -37,7 +37,7 @@ export function validateRepository(value) {
   return value
 }
 
-export function validateReleaseManifest(value, release, currentVersion) {
+export function validateReleaseManifest(value, release, currentVersion, { allowTargetApiContractTransition = false } = {}) {
   const parsedVersion = value && parseStableVersion(value.version)
   if (!value || value.formatVersion !== 1 || value.platform !== 'win32' || value.architecture !== 'x64' || !parsedVersion || parsedVersion.prerelease.length) throw new Error('Маніфест релізу має некоректну версію або платформу.')
   const tagVersion = typeof release.tag_name === 'string' ? release.tag_name.replace(/^v/, '') : ''
@@ -46,8 +46,10 @@ export function validateReleaseManifest(value, release, currentVersion) {
   if (value.compatibility?.installer !== 'hromadaaid-universal-nsis-v1' || !Array.isArray(value.compatibility?.installModes) || !['Client-only', 'Server-only', 'Combined'].every(mode => value.compatibility.installModes.includes(mode))) throw new Error('Маніфест не підтверджує сумісність з універсальним інсталятором HromadaAID.')
   // v1 fields are the bootstrap envelope understood by installed 1.0.2 updaters.
   // Current Client/Manager must additionally match the actual target contract v2.
-  if (value.compatibility?.api?.contract !== 'hromadaaid-rest' || value.compatibility?.api?.version !== 1 || value.compatibility?.api?.targetVersion !== 2) throw new Error('Маніфест має некоректний API contract compatibility marker.')
-  if (value.compatibility?.manager?.versionPolicy !== 'same-release-version' || value.compatibility?.manager?.apiContract !== 'hromadaaid-rest' || value.compatibility?.manager?.apiContractVersion !== 1 || value.compatibility?.manager?.targetApiContractVersion !== 2) throw new Error('Маніфест не підтверджує сумісність Server Manager із сервером цього релізу.')
+  const targetApiContractVersion = value.compatibility?.api?.targetVersion
+  if (value.compatibility?.api?.contract !== 'hromadaaid-rest' || value.compatibility?.api?.version !== 1 || !Number.isSafeInteger(targetApiContractVersion) || targetApiContractVersion < 1) throw new Error('Маніфест має некоректний API contract compatibility marker.')
+  if (!allowTargetApiContractTransition && targetApiContractVersion !== 2) throw new Error('Цільовий API-контракт релізу не підтримується цим засобом оновлення.')
+  if (value.compatibility?.manager?.versionPolicy !== 'same-release-version' || value.compatibility?.manager?.apiContract !== 'hromadaaid-rest' || value.compatibility?.manager?.apiContractVersion !== 1 || value.compatibility?.manager?.targetApiContractVersion !== targetApiContractVersion) throw new Error('Маніфест не підтверджує сумісність Server Manager із сервером цього релізу.')
   if (!Array.isArray(value.artifacts)) throw new Error('У маніфесті відсутній перелік артефактів.')
   const setupName = `HromadaAID-Setup-${value.version}.exe`
   const serverName = `HromadaAID-Server-v${value.version}-win-x64.zip`
@@ -55,15 +57,18 @@ export function validateReleaseManifest(value, release, currentVersion) {
   const server = value.artifacts.find(item => item?.component === 'server' && item.name === serverName)
   for (const artifact of [setup, server]) if (!artifact || !/^[a-f0-9]{64}$/.test(artifact.sha256) || !Number.isSafeInteger(artifact.sizeBytes) || artifact.sizeBytes < 1 || artifact.sizeBytes > 2_000_000_000) throw new Error('Маніфест містить неповні або некоректні артефакти.')
   if (server.packageIntegrity !== 'embedded-package-integrity-v1') throw new Error('Маніфест має посилатися на наявний package-integrity.json сервера.')
-  return { version: value.version, notes: safeReleaseNotes(release.body), artifact: setup, serverArtifact: server }
+  return { version: value.version, notes: safeReleaseNotes(release.body), targetApiContractVersion, artifact: setup, serverArtifact: server }
 }
 
 export function safeReleaseNotes(value) {
-  if (typeof value !== 'string') return 'Опис змін для цього випуску не надано.'
+  return sanitizeReleaseNotes(value) || 'Опис змін для цього випуску не надано.'
+}
+
+export function sanitizeReleaseNotes(value) {
+  if (typeof value !== 'string') return ''
   // Markdown is rendered as React text nodes. Remove embedded HTML while preserving
   // the Markdown structure; the renderer never creates links or raw HTML elements.
-  const text = value.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, '')
-  return text.trim() || 'Опис змін для цього випуску не надано.'
+  return value.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, '').trim()
 }
 
 async function request(url, fetchImpl, connectTimeoutMs, headers = {}) {
@@ -100,7 +105,29 @@ async function requestJson(url, fetchImpl, timeoutMs, headers) {
   } finally { clearTimeout(timer) }
 }
 
-export async function checkLatestRelease({ repository, currentVersion, fetchImpl = fetch, timeoutMs = 12_000 }) {
+export async function fetchStableReleaseNotes({ repository, fetchImpl = fetch, timeoutMs = 12_000, pageSize = 100, maxPages = 100 }) {
+  validateRepository(repository)
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100 || !Number.isInteger(maxPages) || maxPages < 1) throw new Error('Параметри отримання історії релізів некоректні.')
+  const base = `https://api.github.com/repos/${repository}/releases`
+  const headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'HromadaAID' }
+  const entries = []
+  for (let page = 1; page <= maxPages; page++) {
+    const releases = await requestJson(`${base}?per_page=${pageSize}&page=${page}`, fetchImpl, timeoutMs, headers)
+    if (!Array.isArray(releases)) throw new Error('GitHub повернув некоректний перелік релізів.')
+    for (const release of releases) {
+      if (!release || release.draft !== false || release.prerelease !== false || typeof release.tag_name !== 'string') continue
+      const version = release.tag_name.replace(/^v/i, '')
+      const parsed = parseStableVersion(version)
+      if (!parsed || parsed.prerelease.length) continue
+      const published = typeof release.published_at === 'string' && Number.isFinite(Date.parse(release.published_at)) ? release.published_at : undefined
+      entries.push({ version, name: typeof release.name === 'string' ? release.name.trim() : '', ...(published ? { publishedAt: published } : {}), body: sanitizeReleaseNotes(release.body) })
+    }
+    if (releases.length < pageSize) return entries
+  }
+  throw new Error('Історія релізів перевищила допустиму кількість сторінок; отримання не вважається повним.')
+}
+
+export async function checkLatestRelease({ repository, currentVersion, fetchImpl = fetch, timeoutMs = 12_000, allowTargetApiContractTransition = false }) {
   validateRepository(repository)
   if (!parseStableVersion(currentVersion)) throw new Error('Поточна версія застосунку некоректна.')
   const base = `https://api.github.com/repos/${repository}`
@@ -111,7 +138,7 @@ export async function checkLatestRelease({ repository, currentVersion, fetchImpl
   const url = new URL(manifestAsset.browser_download_url)
   if (url.protocol !== 'https:' || url.hostname !== 'github.com') throw new Error('Посилання на маніфест не належить GitHub Releases.')
   const releaseManifest = await requestJson(url.href, fetchImpl, timeoutMs, { Accept: 'application/octet-stream', 'User-Agent': 'HromadaAID' })
-  const manifest = validateReleaseManifest(releaseManifest, release, currentVersion)
+  const manifest = validateReleaseManifest(releaseManifest, release, currentVersion, { allowTargetApiContractTransition })
   if (!manifest) return { available: false, checkedAt: new Date().toISOString() }
   const asset = release.assets.find(item => item?.name === manifest.artifact.name)
   if (!asset || typeof asset.browser_download_url !== 'string') throw new Error('У релізі відсутній інсталятор, зазначений у маніфесті.')
@@ -121,7 +148,7 @@ export async function checkLatestRelease({ repository, currentVersion, fetchImpl
   if (!serverAsset || typeof serverAsset.browser_download_url !== 'string') throw new Error('У релізі відсутній серверний ZIP, зазначений у маніфесті.')
   const serverUrl = new URL(serverAsset.browser_download_url)
   if (serverUrl.protocol !== 'https:' || serverUrl.hostname !== 'github.com') throw new Error('Посилання на серверний ZIP не належить GitHub Releases.')
-  return { available: true, checkedAt: new Date().toISOString(), version: manifest.version, notes: manifest.notes, artifact: manifest.artifact, url: artifactUrl.href, serverArtifact: manifest.serverArtifact, serverUrl: serverUrl.href }
+  return { available: true, checkedAt: new Date().toISOString(), version: manifest.version, notes: manifest.notes, targetApiContractVersion: manifest.targetApiContractVersion, artifact: manifest.artifact, url: artifactUrl.href, serverArtifact: manifest.serverArtifact, serverUrl: serverUrl.href }
 }
 
 export async function downloadVerifiedArtifact({ url, artifact, directory, fetchImpl = fetch, connectTimeoutMs = 20_000, idleTimeoutMs = 45_000, onProgress = () => {} }) {

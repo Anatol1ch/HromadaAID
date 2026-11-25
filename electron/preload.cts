@@ -8,6 +8,16 @@ const api: HromadaAidApi = {
     getVersion: () => invoke('app:get-version'),
     openExternal: url => invoke('app:open-external', url),
   },
+  windowSettings: {
+    getZoomFactor: () => invoke('window-settings:get-zoom'),
+    setZoomFactor: factor => invoke('window-settings:set-zoom', factor),
+    adjustZoom: action => invoke('window-settings:adjust-zoom', action),
+    onZoomChange: listener => {
+      const receive = (_event: Electron.IpcRendererEvent, factor: number) => listener(factor)
+      ipcRenderer.on('window-settings:zoom-changed', receive)
+      return () => ipcRenderer.removeListener('window-settings:zoom-changed', receive)
+    },
+  },
   clientUpdates: {
     getState: () => invoke('client-update:get-state'),
     check: () => invoke('client-update:check'),
@@ -18,6 +28,10 @@ const api: HromadaAidApi = {
       ipcRenderer.on('client-update:state', receive)
       return () => ipcRenderer.removeListener('client-update:state', receive)
     },
+  },
+  releaseHistory: {
+    getLocal: () => invoke('release-history:get-local'),
+    refresh: () => invoke('release-history:refresh'),
   },
   auth: {
     getState: () => invoke('auth:get-state'),
