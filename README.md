@@ -101,14 +101,14 @@ Client відрізняє мережеву недоступність серве
 
 ## Стан розробки
 
-**Останній опублікований Stable — 1.1.0.** Цільовий Stable 1.1.1 готується та ще не опублікований. API Contract залишається v2. [Завантажити Stable 1.1.0](https://github.com/Anatol1ch/HromadaAID/releases/tag/v1.1.0).
+**Останній опублікований Stable — 1.1.1.** API Contract залишається v2. [Завантажити Stable 1.1.1](https://github.com/Anatol1ch/HromadaAID/releases/tag/v1.1.1).
 
 У 1.1.0 оновлено реєстр допомог і навігацію, вдосконалено картки отримувачів та
 запроваджено несумісний із v1 контракт API. Для переходу з 1.0.2 необхідно
 оновити Server Manager, потім API Server, а після нього всі Client. Деталі — в
 [інструкції встановлення й адміністрування](docs/installation-and-administration.md).
-Release Notes: [Stable 1.1.0](docs/release-notes/1.1.0.md). Оновлення до 1.1.1
-буде описане після погодження Release Notes та фактичної публікації.
+Release Notes: [Stable 1.1.1](docs/release-notes/1.1.1.md) та
+[Stable 1.1.0](docs/release-notes/1.1.0.md).
 
 Попередні описи випусків і протоколи тестування залишаються історичними; вони
 не описують поточний інтерфейс чи актуальний порядок оновлення.
@@ -122,6 +122,7 @@ Release Notes: [Stable 1.1.0](docs/release-notes/1.1.0.md). Оновлення �
 - [Прийняті технічні рішення](docs/DECISIONS.md)
 - [Дорожня карта](docs/ROADMAP.md)
 - [Поточний стан і результати перевірок](docs/HANDOFF.md)
+- [Зміни Stable 1.1.1](docs/release-notes/1.1.1.md)
 - [Зміни Stable 1.1.0](docs/release-notes/1.1.0.md)
 
 Розробник: **Анатолій Мироненко**. Систему створено для потреб Вишнівської

@@ -56,10 +56,9 @@ Server Manager показує три вручну задані адреси ли
 
 ## Поточний стан
 
-**Останній опублікований Stable — 1.1.0.** Цільовий Stable 1.1.1 готується;
-його ще не публікували. API Contract залишається v2. Пакети й Release Notes
-опублікованого випуску доступні на
-[GitHub Releases](https://github.com/Anatol1ch/HromadaAID/releases/tag/v1.1.0).
+**Останній опублікований Stable — 1.1.1.** API Contract залишається v2.
+Пакети й Release Notes доступні на
+[GitHub Releases](https://github.com/Anatol1ch/HromadaAID/releases/tag/v1.1.1).
 
 Генерація документів не змінює фінансових даних. Сумісність формату
 «ПриватБанк.xlsx» з імпортом інших банків не підтверджена. Ручні адреси Manager
@@ -73,7 +72,8 @@ IBAN перевіряється добровільно кнопкою за ук�
 
 Перехід із 1.0.2 вимагає оновити Server Manager → API Server → усі Client.
 Порядок описаний в [інструкції оновлення](installation-and-administration.md).
-Release Notes: [Stable 1.1.0](release-notes/1.1.0.md).
+Release Notes: [Stable 1.1.1](release-notes/1.1.1.md) та
+[Stable 1.1.0](release-notes/1.1.0.md).
 
 Для майбутньої зміни контракту Client відкладає міжконтрактне оновлення, доки
 свіжа перевірка не підтвердить, що API Server підтримує цільовий контракт.
